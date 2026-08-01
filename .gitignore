@@ -1,0 +1,10 @@
+node_modules/
+dist/
+out/
+*.vsix
+.env
+.env.local
+.DS_Store
+*.log
+.worktrees/
+.claude-wt/
