@@ -6,7 +6,14 @@ import { mkdir, mkdtemp, readFile, readdir, utimes, writeFile } from "node:fs/pr
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { computePayloadKey, currentPlatform, evictOldCaches, tryFetchPayload } from "./payload.ts";
+import {
+    DISK_HEADROOM,
+    EXTRACT_RATIO_CAP,
+    computePayloadKey,
+    currentPlatform,
+    evictOldCaches,
+    tryFetchPayload,
+} from "./payload.ts";
 
 /**
  * 의존성 페이로드 받기(memo146 §13.10 · T-D2c).
@@ -217,4 +224,16 @@ test("캐시는 최근 3개만 남긴다", async () => {
 test("캐시 폐기 실패는 작업을 막지 않는다", async () => {
     // 없는 경로 — 청소가 안 됐다고 사용자의 작업을 막을 이유가 없다.
     strictEqual(await evictOldCaches(join(tmpdir(), "zalkera-none-does-not-exist"), 3), 0);
+});
+
+test("디스크 여유 요구가 해제 상한이 허용한 최악을 덮는다", () => {
+    // 이 트랜치의 차단이 정확히 **두 상수가 갈린 것**이었다. 6 → 실측 9.19 → 10 으로 올렸더니
+    // 압축비가 다른 트리에서 11.84× 반례가 나왔다 — 표본에 맞춰 고르면 다음 표본에서 또 진다.
+    // 그래서 유도 관계로 묶었고, 이 한 줄이 그 관계를 지키는 그물이다
+    // (없으면 누가 "10이면 충분하지 않나"로 되돌려도 전부 초록이다).
+    ok(
+        DISK_HEADROOM >= 1 + 2 * EXTRACT_RATIO_CAP,
+        `해제 상한 ${EXTRACT_RATIO_CAP}× 를 허용하면서 여유는 ${DISK_HEADROOM}× 만 요구한다 — ` +
+            "검사를 통과한 뒤 디스크가 찬다(gz 1 + 중간 tar cap + 펼친 트리 cap).",
+    );
 });

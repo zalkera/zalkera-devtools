@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { createWriteStream } from "node:fs";
 import { mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { extractTarGzFile } from "./untar.ts";
@@ -63,7 +63,16 @@ interface DepsBlock {
  * 던지지 않는다 — 던지면 호출부가 "실패"와 "없음"을 구분해 처리해야 하는데, 이 축에서 그 둘은 **같은 뜻**이다.
  */
 export async function tryFetchPayload(options: PayloadOptions): Promise<PayloadResult | null> {
-    const report = options.onProgress ?? (() => {});
+    // 진행 보고는 **남의 코드**다(확장 UI). 던지면 그 예외가 우리 계약을 깨고 나간다 —
+    // "절대 던지지 않는다"의 마지막 구멍이었다(3회차 심의 경고 3).
+    const raw = options.onProgress ?? (() => {});
+    const report = (message: string): void => {
+        try {
+            raw(message);
+        } catch {
+            // 보고가 실패했다고 의존성 준비를 멈출 이유가 없다.
+        }
+    };
     try {
         return await attempt(options, report);
     } catch (cause) {
@@ -71,7 +80,7 @@ export async function tryFetchPayload(options: PayloadOptions): Promise<PayloadR
         // 에코 검사(`.toLowerCase()`)와 `new URL(apiBase)` 이 try 밖이라 **깨진 JSON·이상한 주소 하나가
         // 의존성 준비 전체를 죽였다** — npm 폴백으로도 못 갔다. 그리고 그 깨진 응답을 만드는 것이 바로
         // 우리가 방어하려던 "프록시가 답을 바꿔치기하는" 상황이다.
-        await rm(join(options.cacheDir, "node_modules"), { recursive: true, force: true }).catch(() => {});
+        await rm(options.cacheDir, { recursive: true, force: true }).catch(() => {});
         report(`준비된 의존성 꾸러미를 쓰지 못해 직접 내려받습니다(${describe(cause)}).`);
         return null;
     }
@@ -156,7 +165,9 @@ async function attempt(options: PayloadOptions, report: (m: string) => void): Pr
     } catch (cause) {
         // 네트워크 끊김·디스크 부족·해제 실패. **반쯤 펼쳐진 트리를 남기지 않는다** — 남기면
         // `deps.ts` 의 캐시 판정이 그것을 "준비됨"으로 통과시킨다(같은 종류의 결함을 이미 한 번 겪었다).
-        await rm(join(options.cacheDir, "node_modules"), { recursive: true, force: true }).catch(() => {});
+        // `node_modules` 만 지우면 그 아카이브가 만든 **다른 최상위 항목이 잔류**하고 폐기기가 그것을
+        // 살아 있는 세대로 센다(3회차 심의 경고 2 — 모양 불일치 분기만 고치고 여기를 놓쳤다).
+        await rm(options.cacheDir, { recursive: true, force: true }).catch(() => {});
         report(`준비된 의존성 꾸러미를 쓰지 못해 직접 내려받습니다(${describe(cause)}).`);
         return null;
     } finally {
@@ -301,7 +312,7 @@ export async function evictOldCaches(
 
         const withTime = await Promise.all(
             dirs.map(async (e) => {
-                const path = join(cacheRoot, e.name);
+                const path = resolve(join(cacheRoot, e.name));
                 const mtime = await stat(path)
                     .then((s) => s.mtimeMs)
                     .catch(() => 0);
@@ -314,7 +325,8 @@ export async function evictOldCaches(
         for (const entry of withTime.slice(keep)) {
             // 방금 만든/쓴 세대는 절대 지우지 않는다 — mtime 순서만 믿으면 시계 왜곡·동시 실행에서
             // **자기가 쓰려던 캐시를 자기가 지우는** 자리가 생긴다(재심의 관찰 6).
-            if (protectPath && entry.path === protectPath) continue;
+            // 문자열 완전 일치는 끝 슬래시 하나에 보호가 풀린다(실측). 양쪽을 정규화해 둔다.
+            if (protectPath && entry.path === resolve(protectPath)) continue;
             await rm(entry.path, { recursive: true, force: true });
             removed += 1;
         }
@@ -365,17 +377,21 @@ function isSafeHttpsUrl(value: string): boolean {
 
 const LOOKUP_TIMEOUT_MS = 5_000;
 const STALL_TIMEOUT_MS = 30_000;
+/** 해제 상한 배수(실측 158MB → 586MB ≈ 3.7배). */
+export const EXTRACT_RATIO_CAP = 8;
+
 /**
  * 여유 공간 배수 — 압축본 + 중간 tar + 펼친 트리가 **동시에 존재하는 순간**이 있다.
  *
- * 6 이었는데 실측 소요가 **9.19×** 였다(재심의 차단 4): scratch 는 전량 기록된 뒤 루프가 읽고 finally
- * 에서야 지워지고, gz 는 그보다 더 늦게까지 산다. 실 페이로드 비율(158MB→586MB)로도 ≈8.4× 다.
- * 검사를 통과하고 나서 디스크가 차면 사용자는 **의존성도 없고 공간도 없는** 상태가 된다 — 그 실패는
- * 우리가 아낀 여유보다 훨씬 비싸다.
+ * 🔴 **상수를 손으로 고르지 않는다**(3회차 심의 차단). 6 → 9.19× 실측을 보고 10 으로 올렸는데,
+ * 압축비가 다른 실제 트리에서 **11.84×** 반례가 나왔다(gz 4.82MB → tar 25.86MB → 트리 26.37MB ·
+ * 압축비 5.37:1). 표본 하나에 맞춰 상수를 고르면 다음 표본에서 또 진다.
+ *
+ * 그래서 **우리가 이미 허용하기로 한 최악**에서 유도한다: 해제 상한이 [EXTRACT_RATIO_CAP] 배면
+ * 중간 tar 도 트리도 각각 거기까지 갈 수 있고, gz 자신이 1 이다 → `1 + 2 × cap`.
+ * 이러면 두 상수가 다시는 갈리지 않는다(갈리는 것이 이 결함의 본체였다).
  */
-const DISK_HEADROOM = 10;
-/** 해제 상한 배수(실측 158MB → 586MB ≈ 3.7배). */
-const EXTRACT_RATIO_CAP = 8;
+export const DISK_HEADROOM = 1 + 2 * EXTRACT_RATIO_CAP;
 /**
  * 해제 상한 하한선. 배수만 쓰면 **작은 아카이브에서 정상 동작이 죽는다** — tar 는 512바이트 블록에 패딩하고
  * 끝 표식 2블록이 붙어, 몇 KB 짜리 트리도 압축본의 수십 배가 된다(테스트가 이걸 잡았다).

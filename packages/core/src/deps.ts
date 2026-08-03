@@ -77,7 +77,7 @@ export async function ensureDependencies(options: DepsOptions): Promise<DepsResu
         await rm(target, { recursive: true, force: true });
     }
 
-    if (existsSync(join(cacheDir, "node_modules"))) {
+    if (isCacheComplete(cacheDir)) {
         report("준비해 둔 의존성을 연결합니다…");
         // **쓴 시각을 남긴다**(심의 관찰). 안 하면 폐기 기준이 "최근 생성"이라, 네 세대 이상을 오가는
         // 사용자의 **활발한 세대가 먼저 지워진다**(그리고 재설치를 다시 겪는다).
@@ -101,6 +101,7 @@ export async function ensureDependencies(options: DepsOptions): Promise<DepsResu
                 fetchImpl: options.fetchImpl,
             });
             if (payload) {
+                // 표식을 **연결 전에** 남긴다 — 이 줄이 캐시 쪽 완결 판정의 근거다(아래 isCacheComplete).
                 await writePayloadStamp(cacheDir, payload, payloadKey);
                 report(`준비된 의존성 ${payload.fileCount}개를 연결합니다…`);
                 const linked = await linkOrCopy(join(cacheDir, "node_modules"), target);
@@ -124,6 +125,22 @@ export async function ensureDependencies(options: DepsOptions): Promise<DepsResu
     await markComplete(target);
     await evictOldCaches(cacheRoot, KEEP_CACHES, report, cacheDir);
     return { action: "installed", cacheKey };
+}
+
+/**
+ * 캐시 세대가 **완결**인가. 존재가 아니라 표식으로 판정한다(3회차 심의 경고 4).
+ *
+ * 종전엔 `cacheDir/node_modules` 의 **존재만** 봤다. 586MB 해제 도중 프로세스가 죽으면 반쪽 트리가 남고,
+ * 다음 실행은 그것을 링크한 뒤 완결 표식까지 찍는다 — 사용자는 "준비 완료"를 본 뒤 `Cannot find module`
+ * 을 만나고, 우리가 안내하는 복구책은 같은 판정에 걸려 아무 일도 안 한다. **프로젝트 쪽에서 이미 한 번
+ * 겪고 고친 결함의 캐시판**이다(위 COMPLETE_MARKER 주석).
+ *
+ * 표식은 새로 만들지 않고 이미 쓰던 둘을 쓴다 — `key.txt`(npm 경로가 적재 끝에 쓴다) ·
+ * `payload.json`(페이로드 경로가 연결 전에 쓴다). 기존 사용자의 캐시도 `key.txt` 를 갖고 있어 그대로 산다.
+ */
+function isCacheComplete(cacheDir: string): boolean {
+    if (!existsSync(join(cacheDir, "node_modules"))) return false;
+    return existsSync(join(cacheDir, "key.txt")) || existsSync(join(cacheDir, "payload.json"));
 }
 
 /**

@@ -321,3 +321,45 @@ test("버퍼 경로도 잘린 아카이브를 성공으로 보고하지 않는�
         (e: unknown) => e instanceof DevtoolsError && /중간에 끊/.test((e as DevtoolsError).message),
     );
 });
+
+test("대상 폴더에 심링크가 미리 놓여 있으면 그 위로 쓰지 않는다", async () => {
+    const base = await mkdtemp(join(tmpdir(), "zalkera-pre-"));
+    const root = join(base, "cache");
+    await mkdir(join(root, "node_modules"), { recursive: true });
+    await mkdir(join(base, "outside"), { recursive: true });
+    await writeFile(join(base, "outside", "hit.txt"), "원본");
+    // 캐시 자리가 깨끗하다는 보장은 없다(이전 실행 잔해·사용자 조작·다른 도구).
+    await symlink(join(base, "outside", "hit.txt"), join(root, "node_modules", "hit.txt"));
+
+    const { gz } = await fixture();
+    // 같은 이름의 **파일**이 든 아카이브를 먹인다. 쓰기가 기존 링크를 따라가면 뿌리 밖이 덮어써진다.
+    const evil = join(base, "evil.tar.gz");
+    const h = Buffer.alloc(512);
+    h.write("node_modules/hit.txt", 0); h.write("0000644\0", 100); h.write("0000000\0", 108); h.write("0000000\0", 116);
+    h.write((6).toString(8).padStart(11, "0") + "\0", 124);
+    h.write("00000000000\0", 136); h.write("        ", 148); h.write("0", 156);
+    let sum = 0; for (const b of h) sum += b;
+    h.write(sum.toString(8).padStart(6, "0") + "\0 ", 148);
+    const body = Buffer.alloc(512); Buffer.from("덮어씀").copy(body);
+    await writeFile(evil, gzipSync(Buffer.concat([h, body, Buffer.alloc(1024)])));
+
+    // ⚠ 이 축을 지키는 것은 `assertNotSymlink` 한 줄이다 — 지우면 **뿌리 밖 파일이 실제로 덮어써지는데**
+    // 그 전까지 어느 테스트도 안 걸려 있었다(3회차 심의 경고 1).
+    await rejects(() => extractTarGzFile(evil, root, join(root, ".s")));
+    strictEqual(await readFile(join(base, "outside", "hit.txt"), "utf8"), "원본");
+    void gz;
+});
+
+test("링크 자리를 일반 파일이 선점했으면 조용히 넘어가지 않는다", async () => {
+    const { gz } = await fixture();
+    const target = await mkdtemp(join(tmpdir(), "zalkera-occupied-"));
+    await mkdir(join(target, "node_modules", ".bin"), { recursive: true });
+    // 링크가 안 생긴 채 "성공"으로 보고되면, 결과가 하필 이 기능이 막으려던 증상이다
+    // (`next dev` 가 실행 파일을 못 찾는다). EEXIST 를 삼키면 그 일이 난다(3회차 심의 경고 1).
+    await writeFile(join(target, "node_modules", ".bin", "next"), "선점");
+
+    await rejects(
+        () => extractTarGzFile(gz, target, join(target, ".s"), { symlinks: "materialize" }),
+        (e: unknown) => e instanceof DevtoolsError,
+    );
+});
