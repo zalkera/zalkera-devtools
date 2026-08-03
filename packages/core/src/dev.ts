@@ -1,0 +1,184 @@
+import { spawn, type ChildProcess } from "node:child_process";
+import { existsSync } from "node:fs";
+import { createServer } from "node:net";
+import { join } from "node:path";
+import { DevtoolsError } from "./errors.ts";
+
+/**
+ * 개발 서버 기동(C1·C4·C5).
+ *
+ * **npm 스크립트를 부르지 않고 Next 바이너리를 직접 부른다** — VS Code 는 Node 는 싣지만 **npm 은 안 싣기**
+ * 때문이다(실측). `node node_modules/next/dist/bin/next dev` 는 Node 하나만 있으면 돈다.
+ *
+ * 실행 Node 도 주입받는다: 확장은 VS Code 동봉 Node(`process.execPath` + `ELECTRON_RUN_AS_NODE`)를 넘기고,
+ * CLI 는 자기 Node 를 넘긴다. 이 한 줄이 "비개발자가 Node 를 안 깔아도 된다"의 전부다.
+ */
+export interface DevServerOptions {
+    projectDir: string;
+    /** 실행할 Node 경로. 확장은 VS Code 동봉 Node 를 넘긴다. */
+    nodePath: string;
+    /** 원하는 포트(비면 자동). 이미 쓰이면 빈 포트를 찾는다. */
+    port?: number;
+    /** 로그 한 줄씩. 흔한 오류는 [translateLog] 가 사람 말로 바꿔 준다. */
+    onLog?: (line: string) => void;
+    /** 서버가 요청을 받을 준비가 됐을 때 1회. */
+    onReady?: (url: string) => void;
+    /** VS Code 동봉 Node 를 쓰려면 `ELECTRON_RUN_AS_NODE=1` 이 필요하다. */
+    extraEnv?: Record<string, string>;
+}
+
+export interface DevServer {
+    url: string;
+    port: number;
+    /** 멈춘다(멱등). 자식 프로세스 트리를 정리한다. */
+    stop(): Promise<void>;
+    /** 프로세스가 끝났을 때(정상·비정상 모두). */
+    onExit(listener: (code: number | null) => void): void;
+}
+
+const READY_TIMEOUT_MS = 120_000;
+
+export async function startDevServer(options: DevServerOptions): Promise<DevServer> {
+    const nextBin = join(options.projectDir, "node_modules", "next", "dist", "bin", "next");
+    if (!existsSync(nextBin)) {
+        throw new DevtoolsError(
+            "DEV_SERVER_FAILED",
+            "개발 서버를 찾지 못했습니다.",
+            "의존성 준비가 끝났는지 확인해 주세요.",
+        );
+    }
+
+    const port = await pickPort(options.port);
+    const url = `http://localhost:${port}`;
+    const log = options.onLog ?? (() => {});
+
+    const child = spawn(options.nodePath, [nextBin, "dev", "--port", String(port)], {
+        cwd: options.projectDir,
+        env: { ...process.env, ...options.extraEnv, PORT: String(port), BROWSER: "none" },
+        stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    let ready = false;
+    const markReady = () => {
+        if (ready) return;
+        ready = true;
+        options.onReady?.(url);
+    };
+
+    const handle = (chunk: Buffer) => {
+        for (const line of chunk.toString().split("\n")) {
+            const trimmed = line.trimEnd();
+            if (trimmed.length === 0) continue;
+            log(translateLog(trimmed));
+            // Next 는 준비되면 "Ready in ..." 을 찍는다. 판정을 포트 폴링이 아니라 로그로 하는 이유는
+            // 포트가 열려도 첫 컴파일 전에는 응답이 없기 때문이다.
+            if (/\bReady in\b|started server on|Local:\s+http/i.test(trimmed)) markReady();
+        }
+    };
+    child.stdout?.on("data", handle);
+    child.stderr?.on("data", handle);
+
+    const exitListeners: ((code: number | null) => void)[] = [];
+    child.on("exit", (code) => {
+        for (const listener of exitListeners) listener(code);
+    });
+
+    await waitForReady(child, () => ready);
+
+    return {
+        url,
+        port,
+        stop: () => stopChild(child),
+        onExit: (listener) => exitListeners.push(listener),
+    };
+}
+
+/** 요청한 포트가 막혀 있으면 OS 가 준 빈 포트를 쓴다 — 고정 포트 충돌로 사람을 붙잡지 않는다. */
+export async function pickPort(preferred?: number): Promise<number> {
+    if (preferred && (await isFree(preferred))) return preferred;
+    return new Promise<number>((resolve, reject) => {
+        const server = createServer();
+        server.once("error", reject);
+        server.listen(0, "127.0.0.1", () => {
+            const address = server.address();
+            const port = typeof address === "object" && address ? address.port : 0;
+            server.close(() => resolve(port));
+        });
+    });
+}
+
+async function isFree(port: number): Promise<boolean> {
+    return new Promise((resolve) => {
+        const server = createServer();
+        server.once("error", () => resolve(false));
+        server.listen(port, "127.0.0.1", () => server.close(() => resolve(true)));
+    });
+}
+
+async function waitForReady(child: ChildProcess, isReady: () => boolean): Promise<void> {
+    await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(() => {
+            reject(
+                new DevtoolsError(
+                    "DEV_SERVER_FAILED",
+                    "개발 서버가 시간 안에 뜨지 않았습니다.",
+                    "로그의 마지막 오류를 확인해 주세요.",
+                ),
+            );
+        }, READY_TIMEOUT_MS);
+        timer.unref?.();
+
+        const poll = setInterval(() => {
+            if (!isReady()) return;
+            clearInterval(poll);
+            clearTimeout(timer);
+            resolve();
+        }, 100);
+        poll.unref?.();
+
+        child.once("exit", (code) => {
+            if (isReady()) return;
+            clearInterval(poll);
+            clearTimeout(timer);
+            reject(
+                new DevtoolsError(
+                    "DEV_SERVER_FAILED",
+                    `개발 서버가 바로 종료되었습니다(종료 코드 ${code}).`,
+                    "로그의 마지막 오류를 확인해 주세요.",
+                ),
+            );
+        });
+    });
+}
+
+async function stopChild(child: ChildProcess): Promise<void> {
+    if (child.exitCode !== null || child.signalCode !== null) return;
+    child.kill("SIGTERM");
+    await new Promise<void>((resolve) => {
+        const timer = setTimeout(() => {
+            child.kill("SIGKILL");
+            resolve();
+        }, 5_000);
+        timer.unref?.();
+        child.once("exit", () => {
+            clearTimeout(timer);
+            resolve();
+        });
+    });
+}
+
+/**
+ * 흔한 오류를 **사람 말로 옮긴다**(C3). 원문을 지우지 않고 앞에 한 줄을 붙인다 — 개발자가 볼 근거는 남긴다.
+ */
+export function translateLog(line: string): string {
+    if (/EADDRINUSE/.test(line)) return `⚠ 그 포트는 다른 프로그램이 쓰고 있습니다. 다른 포트로 다시 켜 주세요.\n${line}`;
+    if (/Cannot find module/.test(line)) return `⚠ 필요한 파일이 빠졌습니다. 의존성 준비를 다시 해 주세요.\n${line}`;
+    if (/ENOSPC/.test(line)) return `⚠ 디스크 공간이 부족합니다.\n${line}`;
+    if (/ECONNREFUSED|ENOTFOUND|ETIMEDOUT/.test(line)) {
+        return `⚠ 서버에 연결하지 못했습니다. 인터넷·사내망 프록시를 확인해 주세요.\n${line}`;
+    }
+    if (/401|403/.test(line) && /storefront|zalkera/i.test(line)) {
+        return `⚠ 데이터 접속이 거절되었습니다. 프리뷰 키가 만료됐을 수 있습니다 — 프리뷰를 다시 켜 주세요.\n${line}`;
+    }
+    return line;
+}

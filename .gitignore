@@ -8,3 +8,4 @@ out/
 *.log
 .worktrees/
 .claude-wt/
+package-lock.json
