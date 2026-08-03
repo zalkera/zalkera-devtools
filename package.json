@@ -13,8 +13,9 @@
         "typescript": "^5.7.2"
     },
     "scripts": {
-        "build": "npm run build --workspaces --if-present",
-        "test": "npm run test --workspaces --if-present",
-        "typecheck": "npm run typecheck --workspaces --if-present"
+        "build": "npm run build -w @zalkera/devtools-core && npm run build -w @zalkera/devtools-vscode",
+        "test": "npm run test -w @zalkera/devtools-core",
+        "typecheck": "npm run build -w @zalkera/devtools-core && npm run typecheck --workspaces --if-present",
+        "verify": "npm run typecheck && npm run test"
     }
 }
