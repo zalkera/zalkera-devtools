@@ -41,3 +41,9 @@ export { startFromPreset, type StartFromPresetOptions, type StartFromPresetResul
 export { precheck, type PrecheckFinding, type PrecheckOptions } from "./precheck.ts";
 export { registerMcpServer, type McpRegistration, type RegisterMcpResult } from "./mcp.ts";
 export { ensureAgentDocs, type AgentDocsResult } from "./agents.ts";
+export {
+    diagnose,
+    diagnoseClientUsage,
+    protectedPathWarning,
+    type Diagnostic,
+} from "./diagnostics.ts";

@@ -83,6 +83,11 @@
                 "command": "zalkera.agent.connect",
                 "title": "잘커라: 에이전트에 연결(MCP)",
                 "category": "잘커라"
+            },
+            {
+                "command": "zalkera.history",
+                "title": "잘커라: 버전 이력",
+                "category": "잘커라"
             }
         ],
         "configuration": {

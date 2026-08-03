@@ -24,11 +24,24 @@ zalkera.site.link                 이 폴더를 내 사이트로 연결
 zalkera.preview.start / stop / restart
 zalkera.publish                   묶어서 올리기
 zalkera.rollback                  이전 버전으로 되돌리기
+zalkera.history                   버전 이력 보기(읽기 전용 — 아무것도 바뀌지 않습니다)
 zalkera.precheck                  배포 전 검사 — **조언이지 차단이 아니다**
 zalkera.doctor                    무엇이 없어서 안 되는지 점검
 
 zalkera.agent.connect            에이전트에 연결(MCP) — 설정 한 줄을 적어 줍니다
 ```
+
+## 편집 중에 알려 주는 것
+
+코드를 대신 고치지는 않지만, **배포 후에야 드러나는 계약 위반**은 편집기에서 바로 짚습니다.
+
+- 브라우저에서 잘커라 API 를 직접 부르는 코드(배포하면 막힙니다)
+- `NEXT_PUBLIC_` 에 담긴 시크릿(브라우저 번들에 그대로 실립니다)
+- 소스에 박힌 스토어프론트 키
+- 설치된 `@zalkera/client` 에 없는 이름 — **목록은 우리가 들고 있지 않고 설치된 패키지에서 읽습니다**
+  (들고 있으면 client 가 자랄 때마다 어긋나고, 그 어긋남은 "도구가 틀렸다"로 보입니다)
+
+되돌리기 어려운 파일(`.env*`·`node_modules`·빌드 산출물)을 열면 한 번 알려 줍니다 — **막지는 않습니다.**
 
 ## 편집은 하지 않는다
 

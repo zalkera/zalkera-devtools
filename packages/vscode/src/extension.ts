@@ -1,6 +1,8 @@
 import * as vscode from "vscode";
 import {
     DevtoolsError,
+    diagnose,
+    diagnoseClientUsage,
     ensureAgentDocs,
     fetchHandshake,
     fetchSiteSource,
@@ -9,6 +11,7 @@ import {
     login,
     logout,
     precheck,
+    protectedPathWarning,
     publish,
     registerMcpServer,
     runDoctor,
@@ -23,6 +26,7 @@ import {
     type PublishResult,
     type StartFromPresetResult,
 } from "@zalkera/devtools-core";
+import { readFileSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
@@ -49,6 +53,9 @@ let store: SecretTokenStore;
 let handshake: Handshake | null = null;
 let sidebar: ZalkeraSidebar;
 let renewTimer: NodeJS.Timeout | null = null;
+let diagnostics: vscode.DiagnosticCollection;
+/** 보호 경로 경고를 파일마다 한 번만 — 저장할 때마다 같은 말을 반복하면 사람은 그것을 끄고 만다. */
+const warnedPaths = new Set<string>();
 
 const EXTENSION_VERSION = "0.1.0";
 
@@ -62,9 +69,17 @@ export function activate(context: vscode.ExtensionContext): void {
     sidebar = new ZalkeraSidebar();
     void refreshSidebar();
 
+    diagnostics = vscode.languages.createDiagnosticCollection("zalkera");
+
     context.subscriptions.push(
         output,
         status,
+        diagnostics,
+        // F2 — 저장할 때와 열 때 본다. 타이핑마다 돌리지 않는다(계약 위반은 저장 시점에 확인해도 늦지 않다).
+        vscode.workspace.onDidSaveTextDocument((doc) => refreshDiagnostics(doc)),
+        vscode.workspace.onDidOpenTextDocument((doc) => refreshDiagnostics(doc)),
+        // F1 — 되돌리기 어려운 자리를 **막지 않고 알린다**(고객 소스는 고객 것이다).
+        vscode.workspace.onDidOpenTextDocument((doc) => warnProtectedPath(doc)),
         vscode.window.registerTreeDataProvider("zalkera.sidebar", sidebar),
         register("zalkera.signIn", signIn),
         register("zalkera.signOut", signOut),
@@ -79,6 +94,7 @@ export function activate(context: vscode.ExtensionContext): void {
         }),
         register("zalkera.publish", publishCommand),
         register("zalkera.rollback", rollback),
+        register("zalkera.history", showHistory),
         register("zalkera.precheck", precheckCommand),
         register("zalkera.agent.connect", connectAgent),
         register("zalkera.doctor", doctor),
@@ -502,6 +518,94 @@ async function connectAgent(): Promise<void> {
     void vscode.window.showInformationMessage(
         "에이전트 설정을 적었습니다. 에이전트를 다시 열면 이 사이트 도구가 보이고, 처음 쓸 때 브라우저 로그인이 한 번 필요합니다.",
     );
+}
+
+/**
+ * D5「이력」 — 버전 목록을 읽기 전용으로 보여 준다. 되돌리기는 별도 명령(D4)이라 **여기서는 아무것도 바뀌지
+ * 않는다** — 보러 들어왔다가 실수로 라이브를 바꾸는 일이 없어야 한다.
+ */
+async function showHistory(): Promise<void> {
+    const api = await ensureApi();
+    const revisions = await api.listRevisions();
+    if (revisions.length === 0) {
+        void vscode.window.showInformationMessage("아직 올린 버전이 없습니다.");
+        return;
+    }
+
+    output.show();
+    log("── 버전 이력 ──");
+    for (const r of revisions) {
+        const when = new Date(r.createdAt).toLocaleString("ko-KR");
+        log(`${r.isActive ? "▶" : " "} 버전 ${r.revisionNo} · ${r.status} · ${when}${r.note ? ` · ${r.note}` : ""}`);
+    }
+    log(`(총 ${revisions.length}개 · 되돌리려면 「이전 버전으로」를 쓰세요)`);
+}
+
+/** F2 — 문서 하나를 보고 진단을 갱신한다. 우리 프로젝트 밖 파일은 보지 않는다. */
+function refreshDiagnostics(doc: vscode.TextDocument): void {
+    const dir = workspaceDir();
+    if (!dir || doc.uri.scheme !== "file" || !doc.uri.fsPath.startsWith(dir)) return;
+    if (!/\.(ts|tsx|js|jsx|mjs|cjs)$/.test(doc.uri.fsPath)) return;
+
+    const text = doc.getText();
+    const found = [
+        ...diagnose(doc.uri.fsPath, text),
+        ...diagnoseClientUsage(text, clientExports(dir)),
+    ];
+    diagnostics.set(
+        doc.uri,
+        found.map((f) => {
+            const range = new vscode.Range(f.line, f.column, f.line, f.column + f.length);
+            const severity =
+                f.severity === "error" ? vscode.DiagnosticSeverity.Error : vscode.DiagnosticSeverity.Warning;
+            const diagnostic = new vscode.Diagnostic(range, f.message, severity);
+            diagnostic.source = "잘커라";
+            diagnostic.code = f.rule;
+            return diagnostic;
+        }),
+    );
+}
+
+/**
+ * 설치된 `@zalkera/client` 가 **실제로 내보내는 이름**을 읽는다. 목록을 우리가 들고 있으면 client 가 성장할
+ * 때마다 어긋나고, 그 어긋남이 고객에게는 "잘커라 도구가 틀렸다"로 보인다. 못 읽으면 빈 배열 — 아무 말도 안 한다.
+ */
+function clientExports(projectDir: string): string[] {
+    const cached = clientExportCache.get(projectDir);
+    if (cached) return cached;
+    try {
+        const dts = join(projectDir, "node_modules", "@zalkera", "client", "dist", "index.d.ts");
+        if (!existsSync(dts)) return [];
+        const text = readFileSync(dts, "utf8");
+        const names = new Set<string>();
+        for (const match of text.matchAll(/export\s+(?:declare\s+)?(?:type|interface|class|function|const)\s+(\w+)/g)) {
+            if (match[1]) names.add(match[1]);
+        }
+        for (const match of text.matchAll(/export\s*\{([^}]+)\}/g)) {
+            for (const raw of (match[1] ?? "").split(",")) {
+                const name = raw.split(" as ").pop()?.trim().replace(/^type\s+/, "");
+                if (name) names.add(name);
+            }
+        }
+        const list = [...names];
+        clientExportCache.set(projectDir, list);
+        return list;
+    } catch {
+        return [];
+    }
+}
+
+const clientExportCache = new Map<string, string[]>();
+
+/** F1 — 되돌리기 어려운 자리를 연 사람에게 한 번 알린다. */
+function warnProtectedPath(doc: vscode.TextDocument): void {
+    const dir = workspaceDir();
+    if (!dir || doc.uri.scheme !== "file" || !doc.uri.fsPath.startsWith(dir)) return;
+    const relative = doc.uri.fsPath.slice(dir.length + 1);
+    const warning = protectedPathWarning(relative);
+    if (!warning || warnedPaths.has(doc.uri.fsPath)) return;
+    warnedPaths.add(doc.uri.fsPath);
+    void vscode.window.showWarningMessage(`${relative} — ${warning}`);
 }
 
 // ── 진단 ────────────────────────────────────────────────────────────────

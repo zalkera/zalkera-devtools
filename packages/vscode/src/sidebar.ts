@@ -69,6 +69,7 @@ export class ZalkeraSidebar implements vscode.TreeDataProvider<Node> {
             }
             nodes.push(
                 action("발행", "zalkera.publish", "cloud-upload", "묶어서 올립니다"),
+                action("버전 이력", "zalkera.history", "list-flat", "읽기 전용 — 아무것도 바뀌지 않습니다"),
                 action("이전 버전으로", "zalkera.rollback", "history", "버전 이력에서 고릅니다"),
                 action("배포 전 검사", "zalkera.precheck", "checklist", "조언입니다 — 발행을 막지 않습니다"),
             );
