@@ -2,7 +2,8 @@
 
 터미널 없이 쓰는 길. 잘커라 사이트 소스를 로컬에서 열고, 고친 결과를 **바로 보고**, 올린다.
 
-> **상태: 착수 전.** `src` 가 비어 있고 마켓플레이스에 없다. 아래는 **예정된 표면**이다.
+> **상태: MVP 구현됨 · 미배포.** 마켓플레이스에 없고 VSIX 도 아직 굽지 않았다. 아래 명령은 코드로 존재하나
+> **데스크톱 VS Code 에서 한 번도 실행해 보지 않았다** — 그 첫 실행이 다음 할 일이다.
 
 ## 왜 확장인가
 
@@ -15,13 +16,14 @@
 사이드바 뷰 1 · 상태바 1칸 · 출력 채널 1 · 명령 팔레트.
 
 ```
-zalkera.signIn / signOut
-zalkera.site.create / open / link
+zalkera.signIn / signOut          로그인·로그아웃(로그아웃은 .env.local 의 키 줄도 지운다)
+zalkera.site.open                 내 사이트 소스 받기 — 이미 있는 사이트를 로컬로
+zalkera.site.link                 이 폴더를 내 사이트로 연결
 zalkera.preview.start / stop / restart
-zalkera.publish
-zalkera.rollback
-zalkera.agent.connect
-zalkera.doctor
+zalkera.publish                   묶어서 올리기
+zalkera.doctor                    무엇이 없어서 안 되는지 점검
+
+# 아직 없는 것: zalkera.site.create(예제로 시작) · zalkera.rollback · zalkera.agent.connect
 ```
 
 ## 편집은 하지 않는다
