@@ -24,13 +24,21 @@ export {
 export { MANAGED_KEYS, mergeEnv, stripCredentials, writePreviewEnv, type PreviewEnv } from "./env.ts";
 export { ensureEnvIgnored, inspectProject, type ProjectInfo } from "./project.ts";
 export { computeCacheKey, ensureDependencies, type DepsOptions, type DepsResult } from "./deps.ts";
+export {
+    computePayloadKey,
+    currentPlatform,
+    evictOldCaches,
+    tryFetchPayload,
+    type PayloadOptions,
+    type PayloadResult,
+} from "./payload.ts";
+export { extractTarGz, extractTarGzFile, type UntarOptions } from "./untar.ts";
 export { pickPort, startDevServer, translateLog, type DevServer, type DevServerOptions } from "./dev.ts";
 export { createZip, packProject, writeZip, type PackResult, type ZipEntry } from "./zip.ts";
 export { publish, type PublishOptions, type PublishResult } from "./publish.ts";
 export { startPreview, type PreviewOptions, type PreviewSession } from "./preview.ts";
 export { runDoctor, type DoctorCheck, type DoctorOptions } from "./doctor.ts";
 export {
-    extractTarGz,
     fetchSiteSource,
     findProjectRoot,
     type FetchSourceOptions,

@@ -55,6 +55,8 @@ export async function startPreview(options: PreviewOptions): Promise<PreviewSess
     const deps = await ensureDependencies({
         projectDir: options.projectDir,
         onProgress: report,
+        // 캐시 미스면 **미리 구운 꾸러미를 먼저 물어본다**(T-D2c). 서버가 안 주면 그대로 npm 으로 내려간다.
+        apiBase: options.apiBase,
         ...(options.npmCommand ? { npmCommand: options.npmCommand } : {}),
         ...(options.npmEnv ? { npmEnv: options.npmEnv } : {}),
     });

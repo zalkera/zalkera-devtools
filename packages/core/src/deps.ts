@@ -5,6 +5,7 @@ import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { DevtoolsError } from "./errors.ts";
+import { computePayloadKey, currentPlatform, evictOldCaches, tryFetchPayload, writePayloadStamp } from "./payload.ts";
 
 /**
  * 의존성 준비(backend memo146 §3.2).
@@ -36,6 +37,12 @@ export interface DepsOptions {
     npmCommand?: string[];
     /** npm 실행 환경 추가분. VS Code 동봉 Node 로 부르려면 `ELECTRON_RUN_AS_NODE=1` 이 필요하다. */
     npmEnv?: Record<string, string>;
+    /**
+     * 서버 주소. 주면 **캐시 미스 때 미리 구운 꾸러미를 먼저 물어본다**(§13.10.5 · T-D2c).
+     * 안 주면 종전대로 곧장 `npm install` — 즉 이 배선은 **가산**이다.
+     */
+    apiBase?: string;
+    fetchImpl?: typeof fetch;
 }
 
 export interface DepsResult {
@@ -72,12 +79,44 @@ export async function ensureDependencies(options: DepsOptions): Promise<DepsResu
         return { action: linked, cacheKey };
     }
 
+    // 캐시 미스 — **먼저 미리 구운 꾸러미를 물어본다**(§13.10.5). 실패·미존재는 전부 아래 npm 경로로
+    // 수렴하므로, 이 블록은 있어도 없어도 결과가 같고 **빠를 때만 빠르다**.
+    if (options.apiBase) {
+        const payloadKey = await computePayloadKey(projectDir);
+        if (payloadKey) {
+            const payload = await tryFetchPayload({
+                apiBase: options.apiBase,
+                lockfileSha256: payloadKey,
+                platform: currentPlatform(),
+                cacheDir,
+                onProgress: report,
+                fetchImpl: options.fetchImpl,
+            });
+            if (payload) {
+                await writePayloadStamp(cacheDir, payload, payloadKey);
+                report(`준비된 의존성 ${payload.fileCount}개를 연결합니다…`);
+                const linked = await linkOrCopy(join(cacheDir, "node_modules"), target);
+                await markComplete(target);
+                await evictOldCaches(cacheRoot, KEEP_CACHES, report);
+                return { action: linked, cacheKey };
+            }
+        }
+        // pnpm/yarn·lockfile 없음은 **조회조차 하지 않는다**(굽지 않으므로 항상 "없다"이고 왕복만 낭비다).
+    }
+
     report("의존성을 처음 한 번 내려받습니다. 몇 분 걸릴 수 있습니다…");
     await runNpmInstall(projectDir, options.npmCommand ?? ["npm", "install"], options.npmEnv ?? {}, report);
     await seedCache(target, cacheDir, cacheKey, report);
     await markComplete(target);
+    await evictOldCaches(cacheRoot, KEEP_CACHES, report);
     return { action: "installed", cacheKey };
 }
+
+/**
+ * 남길 캐시 세대 수. 하드링크 트리라 **refcount 가 데이터를 지킨다** — 캐시를 지워도 이미 연결된
+ * 프로젝트는 멀쩡하다(§13.5). 그래서 "쓰는 중인지"를 따지지 않는다.
+ */
+const KEEP_CACHES = 3;
 
 /**
  * 캐시 키 = lockfile 내용 + 플랫폼. **플랫폼을 넣는 이유**는 네이티브 바이너리(SWC 등)가 OS·아키텍처마다
