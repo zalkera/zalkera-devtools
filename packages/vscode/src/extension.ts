@@ -52,6 +52,8 @@ let previewStarting = false;
 let store: SecretTokenStore;
 let handshake: Handshake | null = null;
 let sidebar: ZalkeraSidebar;
+/** 동봉 자원(npm)을 찾으려면 확장 설치 경로가 필요하다. */
+let extensionPath: string;
 let renewTimer: NodeJS.Timeout | null = null;
 let diagnostics: vscode.DiagnosticCollection;
 /** 보호 경로 경고를 파일마다 한 번만 — 저장할 때마다 같은 말을 반복하면 사람은 그것을 끄고 만다. */
@@ -66,6 +68,7 @@ export function activate(context: vscode.ExtensionContext): void {
     setStatus("$(zap) 잘커라");
     status.show();
     store = new SecretTokenStore(context);
+    extensionPath = context.extensionPath;
     sidebar = new ZalkeraSidebar();
     void refreshSidebar();
 
@@ -350,7 +353,7 @@ async function startPreviewCommand(): Promise<void> {
     const dir = requireWorkspace();
     const api = await ensureApi();
     const config = await ensureHandshake();
-    const runtime = embeddedNodeRuntime();
+    const runtime = embeddedNodeRuntime(extensionPath);
 
     setStatus("$(sync~spin) 프리뷰 준비 중");
     const started = await withStartGuard(() => vscode.window.withProgress<PreviewSession>(
@@ -363,6 +366,8 @@ async function startPreviewCommand(): Promise<void> {
                 tenantCode: tenantCode(),
                 nodePath: runtime.nodePath,
                 extraEnv: runtime.env,
+                // 동봉한 npm 을 넘긴다 — 없으면 코어가 PATH 의 npm 으로 떨어진다(개발자 기계 전용 경로).
+                ...(runtime.npmCommand ? { npmCommand: runtime.npmCommand, npmEnv: runtime.env } : {}),
                 label: `${vscode.env.appName} · ${process.platform}`,
                 onProgress: log,
                 onLog: log,
@@ -617,8 +622,14 @@ async function doctor(): Promise<void> {
         extensionVersion: EXTENSION_VERSION,
         ...(dir ? { projectDir: dir } : {}),
     });
+    const runtime = embeddedNodeRuntime(extensionPath);
     output.show();
     log("── 진단 ──");
+    log(
+        runtime.npmCommand
+            ? "✅ 동봉 npm: 있음(의존성 설치에 이것을 씁니다)"
+            : "❌ 동봉 npm: 없음 — 이 기계에 npm 이 따로 없으면 의존성 준비가 실패합니다(확장 재설치 필요)",
+    );
     for (const check of checks) {
         log(`${check.ok ? "✅" : "❌"} ${check.name}: ${check.detail}`);
         if (check.hint) log(`   → ${check.hint}`);

@@ -21,6 +21,9 @@ export interface PreviewOptions {
     label?: string;
     port?: number;
     extraEnv?: Record<string, string>;
+    /** npm 실행 방법·환경(§13 T-D2a). 확장은 동봉한 npm 을 여기로 넘긴다 — 넘기지 않으면 PATH 의 npm 을 찾는다. */
+    npmCommand?: string[];
+    npmEnv?: Record<string, string>;
     onProgress?: (message: string) => void;
     onLog?: (line: string) => void;
 }
@@ -49,7 +52,12 @@ export async function startPreview(options: PreviewOptions): Promise<PreviewSess
     report("프리뷰 자격증명을 발급받는 중…");
     const key = await options.api.issuePreviewKey(options.label);
 
-    const deps = await ensureDependencies({ projectDir: options.projectDir, onProgress: report });
+    const deps = await ensureDependencies({
+        projectDir: options.projectDir,
+        onProgress: report,
+        ...(options.npmCommand ? { npmCommand: options.npmCommand } : {}),
+        ...(options.npmEnv ? { npmEnv: options.npmEnv } : {}),
+    });
     if (deps.action === "installed") report("의존성 준비가 끝났습니다(다음부터는 즉시 시작합니다).");
 
     // 포트를 먼저 정한다 — `ZALKERA_SITE_URL` 이 실제 주소와 달라지면 링크·정규 URL 이 어긋난다.

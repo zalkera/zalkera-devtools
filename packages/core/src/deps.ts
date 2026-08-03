@@ -27,8 +27,15 @@ export interface DepsOptions {
     cacheRoot?: string;
     /** 진행 상황을 사람 말로 흘린다. */
     onProgress?: (message: string) => void;
-    /** `npm` 실행 파일. 확장은 VS Code 동봉 Node 로 npm-cli.js 를 직접 부를 수 있어 주입 가능하게 둔다. */
+    /**
+     * `npm` 실행 방법. **기본값(`npm`)은 npm 이 PATH 에 있는 기계에서만 선다** — VS Code 는 Node 는 싣고
+     * npm 은 안 싣기 때문에(T0 실측), 확장은 **반드시** 동봉한 npm 을 여기로 주입해야 한다.
+     * 주입하지 않으면 비개발자 기계에서 `spawn` 이 ENOENT 로 죽고, 사용자는 "인터넷을 확인하세요"라는
+     * 틀린 안내를 받는다(memo146 §3.2 ⚠ · §13 T-D2a).
+     */
     npmCommand?: string[];
+    /** npm 실행 환경 추가분. VS Code 동봉 Node 로 부르려면 `ELECTRON_RUN_AS_NODE=1` 이 필요하다. */
+    npmEnv?: Record<string, string>;
 }
 
 export interface DepsResult {
@@ -66,7 +73,7 @@ export async function ensureDependencies(options: DepsOptions): Promise<DepsResu
     }
 
     report("의존성을 처음 한 번 내려받습니다. 몇 분 걸릴 수 있습니다…");
-    await runNpmInstall(projectDir, options.npmCommand ?? ["npm", "install"], report);
+    await runNpmInstall(projectDir, options.npmCommand ?? ["npm", "install"], options.npmEnv ?? {}, report);
     await seedCache(target, cacheDir, cacheKey, report);
     await markComplete(target);
     return { action: "installed", cacheKey };
@@ -164,6 +171,10 @@ async function markComplete(target: string): Promise<void> {
 
 const COMPLETE_MARKER = ".zalkera-deps-complete";
 
+function isNotFound(error: unknown): boolean {
+    return (error as NodeJS.ErrnoException | undefined)?.code === "ENOENT";
+}
+
 function isCrossDevice(error: unknown): boolean {
     return (error as NodeJS.ErrnoException | undefined)?.code === "EXDEV";
 }
@@ -187,20 +198,31 @@ async function seedCache(source: string, cacheDir: string, cacheKey: string, rep
     }
 }
 
-async function runNpmInstall(cwd: string, command: string[], report: (m: string) => void): Promise<void> {
+async function runNpmInstall(
+    cwd: string,
+    command: string[],
+    env: Record<string, string>,
+    report: (m: string) => void,
+): Promise<void> {
     const [bin, ...args] = command;
     if (!bin) throw new DevtoolsError("DEPENDENCIES_FAILED", "npm 실행 방법을 알 수 없습니다.");
 
     await new Promise<void>((resolve, reject) => {
-        const child = spawn(bin, args, { cwd, stdio: ["ignore", "pipe", "pipe"] });
+        const child = spawn(bin, args, { cwd, env: { ...process.env, ...env }, stdio: ["ignore", "pipe", "pipe"] });
         child.stdout?.on("data", (chunk: Buffer) => report(chunk.toString().trimEnd()));
         child.stderr?.on("data", (chunk: Buffer) => report(chunk.toString().trimEnd()));
         child.on("error", (cause) =>
             reject(
+                // ⚠ 실행 자체가 안 된 것(ENOENT)과 받다가 실패한 것을 **구분한다**. 종전에는 둘 다
+                // "인터넷을 확인하세요"로 안내해, npm 이 없는 기계의 사용자를 엉뚱한 곳으로 보냈다.
                 new DevtoolsError(
                     "DEPENDENCIES_FAILED",
-                    "의존성을 내려받지 못했습니다.",
-                    "인터넷 연결이나 사내망 프록시 설정을 확인해 주세요.",
+                    isNotFound(cause)
+                        ? "의존성 설치 도구를 실행하지 못했습니다."
+                        : "의존성을 내려받지 못했습니다.",
+                    isNotFound(cause)
+                        ? "확장을 다시 설치해 보세요. 그래도 같으면 잘커라에 문의해 주세요."
+                        : "인터넷 연결이나 사내망 프록시 설정을 확인해 주세요.",
                     cause,
                 ),
             ),
