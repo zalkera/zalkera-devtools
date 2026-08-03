@@ -1,11 +1,51 @@
 import { ok, rejects, strictEqual } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { chmod, lstat, mkdir, mkdtemp, readFile, readlink, symlink, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, readlink, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { gzipSync } from "node:zlib";
 import { DevtoolsError } from "./errors.ts";
 import { extractTarGz, extractTarGzFile } from "./untar.ts";
+
+/**
+ * 링크 **사다리** 픽스처 — 심의가 이걸로 뚫었다(2026-08-03 · 실측).
+ *
+ * 각 홉은 "어휘상 뿌리 안"이면서 물리적으로는 한 단계씩 올라간다. 표준 `tar` 로는 이런 아카이브를
+ * 만들 수 없어(디스크에 만들면 그 링크를 따라가 버린다) **바이트로 직접 짓는다.**
+ */
+function ladderTarGz(hops: number, finalFile: string): Buffer {
+    const blocks: Buffer[] = [];
+    const header = (name: string, type: string, size: number, link: string): Buffer => {
+        const h = Buffer.alloc(512);
+        h.write(name.slice(0, 100), 0);
+        h.write("0000644\0", 100);
+        h.write("0000000\0", 108);
+        h.write("0000000\0", 116);
+        h.write(size.toString(8).padStart(11, "0") + "\0", 124);
+        h.write("00000000000\0", 136);
+        h.write("        ", 148);
+        h.write(type, 156);
+        h.write(link.slice(0, 100), 157);
+        let sum = 0;
+        for (const b of h) sum += b;
+        h.write(sum.toString(8).padStart(6, "0") + "\0 ", 148);
+        return h;
+    };
+    let prefix = "node_modules";
+    blocks.push(header(`${prefix}/`, "5", 0, ""));
+    for (let i = 0; i < hops; i += 1) {
+        blocks.push(header(`${prefix}/up`, "2", 0, ".."));
+        prefix = `${prefix}/up`;
+    }
+    const body = Buffer.from("OWNED\n");
+    blocks.push(header(`${prefix}/${finalFile}`, "0", body.length, ""));
+    const padded = Buffer.alloc(Math.ceil(body.length / 512) * 512);
+    body.copy(padded);
+    blocks.push(padded);
+    blocks.push(Buffer.alloc(1024));
+    return gzipSync(Buffer.concat(blocks));
+}
 
 /**
  * 페이로드 해제기 확장 3건(memo146 §13.3 · T-D2c) — 심볼릭 링크 실체화 · 실행 비트 · 저메모리 스트리밍.
@@ -129,4 +169,51 @@ test("잘린 아카이브는 성공으로 보고하지 않는다", async () => {
 
     // 조용히 절반만 풀고 "됐다"고 하면, 그 트리로 dev 서버가 서다가 이유 없이 죽는다.
     await rejects(() => extractTarGzFile(truncated, target, join(target, ".s")));
+});
+
+test("링크 사다리로 뿌리 밖에 쓰지 못한다 (심의 차단 회귀)", async () => {
+    const base = await mkdtemp(join(tmpdir(), "zalkera-ladder-"));
+    const root = join(base, "sandbox", "cache");
+    await mkdir(root, { recursive: true });
+    await mkdir(join(base, "victim"), { recursive: true });
+    await writeFile(join(base, "victim", "secret.txt"), "원본");
+    const gz = join(base, "evil.tar.gz");
+    // 3홉이면 base 밖까지 나간다 — 초판은 여기서 "성공, 1개 씀"이라고 보고했다.
+    await writeFile(gz, ladderTarGz(3, "victim/secret.txt"));
+
+    await rejects(
+        () => extractTarGzFile(gz, root, join(root, ".s"), { symlinks: "materialize" }),
+        (e: unknown) => e instanceof DevtoolsError,
+    );
+
+    // 거절만으로는 부족하다 — **부작용이 남지 않았는지**까지 본다.
+    strictEqual(await readFile(join(base, "victim", "secret.txt"), "utf8"), "원본");
+    const strays = (await readdir(join(base, "sandbox"))).filter((n) => n !== "cache");
+    strictEqual(strays.length, 0, `뿌리 밖 잔해: ${strays.join(",")}`);
+});
+
+test("한 홉짜리 링크(뿌리 자신을 가리킴)도 그 위로 못 올라간다", async () => {
+    const base = await mkdtemp(join(tmpdir(), "zalkera-ladder1-"));
+    const root = join(base, "cache");
+    await mkdir(root, { recursive: true });
+    const gz = join(base, "evil.tar.gz");
+    // 초판이 통과시킨 첫 칸: 대상이 정확히 뿌리로 떨어지면 `resolved === root` 라 허용됐다.
+    await writeFile(gz, ladderTarGz(2, "escaped.txt"));
+
+    await rejects(() => extractTarGzFile(gz, root, join(root, ".s"), { symlinks: "materialize" }));
+    strictEqual((await readdir(base)).includes("escaped.txt"), false);
+});
+
+test("기본값(reject)에서도 사다리는 뿌리 안에 갇힌다", async () => {
+    const base = await mkdtemp(join(tmpdir(), "zalkera-ladder2-"));
+    const root = join(base, "cache");
+    await mkdir(root, { recursive: true });
+    await mkdir(join(base, "victim"), { recursive: true });
+    await writeFile(join(base, "victim", "secret.txt"), "원본");
+    const gz = join(base, "evil.tar.gz");
+    await writeFile(gz, ladderTarGz(3, "victim/secret.txt"));
+
+    // 링크를 안 만드는 경로라도 **파일 쓰기가 기존 링크를 타고 나가면** 같은 사고다.
+    await extractTarGzFile(gz, root, join(root, ".s")).catch(() => {});
+    strictEqual(await readFile(join(base, "victim", "secret.txt"), "utf8"), "원본");
 });

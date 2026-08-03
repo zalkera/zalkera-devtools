@@ -3,7 +3,7 @@ import { createWriteStream } from "node:fs";
 import { mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { Readable } from "node:stream";
+import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { extractTarGzFile } from "./untar.ts";
 
@@ -37,6 +37,11 @@ export interface PayloadOptions {
     fetchImpl?: typeof fetch;
     /** 매니페스트 조회 상한. 가속기 하나 때문에 사용자를 기다리게 하지 않는다(§13.5). */
     lookupTimeoutMs?: number;
+    /**
+     * 다운로드 **무전송** 상한(심의 W1). 전체 시간이 아니다 — 느린 회선을 시간으로 자르면 사내망
+     * 사용자가 영영 못 받는다. "받다가 멈춘" 경우만 끊어 npm 폴백으로 보낸다.
+     */
+    stallTimeoutMs?: number;
 }
 
 export interface PayloadResult {
@@ -67,6 +72,11 @@ export async function tryFetchPayload(options: PayloadOptions): Promise<PayloadR
         report("미리 준비된 의존성 꾸러미가 없어 직접 내려받습니다(조금 더 걸립니다).");
         return null;
     }
+    if (block.lockfileSha256 && block.lockfileSha256.toLowerCase() !== options.lockfileSha256.toLowerCase()) {
+        // 서버는 자기정합을 이미 확인하지만, 프록시가 다른 응답을 끼워 넣는 경우가 이 축의 실재 위협이다.
+        report("서버가 다른 버전의 답을 주어 준비된 꾸러미를 쓰지 않습니다.");
+        return null;
+    }
     if (!block.payload) {
         report("이 버전에 맞는 의존성 꾸러미가 아직 없어 직접 내려받습니다(조금 더 걸립니다).");
         return null;
@@ -76,11 +86,16 @@ export async function tryFetchPayload(options: PayloadOptions): Promise<PayloadR
     report(`준비된 의존성 꾸러미를 받는 중… (${formatMegabytes(bytes)})`);
 
     await mkdir(options.cacheDir, { recursive: true });
+    if (!(await hasRoomFor(options.cacheDir, bytes))) {
+        // 받다가 디스크가 차면 사용자는 **의존성도 없고 공간도 없는** 상태가 된다. 시작하지 않는 편이 낫다.
+        report("디스크 여유가 부족해 준비된 꾸러미를 쓰지 않고 직접 내려받습니다.");
+        return null;
+    }
     const archivePath = join(options.cacheDir, DOWNLOAD_NAME);
     const scratchPath = join(options.cacheDir, SCRATCH_NAME);
 
     try {
-        const actual = await download(url, archivePath, fetchImpl);
+        const actual = await download(url, archivePath, fetchImpl, bytes, options.stallTimeoutMs ?? STALL_TIMEOUT_MS);
         if (actual !== sha256.toLowerCase()) {
             // **문구가 다른 유일한 실패**(§13.5). 여기까지 왔다는 것은 네트워크가 됐다는 뜻이므로,
             // "안 됐다"가 아니라 "받은 것을 믿을 수 없다"가 사실이다.
@@ -90,6 +105,9 @@ export async function tryFetchPayload(options: PayloadOptions): Promise<PayloadR
 
         report("의존성 꾸러미를 푸는 중…");
         const fileCount = await extractTarGzFile(archivePath, options.cacheDir, scratchPath, {
+            // 오염된 응답이 sha 대조 **전에** 디스크를 채우지 못하게 막는다(심의 W3). 정상 페이로드는
+            // 압축 대비 4배 안쪽이라(실측 158MB → 586MB) 여유 있게 잡되 무제한은 아니다.
+            maxBytes: Math.max(bytes * EXTRACT_RATIO_CAP, MIN_EXTRACT_CAP),
             // `.bin` 의 상대 심볼릭 링크 9개가 없으면 `next dev` 가 실행 파일을 못 찾는다(실측).
             symlinks: "materialize",
             // 실행 비트가 없으면 그 실패는 **실행 단계**에서 EACCES 로 나타나, 원인을 엉뚱한 데서 찾게 된다.
@@ -146,17 +164,78 @@ async function lookup(options: PayloadOptions, fetchImpl: typeof fetch): Promise
     }
 }
 
-/** 받으면서 sha256 을 함께 센다 — 다 받고 다시 읽으면 167MB 를 두 번 만진다. */
-async function download(url: string, targetPath: string, fetchImpl: typeof fetch): Promise<string> {
-    const response = await fetchImpl(url);
+/**
+ * 받으면서 sha256 을 함께 센다 — 다 받고 다시 읽으면 167MB 를 두 번 만진다.
+ *
+ * 둘이 심의에서 나온 수정이다.
+ * - **정체 상한**(W1): 조회에만 5초를 걸어 뒀는데, 정작 167MB 를 받다 연결이 멈추면 **무한히 기다렸다.**
+ *   가속기가 가속 대상을 막는 형국이다. 전체 시간이 아니라 **무전송 구간**으로 잰다 — 느린 회선을
+ *   시간으로 자르면 사내망 사용자가 영영 못 받는다.
+ * - **신고 크기 강제**(W2): 서버가 말한 바이트를 넘기면 그 자리에서 끊는다. sha 대조는 다 받은 **뒤**라,
+ *   그때까지 디스크가 무한히 차는 것을 막을 수 있는 유일한 지점이 여기다.
+ */
+async function download(
+    url: string,
+    targetPath: string,
+    fetchImpl: typeof fetch,
+    declaredBytes: number,
+    stallMs: number,
+): Promise<string> {
+    const controller = new AbortController();
+    let stall = setTimeout(() => controller.abort(), stallMs);
+    const response = await fetchImpl(url, { signal: controller.signal });
     if (!response.ok || !response.body) {
+        clearTimeout(stall);
         throw new Error(`HTTP ${response.status}`);
     }
+
     const hash = createHash("sha256");
+    const cap = declaredBytes > 0 ? declaredBytes : Number.POSITIVE_INFINITY;
+    let received = 0;
     const body = Readable.fromWeb(response.body as never);
-    body.on("data", (chunk: Buffer) => hash.update(chunk));
-    await pipeline(body, createWriteStream(targetPath));
+    const guard = new Transform({
+        transform(chunk: Buffer, _enc, done) {
+            clearTimeout(stall);
+            stall = setTimeout(() => controller.abort(), stallMs);
+            received += chunk.length;
+            if (received > cap) {
+                done(new Error(`받는 양이 서버가 말한 크기(${cap}B)를 넘었습니다`));
+                return;
+            }
+            // 해시는 **디스크에 쓰는 것과 같은 바이트**로 센다. 여기서 갈리면 무결성 검사가 손상 파일을
+            // 통과시킨다 — 두 스트림으로 나누지 않는 이유다.
+            hash.update(chunk);
+            done(null, chunk);
+        },
+    });
+
+    try {
+        await pipeline(body, guard, createWriteStream(targetPath));
+    } finally {
+        clearTimeout(stall);
+    }
+    if (received !== declaredBytes && declaredBytes > 0) {
+        throw new Error(`받은 크기가 서버가 말한 것과 다릅니다(${received} != ${declaredBytes})`);
+    }
     return hash.digest("hex");
+}
+
+/**
+ * 디스크 여유 점검(심의 W2). 필요량은 **압축본 + 중간 tar + 트리** 라 신고 크기의 몇 배가 든다.
+ *
+ * 못 재는 환경(구 Node·특수 파일시스템)에서는 **막지 않는다** — 재지 못한다는 이유로 되는 일을 막는 것은
+ * 이 축의 성격(가속기)에 맞지 않는다.
+ */
+async function hasRoomFor(dir: string, declaredBytes: number): Promise<boolean> {
+    try {
+        const { statfs } = await import("node:fs/promises");
+        if (typeof statfs !== "function") return true;
+        const info = await statfs(dir);
+        const free = Number(info.bavail) * Number(info.bsize);
+        return free > declaredBytes * DISK_HEADROOM;
+    } catch {
+        return true;
+    }
 }
 
 /**
@@ -224,6 +303,17 @@ export async function writePayloadStamp(cacheDir: string, result: PayloadResult,
 }
 
 const LOOKUP_TIMEOUT_MS = 5_000;
+const STALL_TIMEOUT_MS = 30_000;
+/** 여유 공간 배수 — 압축본 + 중간 tar + 펼친 트리가 동시에 존재하는 순간이 있다. */
+const DISK_HEADROOM = 6;
+/** 해제 상한 배수(실측 158MB → 586MB ≈ 3.7배). */
+const EXTRACT_RATIO_CAP = 8;
+/**
+ * 해제 상한 하한선. 배수만 쓰면 **작은 아카이브에서 정상 동작이 죽는다** — tar 는 512바이트 블록에 패딩하고
+ * 끝 표식 2블록이 붙어, 몇 KB 짜리 트리도 압축본의 수십 배가 된다(테스트가 이걸 잡았다).
+ * 남용 방어는 이 하한선 안에서도 성립한다(32MB 는 채워도 무해하다).
+ */
+const MIN_EXTRACT_CAP = 32 * 1024 * 1024;
 const DOWNLOAD_NAME = ".payload.tar.gz";
 const SCRATCH_NAME = ".payload.tar";
 

@@ -1,6 +1,7 @@
 import { createReadStream, createWriteStream } from "node:fs";
-import { chmod, mkdir, open, rm, symlink, writeFile } from "node:fs/promises";
-import { dirname, isAbsolute, normalize, relative, resolve, sep } from "node:path";
+import { chmod, lstat, mkdir, open, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { isAbsolute, join, normalize, relative, resolve, sep } from "node:path";
+import { Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { createGunzip } from "node:zlib";
 import { DevtoolsError } from "./errors.ts";
@@ -40,12 +41,20 @@ export interface UntarOptions {
      * 원인을 엉뚱한 데서 찾게 된다.
      */
     preserveMode?: boolean;
+    /**
+     * 해제 산출물 상한(심의 W3). 버퍼 경로엔 `maxOutputLength` 가 있었는데 **스트리밍 경로만 비어 있었다** —
+     * 오염된 응답이 sha 대조 **전에** 디스크를 무제한 채울 수 있었다.
+     *
+     * 상한을 고정값으로 둘 수 없다: 정상 페이로드가 풀면 600MB 라 버퍼 경로의 200MB 를 그대로 쓰면
+     * 정상 동작이 죽는다. 그래서 호출부가 **서버가 신고한 크기 기준**으로 넘긴다(`payload.ts`).
+     */
+    maxBytes?: number;
 }
 
 /** 버퍼 해제(사이트 소스용). 반환은 **쓴 파일 수**다(디렉터리·링크는 안 센다). */
 export async function extractTarGz(gzipped: Buffer, targetDir: string, options: UntarOptions = {}): Promise<number> {
     const tar = await gunzipBuffer(gzipped);
-    const sink = createSink(resolve(targetDir), options);
+    const sink = await createSink(targetDir, options);
     let offset = 0;
 
     while (offset + BLOCK <= tar.length) {
@@ -77,7 +86,19 @@ export async function extractTarGzFile(
     options: UntarOptions = {},
 ): Promise<number> {
     try {
-        await pipeline(createReadStream(gzPath), createGunzip(), createWriteStream(scratchPath));
+        const limit = options.maxBytes;
+        const guard = new Transform({
+            transform(chunk: Buffer, _enc, done) {
+                written += chunk.length;
+                if (limit !== undefined && written > limit) {
+                    done(new Error(`해제 산출물이 상한(${limit}B)을 넘었습니다`));
+                    return;
+                }
+                done(null, chunk);
+            },
+        });
+        let written = 0;
+        await pipeline(createReadStream(gzPath), createGunzip(), guard, createWriteStream(scratchPath));
     } catch (cause) {
         await rm(scratchPath, { force: true }).catch(() => {});
         throw new DevtoolsError(
@@ -88,7 +109,7 @@ export async function extractTarGzFile(
         );
     }
 
-    const sink = createSink(resolve(targetDir), options);
+    const sink = await createSink(targetDir, options);
     const handle = await open(scratchPath, "r");
     try {
         const header = Buffer.alloc(BLOCK);
@@ -150,8 +171,29 @@ function parseHeader(header: Buffer): Entry {
     };
 }
 
-/** 항목을 디스크에 반영하는 쪽. 버퍼·스트리밍 두 경로가 **같은 판정**을 쓰게 묶어 둔다. */
-function createSink(root: string, options: UntarOptions) {
+/**
+ * 항목을 디스크에 반영하는 쪽. 버퍼·스트리밍 두 경로가 **같은 판정**을 쓰게 묶어 둔다.
+ *
+ * 🔴 **경로 판정은 물리(physical)여야 한다**(심의 차단 · 2026-08-03 · 실제로 뚫렸다).
+ *
+ * 초판은 문자열로만 쟀다(`resolve`·`normalize`). 그런데 실제 `symlink(2)`·`writeFile` 은 **부모 조각을 전부
+ * 따라간다** — 그래서 링크를 사다리처럼 엮으면 매 홉이 "어휘상 뿌리 안"이면서 물리적으로는 한 단계씩 올라간다:
+ *
+ * ```
+ * node_modules/up         -> ..   (어휘상 뿌리 = 통과)
+ * node_modules/up/up2     -> ..   (부모가 이미 뿌리 밖을 가리킨다)
+ * node_modules/up/up2/up3 -> ..
+ * → 뿌리와 무관한 파일이 덮어써졌다(재현 실측: 해제기는 "성공, 1개 씀"이라 보고했다)
+ * ```
+ *
+ * 그래서 **뿌리에서부터 조각 단위로 내려가며 심볼릭 링크를 절대 따라가지 않는다**([descend]).
+ * 이러면 우리가 만드는 모든 경로가 "우리가 확인한 실제 디렉터리들"만 거치므로, 사슬이 몇 홉이든 밖으로 못 나간다.
+ * `..` 자체를 금지하는 방법은 못 쓴다 — `.bin` 링크 9개가 전부 `../` 다(실측).
+ */
+async function createSink(targetDir: string, options: UntarOptions) {
+    await mkdir(targetDir, { recursive: true });
+    // 뿌리 자체가 심링크일 수 있다(예: `/tmp` → `/private/tmp`). 기준을 실제 경로로 고정한다.
+    const root = await realpath(targetDir);
     const materializeLinks = options.symlinks === "materialize";
     const preserveMode = options.preserveMode === true;
     let count = 0;
@@ -185,14 +227,16 @@ function createSink(root: string, options: UntarOptions) {
             const linkTarget = pendingLink ?? entry.linkTarget;
             pendingLink = null;
 
+            const segments = safeSegments(root, name);
+
             if (entry.type === "5") {
-                await mkdir(safeJoin(root, name), { recursive: true });
+                await descend(root, segments, true);
                 return;
             }
 
             if (entry.type === "2") {
                 if (!materializeLinks) return;
-                await writeSymlink(root, name, linkTarget);
+                await writeSymlink(root, segments, name, linkTarget);
                 return;
             }
             // 하드링크(`1`)는 만들지 않는다. **실측**(2026-08-03 · examples 레포 node_modules 를 실제로 구워
@@ -209,8 +253,12 @@ function createSink(root: string, options: UntarOptions) {
                 );
             }
 
-            const path = safeJoin(root, name);
-            await mkdir(dirname(path), { recursive: true });
+            const leaf = segments[segments.length - 1];
+            if (!leaf) throw new DevtoolsError("SERVER_REJECTED", `받은 파일에 이상한 경로가 있습니다: ${name}`);
+            const parent = await descend(root, segments.slice(0, -1), true);
+            const path = join(parent, leaf);
+            // 마지막 조각이 이미 심링크면 **쓰기가 그 링크를 따라간다** — 조각 검사의 마지막 칸이다.
+            await assertNotSymlink(path, name);
             await writeFile(path, data);
             if (preserveMode && (entry.mode & 0o111) !== 0) {
                 // 실행 비트가 있던 것만 되살린다. 전체 mode 를 그대로 쓰지 않는 이유는 아카이브가 정한
@@ -223,31 +271,84 @@ function createSink(root: string, options: UntarOptions) {
 }
 
 /**
+ * 뿌리에서부터 조각 단위로 내려간다. **심볼릭 링크는 절대 따라가지 않는다.**
+ *
+ * `mkdir(..., { recursive: true })` 를 쓰면 안 되는 이유가 여기 있다 — 그 호출은 기존 심링크를 따라가고,
+ * 따라간 자리에 **뿌리 밖 디렉터리를 실제로 만들어 버린다**(검사에서 나중에 거절해도 부작용은 이미 남는다).
+ */
+async function descend(root: string, segments: string[], create: boolean): Promise<string> {
+    let current = root;
+    for (const part of segments) {
+        const next = join(current, part);
+        const info = await lstat(next).catch(() => null);
+        if (info?.isSymbolicLink()) {
+            throw new DevtoolsError(
+                "SERVER_REJECTED",
+                `받은 꾸러미가 링크를 거쳐 폴더 밖에 쓰려고 합니다: ${part}`,
+                "잘못 받은 상태로 진행하지 않았습니다. 잘커라에 문의해 주세요.",
+            );
+        }
+        if (!info) {
+            if (!create) throw new DevtoolsError("SERVER_REJECTED", `받은 꾸러미의 경로가 이상합니다: ${part}`);
+            await mkdir(next).catch((error: unknown) => {
+                if ((error as NodeJS.ErrnoException | undefined)?.code !== "EEXIST") throw error;
+            });
+        } else if (!info.isDirectory()) {
+            throw new DevtoolsError("SERVER_REJECTED", `받은 꾸러미의 경로가 파일과 겹칩니다: ${part}`);
+        }
+        current = next;
+    }
+    return current;
+}
+
+async function assertNotSymlink(path: string, name: string): Promise<void> {
+    const info = await lstat(path).catch(() => null);
+    if (info?.isSymbolicLink()) {
+        throw new DevtoolsError("SERVER_REJECTED", `받은 꾸러미가 기존 링크를 덮어쓰려고 합니다: ${name}`);
+    }
+}
+
+/**
  * 심볼릭 링크를 만든다. **뿌리 안을 가리키는 상대 링크만.**
  *
- * 링크는 해제 시점이 아니라 **따라가는 시점에** 해석된다 — 그래서 경로 검사를 해제기가 안 하면
- * 오염된 아카이브가 고객 홈의 임의 파일을 가리키는 링크를 심을 수 있고, 그 뒤 도구가 그 링크를 읽는다.
+ * 판정 기준이 둘이다.
+ * 1. 링크가 놓일 자리까지 [descend] 로 내려간다 — 그 경로에 심링크 조각이 하나라도 있으면 거절한다.
+ * 2. 대상은 **그 실제 부모 기준**으로 풀어 뿌리 안인지 본다. 부모가 물리적으로 뿌리 안이고 우리가 만든
+ *    모든 링크가 뿌리 안을 가리키므로, 귀납적으로 어떤 사슬도 밖으로 못 나간다.
+ *
+ * 링크는 해제 시점이 아니라 **따라가는 시점에** 해석된다 — 그래서 이 검사가 없으면 오염된 아카이브가
+ * 고객 홈의 임의 파일을 가리키는 링크를 심고, 그 뒤 도구가 그 링크를 읽거나 쓴다.
  */
-async function writeSymlink(root: string, name: string, target: string): Promise<void> {
+async function writeSymlink(root: string, segments: string[], name: string, target: string): Promise<void> {
     if (!target) return;
     if (isAbsolute(target) || /^[A-Za-z]:/.test(target)) {
         throw new DevtoolsError("SERVER_REJECTED", `받은 꾸러미에 절대경로 링크가 있습니다: ${name}`);
     }
-    const linkPath = safeJoin(root, name);
-    const resolved = resolve(dirname(linkPath), target);
+    const leaf = segments[segments.length - 1];
+    if (!leaf) throw new DevtoolsError("SERVER_REJECTED", `받은 꾸러미에 이상한 링크 이름이 있습니다: ${name}`);
+
+    const parent = await descend(root, segments.slice(0, -1), true);
+    const resolved = resolve(parent, target);
     if (resolved !== root && !resolved.startsWith(root + sep)) {
         throw new DevtoolsError("SERVER_REJECTED", `받은 꾸러미의 링크가 폴더 밖을 가리킵니다: ${name}`);
     }
-    await mkdir(dirname(linkPath), { recursive: true });
+
+    const linkPath = join(parent, leaf);
+    await assertNotSymlink(linkPath, name);
     // 상대 형태 그대로 심는다 — 절대경로로 바꿔 심으면 캐시 트리를 다른 자리로 옮기는 순간 전부 끊긴다
     // (`deps.ts` 의 `verbatimSymlinks` 와 같은 이유).
-    await symlink(relative(dirname(linkPath), resolved) || ".", linkPath).catch((error: unknown) => {
+    await symlink(relative(parent, resolved) || ".", linkPath).catch((error: unknown) => {
         if ((error as NodeJS.ErrnoException | undefined)?.code !== "EEXIST") throw error;
     });
 }
 
-/** 아카이브 안 경로가 대상 폴더 밖을 가리키면 거절한다(Zip Slip 동형). */
-function safeJoin(root: string, name: string): string {
+/**
+ * 아카이브 안 경로를 **조각 배열**로 바꾼다. 뿌리 밖을 가리키면 거절한다(Zip Slip 동형).
+ *
+ * 조각으로 돌려주는 이유: 최종 경로 문자열만 넘기면 호출부가 다시 `mkdir -p` 를 하게 되고, 그 호출이
+ * **심링크를 따라간다.** 판정과 생성이 같은 조각 목록을 쓰게 묶어 둔다([descend]).
+ */
+function safeSegments(root: string, name: string): string[] {
     const cleaned = name.replace(/^(\.\/)+/, "");
     if (cleaned.startsWith("/") || /^[A-Za-z]:/.test(cleaned)) {
         throw new DevtoolsError("SERVER_REJECTED", `받은 파일에 이상한 경로가 있습니다: ${name}`);
@@ -256,7 +357,7 @@ function safeJoin(root: string, name: string): string {
     if (path !== root && !path.startsWith(root + sep)) {
         throw new DevtoolsError("SERVER_REJECTED", `받은 파일이 폴더 밖을 가리킵니다: ${name}`);
     }
-    return path;
+    return relative(root, path).split(sep).filter((part) => part.length > 0);
 }
 
 function cstring(buffer: Buffer): string {

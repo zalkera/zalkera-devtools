@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { cp, link, mkdir, readFile, readdir, readlink, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { cp, link, mkdir, readFile, readdir, readlink, rm, stat, symlink, utimes, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -39,7 +39,12 @@ export interface DepsOptions {
     npmEnv?: Record<string, string>;
     /**
      * 서버 주소. 주면 **캐시 미스 때 미리 구운 꾸러미를 먼저 물어본다**(§13.10.5 · T-D2c).
-     * 안 주면 종전대로 곧장 `npm install` — 즉 이 배선은 **가산**이다.
+     * 안 주면 종전대로 곧장 `npm install`.
+     *
+     * ⚠ **"안 주면 완전히 종전과 같다"는 아니다**(심의 W4 · 종전 주석이 그렇게 적어 거짓이었다):
+     * 캐시 폐기([KEEP_CACHES])는 **양쪽 공통**으로 돈다. 세대당 586MB 라 무한 증식이 그 자체로 결함이고,
+     * 페이로드를 쓰든 안 쓰든 같은 문제이기 때문이다. 기존 사용자는 이 배포부터 3세대 초과분을 잃는다
+     * (재생성 가능한 캐시라 손실이 아니지만, **말없이 바뀌는 것은 아니어야** 한다).
      */
     apiBase?: string;
     fetchImpl?: typeof fetch;
@@ -74,6 +79,9 @@ export async function ensureDependencies(options: DepsOptions): Promise<DepsResu
 
     if (existsSync(join(cacheDir, "node_modules"))) {
         report("준비해 둔 의존성을 연결합니다…");
+        // **쓴 시각을 남긴다**(심의 관찰). 안 하면 폐기 기준이 "최근 생성"이라, 네 세대 이상을 오가는
+        // 사용자의 **활발한 세대가 먼저 지워진다**(그리고 재설치를 다시 겪는다).
+        await utimes(cacheDir, new Date(), new Date()).catch(() => {});
         const linked = await linkOrCopy(join(cacheDir, "node_modules"), target);
         await markComplete(target);
         return { action: linked, cacheKey };
@@ -101,7 +109,11 @@ export async function ensureDependencies(options: DepsOptions): Promise<DepsResu
                 return { action: linked, cacheKey };
             }
         }
-        // pnpm/yarn·lockfile 없음은 **조회조차 하지 않는다**(굽지 않으므로 항상 "없다"이고 왕복만 낭비다).
+        else {
+            // pnpm/yarn·lockfile 없음은 **조회조차 하지 않는다**(굽지 않으므로 항상 "없다"이고 왕복만 낭비다).
+            // 그래도 **말은 한다**(심의 W6) — 침묵하면 "왜 나만 느린가"를 사용자도 우리도 설명할 수 없다.
+            report("이 프로젝트는 미리 준비된 꾸러미를 쓸 수 없어 직접 내려받습니다(npm lockfile 이 필요합니다).");
+        }
     }
 
     report("의존성을 처음 한 번 내려받습니다. 몇 분 걸릴 수 있습니다…");
