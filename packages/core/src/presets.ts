@@ -52,8 +52,17 @@ export async function startFromPreset(options: StartFromPresetOptions): Promise<
     }
     const zip = Buffer.from(await response.arrayBuffer());
 
+    // ⚠ **fail-open 이었다**(심의 지적): `source.sha256 &&` 라 서버가 빈 값을 주면 검사가 소멸했는데,
+    // 주석은 "중간자도 여기서 걸린다"고 강하게 적혀 있었다. 검사가 있는 척하는 것이 없는 것보다 나쁘다.
+    if (!source.sha256) {
+        throw new DevtoolsError(
+            "SERVER_REJECTED",
+            "서버가 무결성 해시를 주지 않아 시작 소스를 검증할 수 없습니다.",
+            "잘커라에 문의해 주세요. 검증 없이 진행하지 않았습니다.",
+        );
+    }
     const actual = createHash("sha256").update(zip).digest("hex");
-    if (source.sha256 && actual !== source.sha256) {
+    if (actual !== source.sha256) {
         // 받은 바이트가 서버가 약속한 바이트와 다르면 **풀지 않는다.** 여기서 진행하면 무엇이 깨졌는지
         // 모른 채 소스가 남고, 그 소스로 만든 사이트의 원인 추적이 불가능해진다.
         throw new DevtoolsError(

@@ -240,3 +240,45 @@ test("경고 — 서버 메시지를 무제한으로 사용자에게 넘기지 �
         (e: unknown) => e instanceof DevtoolsError && e.message.length < 400,
     );
 });
+
+test("무결성 — 받은 소스가 원장과 다르면 풀지 않는다(B2)", async () => {
+    const { fetchSiteSource } = await import("./fetchSource.ts");
+    const dir = await mkdtemp(join(tmpdir(), "zalkera-integrity-"));
+    const payload = Buffer.from("이건 진짜 tar 가 아니어도 된다 — 해시에서 먼저 걸린다");
+
+    const api = {
+        listRevisions: async () => [{ revisionNo: 9, status: "READY", isActive: true, createdAt: "2026-08-03" }],
+        sourceUrl: async () => ({ url: "https://s3/x", revisionNo: 9, sha256: "0".repeat(64), expiresAt: "" }),
+    } as never;
+
+    await rejects(
+        () =>
+            fetchSiteSource({
+                api,
+                targetDir: dir,
+                fetchImpl: (async () => new Response(payload)) as unknown as typeof fetch,
+            }),
+        (e: unknown) => e instanceof DevtoolsError && /원본과 다릅니다/.test(e.message),
+    );
+    // 풀지 않았다는 것이 이 테스트의 본체다 — 풀고 나면 무엇이 깨졌는지 모른 채 소스가 남는다.
+    strictEqual((await readdir(dir)).length, 0);
+});
+
+test("무결성 — 서버가 해시를 안 주면 시작 소스는 진행하지 않는다(fail-open 제거)", async () => {
+    const { startFromPreset } = await import("./presets.ts");
+    const dir = await mkdtemp(join(tmpdir(), "zalkera-preset-open-"));
+    const api = {
+        presetSourceUrl: async () => ({ url: "https://s3/p", version: "1.0.0", sha256: "", sizeBytes: 0, filename: "p.zip" }),
+    } as never;
+
+    await rejects(
+        () =>
+            startFromPreset({
+                api,
+                presetCode: "skeleton",
+                targetDir: dir,
+                fetchImpl: (async () => new Response(Buffer.from("x"))) as unknown as typeof fetch,
+            }),
+        (e: unknown) => e instanceof DevtoolsError && /검증할 수 없습니다/.test(e.message),
+    );
+});

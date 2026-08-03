@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { createWriteStream } from "node:fs";
 import { mkdir, readdir, writeFile } from "node:fs/promises";
 import { dirname, join, normalize, resolve, sep } from "node:path";
@@ -48,8 +49,8 @@ export async function fetchSiteSource(options: FetchSourceOptions): Promise<Fetc
     }
 
     report(`버전 ${revisionNo} 소스를 받는 중…`);
-    const url = await options.api.sourceUrl(revisionNo);
-    const response = await fetchImpl(url);
+    const source = await options.api.sourceUrl(revisionNo);
+    const response = await fetchImpl(source.url);
     if (!response.ok || !response.body) {
         throw new DevtoolsError(
             "SERVER_REJECTED",
@@ -71,6 +72,25 @@ export async function fetchSiteSource(options: FetchSourceOptions): Promise<Fetc
     }
 
     const buffer = Buffer.from(await response.arrayBuffer());
+
+    // ⚠ **받은 바이트가 원장의 그 바이트인지 대조한다**(심의 반영 · 2026-08-03).
+    // 시작 소스(B1)는 진작 대조하는데 **이 경로만 비어 있었다** — 그런데 이쪽이 MVP 절단선의 본체다.
+    // 불일치면 **풀지 않는다**: 풀고 나면 무엇이 깨졌는지 모른 채 소스가 남고, 그 소스로 만든 사이트의
+    // 원인 추적이 불가능해진다. 서버가 sha 를 안 주면(구버전 서버) 그 사실을 말하고 진행한다 —
+    // **검사가 있는 척하지 않는다.**
+    if (source.sha256) {
+        const actual = createHash("sha256").update(buffer).digest("hex");
+        if (actual !== source.sha256) {
+            throw new DevtoolsError(
+                "SERVER_REJECTED",
+                "받은 소스가 원본과 다릅니다(무결성 확인 실패).",
+                "네트워크 문제일 수 있습니다. 다시 시도해 주세요.",
+            );
+        }
+    } else {
+        report("⚠ 서버가 무결성 해시를 주지 않아 대조를 건너뜁니다(서버가 오래된 버전일 수 있습니다).");
+    }
+
     const fileCount = await extractTarGz(buffer, options.targetDir);
     report(`${fileCount}개 파일을 받았습니다.`);
     return { revisionNo, fileCount };

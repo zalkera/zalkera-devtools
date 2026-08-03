@@ -16,6 +16,7 @@ export {
     type IssuedPreviewKey,
     type PresetSource,
     type PresignedUpload,
+    type RevisionSource,
     type SitePreset,
     type SiteRevision,
     type TenantSummary,

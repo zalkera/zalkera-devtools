@@ -49,6 +49,14 @@ export interface PresetSource {
     filename: string;
 }
 
+export interface RevisionSource {
+    url: string;
+    revisionNo: number;
+    /** canonical tar.gz 의 sha256. **받는 쪽이 대조하지 않으면 서버의 약속은 말뿐이다.** */
+    sha256: string;
+    expiresAt: string;
+}
+
 export interface SiteRevision {
     revisionNo: number;
     status: string;
@@ -120,13 +128,9 @@ export class ZalkeraApi {
         return this.request<SiteRevision[]>("GET", "/api/partner/site-upload/revisions");
     }
 
-    /** 소스 tar.gz 다운로드 URL(TENANT_ADMIN+). 소스 소유의 실물이다. */
-    async sourceUrl(revisionNo: number): Promise<string> {
-        const presigned = await this.request<{ url: string }>(
-            "GET",
-            `/api/partner/site-upload/revisions/${revisionNo}/source-url`,
-        );
-        return presigned.url;
+    /** 소스 tar.gz 다운로드 URL **+ sha256**(TENANT_ADMIN+). 소스 소유의 실물이고, 해시가 그 약속의 검산이다. */
+    sourceUrl(revisionNo: number): Promise<RevisionSource> {
+        return this.request<RevisionSource>("GET", `/api/partner/site-upload/revisions/${revisionNo}/source-url`);
     }
 
     /** 버전 전환(롤백 포함). READY 인 버전만 받는다. */
