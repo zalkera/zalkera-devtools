@@ -13,17 +13,21 @@
 
 ## 표면은 넷뿐
 
-사이드바 뷰 1 · 상태바 1칸 · 출력 채널 1 · 명령 팔레트.
+사이드바 뷰 1 · 상태바 1칸 · 출력 채널 1 · 명령 팔레트. **웹뷰는 쓰지 않는다** — 화면을 그리기 시작하면
+그 화면이 곧 제품이 되고, 확장이 두꺼워져 CLI·데스크톱이 같은 것을 재사용하지 못한다.
 
 ```
 zalkera.signIn / signOut          로그인·로그아웃(로그아웃은 .env.local 의 키 줄도 지운다)
+zalkera.site.create               예제로 시작 — 시작 소스를 받아 새로
 zalkera.site.open                 내 사이트 소스 받기 — 이미 있는 사이트를 로컬로
 zalkera.site.link                 이 폴더를 내 사이트로 연결
 zalkera.preview.start / stop / restart
 zalkera.publish                   묶어서 올리기
+zalkera.rollback                  이전 버전으로 되돌리기
+zalkera.precheck                  배포 전 검사 — **조언이지 차단이 아니다**
 zalkera.doctor                    무엇이 없어서 안 되는지 점검
 
-# 아직 없는 것: zalkera.site.create(예제로 시작) · zalkera.rollback · zalkera.agent.connect
+# 아직 없는 것: zalkera.agent.connect(MCP 등록)
 ```
 
 ## 편집은 하지 않는다

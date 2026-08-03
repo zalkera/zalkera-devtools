@@ -63,6 +63,21 @@
                 "command": "zalkera.doctor",
                 "title": "잘커라: 진단",
                 "category": "잘커라"
+            },
+            {
+                "command": "zalkera.site.create",
+                "title": "잘커라: 예제로 시작",
+                "category": "잘커라"
+            },
+            {
+                "command": "zalkera.rollback",
+                "title": "잘커라: 이전 버전으로",
+                "category": "잘커라"
+            },
+            {
+                "command": "zalkera.precheck",
+                "title": "잘커라: 배포 전 검사",
+                "category": "잘커라"
             }
         ],
         "configuration": {
@@ -79,6 +94,23 @@
                     "description": "작업할 사이트(테넌트) 코드. 비우면 로그인 뒤 고릅니다."
                 }
             }
+        },
+        "viewsContainers": {
+            "activitybar": [
+                {
+                    "id": "zalkera",
+                    "title": "잘커라",
+                    "icon": "media/zalkera.svg"
+                }
+            ]
+        },
+        "views": {
+            "zalkera": [
+                {
+                    "id": "zalkera.sidebar",
+                    "name": "사이트"
+                }
+            ]
         }
     },
     "scripts": {

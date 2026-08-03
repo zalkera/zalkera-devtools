@@ -32,6 +32,23 @@ export interface IssuedPreviewKey {
     warning: string;
 }
 
+export interface SitePreset {
+    code: string;
+    name: string;
+    description: string;
+    version: string;
+    sha256: string;
+    previewUrl: string | null;
+}
+
+export interface PresetSource {
+    url: string;
+    version: string;
+    sha256: string;
+    sizeBytes: number;
+    filename: string;
+}
+
 export interface SiteRevision {
     revisionNo: number;
     status: string;
@@ -76,6 +93,16 @@ export class ZalkeraApi {
         return this.request<IssuedPreviewKey>("POST", "/api/partner/storefront-keys/preview", {
             body: label ? { label } : {},
         });
+    }
+
+    /** 시작 소스 팩 목록(B1). 공개된 것만 온다 — 고를 수 없는 것은 안 보이는 편이 정직하다. */
+    listPresets(): Promise<SitePreset[]> {
+        return this.request<SitePreset[]>("GET", "/api/partner/site-preset/presets");
+    }
+
+    /** 팩 소스 zip 의 단기 URL + **sha256**(받는 쪽이 대조한다 — 그래야 "배달했으면 끝"이 검증 가능한 약속이 된다). */
+    presetSourceUrl(code: string): Promise<PresetSource> {
+        return this.request<PresetSource>("GET", `/api/partner/site-preset/presets/${encodeURIComponent(code)}/source-url`);
     }
 
     /** 버전 이력(최신순). B2「현재 사이트 내려받기」와 롤백이 여기서 대상을 고른다. */

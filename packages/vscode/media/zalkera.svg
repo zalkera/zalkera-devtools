@@ -1,0 +1,6 @@
+<!-- 활동 표시줄 아이콘. 단색 라인아트여야 한다(VS Code 가 테마 색으로 칠한다). -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M4 7h16"/>
+  <path d="M16 7 8 17"/>
+  <path d="M4 17h16"/>
+</svg>

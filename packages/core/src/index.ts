@@ -14,7 +14,9 @@ export {
     ZalkeraApi,
     type ApiOptions,
     type IssuedPreviewKey,
+    type PresetSource,
     type PresignedUpload,
+    type SitePreset,
     type SiteRevision,
     type TenantSummary,
 } from "./api.ts";
@@ -33,3 +35,6 @@ export {
     type FetchSourceOptions,
     type FetchSourceResult,
 } from "./fetchSource.ts";
+export { extractZip, type UnzipResult } from "./unzip.ts";
+export { startFromPreset, type StartFromPresetOptions, type StartFromPresetResult } from "./presets.ts";
+export { precheck, type PrecheckFinding, type PrecheckOptions } from "./precheck.ts";
