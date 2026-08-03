@@ -69,8 +69,27 @@ export async function fetchHandshake(
         );
     }
 
-    const body = (await response.json()) as Envelope<Handshake>;
-    const handshake = body.data;
+    // 응답이 우리 형식이라는 보장이 없다 — 게이트웨이가 502 HTML 을 주거나 프록시가 로그인 페이지를 끼워 넣는다.
+    // 초판은 곧장 `.data.verdict` 를 읽어 `TypeError`·`SyntaxError` 가 그대로 사용자에게 갔다(심의 실측).
+    let body: Envelope<Handshake>;
+    try {
+        body = (await response.json()) as Envelope<Handshake>;
+    } catch (cause) {
+        throw new DevtoolsError(
+            "SERVER_UNREACHABLE",
+            "서버 응답을 이해하지 못했습니다.",
+            `${apiBase} 가 잘커라 서버가 맞는지, 사내망 프록시가 응답을 바꾸고 있지 않은지 확인해 주세요.`,
+            cause,
+        );
+    }
+    const handshake = body?.data;
+    if (!handshake || typeof handshake.verdict !== "string") {
+        throw new DevtoolsError(
+            "SERVER_UNREACHABLE",
+            "서버 응답에 필요한 정보가 없습니다.",
+            "주소가 잘커라 서버가 맞는지 확인해 주세요.",
+        );
+    }
     if (handshake.verdict === "UPGRADE_REQUIRED") {
         throw new DevtoolsError(
             "EXTENSION_OUTDATED",

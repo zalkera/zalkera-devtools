@@ -111,3 +111,132 @@ test("자격증명 파일은 형제 이름까지 전부 빠진다", async () => 
     strictEqual(packed.fileCount, 1, "package.json 하나만 실려야 한다");
     ok(!packed.buffer.includes(Buffer.from("oqsk_secret")), "아카이브 어디에도 키가 없어야 한다");
 });
+
+// ── 경고 회귀 ────────────────────────────────────────────────────────────
+
+test("경고 — .env.local 중복 선언이 남으면 폐기된 키가 이긴다", async () => {
+    const { mergeEnv } = await import("./env.ts");
+    const existing = [
+        "ZALKERA_STOREFRONT_KEY=oqsk_old_first",
+        "OTHER=1",
+        "ZALKERA_STOREFRONT_KEY=oqsk_old_last",
+    ].join("\n");
+
+    const merged = mergeEnv(existing, {
+        ZALKERA_API_BASE: "https://api.zalkera.com",
+        ZALKERA_TENANT: "acme",
+        ZALKERA_STOREFRONT_KEY: "oqsk_new",
+        ZALKERA_SITE_URL: "http://localhost:3000",
+        NEXT_PUBLIC_ZALKERA_PREVIEW: "1",
+    });
+
+    const keyLines = merged.split("\n").filter((l) => l.startsWith("ZALKERA_STOREFRONT_KEY="));
+    strictEqual(keyLines.length, 1, `중복이 남으면 dotenv 가 마지막 것을 채택해 영구 401 이 된다: ${keyLines}`);
+    strictEqual(keyLines[0], "ZALKERA_STOREFRONT_KEY=oqsk_new");
+    ok(merged.includes("OTHER=1"), "남의 값은 그대로");
+});
+
+test("경고 — 기존 .env.local 권한을 600 으로 조인다", async () => {
+    const { writePreviewEnv } = await import("./env.ts");
+    const { chmod, stat, writeFile: wf } = await import("node:fs/promises");
+    const dir = await mkdtemp(join(tmpdir(), "zalkera-perm-"));
+    const path = join(dir, ".env.local");
+    await wf(path, "OTHER=1\n");
+    await chmod(path, 0o644);
+
+    await writePreviewEnv(dir, {
+        ZALKERA_API_BASE: "https://api.zalkera.com",
+        ZALKERA_TENANT: "acme",
+        ZALKERA_STOREFRONT_KEY: "oqsk_x",
+        ZALKERA_SITE_URL: "http://localhost:3000",
+        NEXT_PUBLIC_ZALKERA_PREVIEW: "1",
+    });
+
+    strictEqual((await stat(path)).mode & 0o777, 0o600, "공용 기계의 다른 사용자가 키를 읽으면 안 된다");
+});
+
+test("경고 — 압축 폭탄은 사람 말로 끊는다", async () => {
+    const { extractZip } = await import("./unzip.ts");
+    const { createZip } = await import("./zip.ts");
+    // 200MB 상한을 넘기는 단일 항목(0 바이트는 잘 압축된다).
+    const bomb = await createZip([{ path: "bomb.bin", data: Buffer.alloc(210 * 1024 * 1024) }]);
+    const target = await mkdtemp(join(tmpdir(), "zalkera-bomb-"));
+    await rejects(
+        () => extractZip(bomb, target),
+        (e: unknown) => e instanceof DevtoolsError && /너무 크거나 손상/.test(e.message),
+    );
+});
+
+test("경고 — 항목 65535 초과는 raw RangeError 가 아니라 사람 말", async () => {
+    const { createZip } = await import("./zip.ts");
+    const entries = Array.from({ length: 65_536 }, (_, i) => ({ path: `f${i}.txt`, data: Buffer.alloc(1) }));
+    await rejects(
+        () => createZip(entries),
+        (e: unknown) => e instanceof DevtoolsError && /파일이 너무 많습니다/.test(e.message),
+    );
+});
+
+test("경고 — 손상된 zip 목록은 raw RangeError 가 아니라 사람 말", async () => {
+    const { extractZip } = await import("./unzip.ts");
+    const { createZip } = await import("./zip.ts");
+    const zip = await createZip([{ path: "a.txt", data: Buffer.from("x") }]);
+    // 중앙 디렉터리의 로컬 헤더 오프셋을 파일 밖으로 밀어 버린다.
+    const eocd = zip.length - 22;
+    const centralStart = zip.readUInt32LE(eocd + 16);
+    zip.writeUInt32LE(0xff_ff_ff_00, centralStart + 42);
+
+    const target = await mkdtemp(join(tmpdir(), "zalkera-broken-"));
+    await rejects(
+        () => extractZip(zip, target),
+        (e: unknown) => e instanceof DevtoolsError && /손상/.test(e.message),
+    );
+});
+
+test("경고 — 프록시 자격증명은 리포트에 찍히지 않는다", async () => {
+    const { runDoctor } = await import("./doctor.ts");
+    const previous = process.env.HTTPS_PROXY;
+    process.env.HTTPS_PROXY = "http://alice:s3cret@proxy.corp:8080";
+    try {
+        const checks = await runDoctor({
+            apiBase: "http://127.0.0.1:1",
+            extensionVersion: "0.1.0",
+            fetchImpl: (() => Promise.reject(new Error("offline"))) as unknown as typeof fetch,
+        });
+        const proxy = checks.find((c) => c.name === "네트워크 프록시");
+        ok(proxy && !proxy.detail.includes("s3cret"), `비밀번호가 새면 안 된다: ${proxy?.detail}`);
+        ok(proxy!.detail.includes("proxy.corp:8080"), "호스트는 보여야 쓸모가 있다");
+    } finally {
+        if (previous === undefined) delete process.env.HTTPS_PROXY;
+        else process.env.HTTPS_PROXY = previous;
+    }
+});
+
+test("경고 — 핸드셰이크 응답이 우리 형식이 아니면 사람 말로 끊는다", async () => {
+    const { fetchHandshake } = await import("./handshake.ts");
+    const html = (async () => new Response("<html>502</html>", { status: 200 })) as unknown as typeof fetch;
+    await rejects(
+        () => fetchHandshake("https://api.zalkera.com", "0.1.0", html),
+        (e: unknown) => e instanceof DevtoolsError && /이해하지 못했습니다/.test(e.message),
+    );
+
+    const empty = (async () => Response.json({ status: 200, data: null })) as unknown as typeof fetch;
+    await rejects(
+        () => fetchHandshake("https://api.zalkera.com", "0.1.0", empty),
+        (e: unknown) => e instanceof DevtoolsError && /필요한 정보가 없습니다/.test(e.message),
+    );
+});
+
+test("경고 — 서버 메시지를 무제한으로 사용자에게 넘기지 않는다", async () => {
+    const { ZalkeraApi } = await import("./api.ts");
+    const huge = "가".repeat(40_000);
+    const api = new ZalkeraApi({
+        apiBase: "https://api.zalkera.com",
+        accessToken: async () => "t",
+        tenantCode: () => "acme",
+        fetchImpl: (async () => Response.json({ message: huge }, { status: 400 })) as unknown as typeof fetch,
+    });
+    await rejects(
+        () => api.listRevisions(),
+        (e: unknown) => e instanceof DevtoolsError && e.message.length < 400,
+    );
+});

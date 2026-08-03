@@ -1,4 +1,4 @@
-import { readFile, writeFile } from "node:fs/promises";
+import { chmod, readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 
@@ -38,7 +38,19 @@ export function mergeEnv(existing: string, values: PreviewEnv): string {
     const pending = new Map<string, string>(Object.entries(values));
     const lines = existing.length === 0 ? [] : existing.split("\n");
 
-    const merged = lines.map((line) => {
+    // ⚠ **중복 선언은 뒤엣것이 이긴다**(dotenv 규칙 · 심의 경고). 초판은 첫 줄만 갱신하고 뒤에 남은 옛 줄을
+    // 그대로 뒀다 — 폐기된 키가 채택돼 **영구 401** 이 되고, 우리가 안내하는 "프리뷰를 다시 켜세요"를 따라도
+    // 같은 결과가 반복됐다(사용자가 못 빠져나오는 왕복). 먼저 갱신할 키의 **중복 줄을 걷어낸다**.
+    const seen = new Set<string>();
+    const deduped = lines.filter((line) => {
+        const key = keyOf(line);
+        if (key === null || !pending.has(key)) return true;
+        if (seen.has(key)) return false; // 같은 관리 키의 두 번째 이후 선언은 버린다.
+        seen.add(key);
+        return true;
+    });
+
+    const merged = deduped.map((line) => {
         const key = keyOf(line);
         if (key === null || !pending.has(key)) return line;
         const value = pending.get(key)!;
@@ -64,6 +76,9 @@ export async function writePreviewEnv(projectDir: string, values: PreviewEnv): P
     const existing = existsSync(path) ? await readFile(path, "utf8") : "";
     const merged = mergeEnv(existing, values);
     await writeFile(path, merged, { encoding: "utf8", mode: 0o600 });
+    // `mode` 는 **생성 시에만** 적용된다 — 이미 644 로 있던 파일은 그대로였다(심의 실측).
+    // 공용 기계의 다른 로컬 사용자가 프리뷰 키를 읽는 자리라 매번 조인다. 윈도우에서는 무의미하나 무해하다.
+    await chmod(path, 0o600).catch(() => {});
     return path;
 }
 

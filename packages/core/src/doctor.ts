@@ -24,6 +24,16 @@ export interface DoctorOptions {
     fetchImpl?: typeof fetch;
 }
 
+/** `http://user:pass@host:port` → `http://host:port`. 파싱 실패면 통째로 가린다(추측해 흘리지 않는다). */
+function maskCredentials(url: string): string {
+    try {
+        const parsed = new URL(url);
+        return `${parsed.protocol}//${parsed.host}`;
+    } catch {
+        return "(설정됨 · 형식을 읽지 못함)";
+    }
+}
+
 export async function runDoctor(options: DoctorOptions): Promise<DoctorCheck[]> {
     const checks: DoctorCheck[] = [];
 
@@ -39,7 +49,9 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorCheck[]> 
     checks.push({
         name: "네트워크 프록시",
         ok: true,
-        detail: proxy ? `프록시 설정됨: ${proxy}` : "프록시 설정 없음",
+        // ⚠ 프록시 URL 은 흔히 `http://user:pass@host:port` 다 — 지원용 리포트가 고객 사내 비밀번호를 담고,
+        // 힌트가 그것을 공유하라고 지시하고 있었다(심의 경고). 호스트만 남긴다.
+        detail: proxy ? `프록시 설정됨: ${maskCredentials(proxy)}` : "프록시 설정 없음",
         ...(proxy
             ? { hint: "사내망 프록시가 있으면 로그인 창·의존성 내려받기가 막힐 수 있습니다. 막히면 이 값을 관리자에게 알려 주세요." }
             : {}),

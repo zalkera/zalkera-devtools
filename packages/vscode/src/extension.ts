@@ -42,7 +42,9 @@ import { ZalkeraSidebar } from "./sidebar.ts";
 
 let output: vscode.OutputChannel;
 let status: vscode.StatusBarItem;
-let session: { server: DevServer; projectDir: string } | null = null;
+let session: { server: DevServer; projectDir: string; keyId: number } | null = null;
+/** 프리뷰 시작 재진입 가드 — 첫 실행은 수 분짜리 설치라 사용자가 반드시 두 번 누른다(심의 경고). */
+let previewStarting = false;
 let store: SecretTokenStore;
 let handshake: Handshake | null = null;
 let sidebar: ZalkeraSidebar;
@@ -124,6 +126,15 @@ async function signIn(): Promise<void> {
 }
 
 async function signOut(): Promise<void> {
+    // ⚠ **로그아웃이 반쪽이었다**(심의 경고): 도는 프리뷰를 안 끄고 서버 키도 안 지웠다. 이미 뜬 dev 서버는
+    // 부팅 때 읽은 키로 **최대 12시간 상용 데이터를 계속 읽는다** — "로그아웃했다"는 화면과 실제가 어긋난다.
+    // 순서가 중요하다: 서버를 먼저 멈추고(그 키를 쓰는 프로세스를 없앤 뒤) 키를 지운다.
+    const running = session;
+    await stopPreview();
+    if (running) {
+        await revokeKeyQuietly(running.keyId);
+    }
+
     await logout(store);
     // 로컬 자격증명도 함께 지운다(A4) — **키 줄만** 지우고 고객이 넣은 값은 남긴다.
     const dir = workspaceDir();
@@ -136,6 +147,25 @@ async function signOut(): Promise<void> {
     }
     await refreshSidebar();
     void vscode.window.showInformationMessage("로그아웃했습니다.");
+}
+
+/**
+ * 키 폐기는 **실패해도 로그아웃을 막지 않는다** — 사용자가 원한 것은 로그아웃이고, 서버가 잠깐 안 되는 것이
+ * 그것을 되돌릴 이유가 되지 않는다. 대신 남은 키가 있다는 사실은 로그로 남긴다.
+ */
+async function revokeKeyQuietly(keyId: number): Promise<void> {
+    try {
+        const config = await ensureHandshake();
+        const api = new ZalkeraApi({
+            apiBase: apiBase(),
+            accessToken: () => getAccessToken(config.auth, store),
+            tenantCode: () => tenantCode(),
+        });
+        await api.revokeStorefrontKey(keyId);
+        log("프리뷰 자격증명을 서버에서 폐기했습니다.");
+    } catch (error) {
+        log(`프리뷰 자격증명 폐기 실패(만료까지 유효할 수 있습니다): ${error instanceof Error ? error.message : error}`);
+    }
 }
 
 // ── 사이트 가져오기 ──────────────────────────────────────────────────────
@@ -294,13 +324,20 @@ async function startPreviewCommand(): Promise<void> {
         await vscode.env.openExternal(vscode.Uri.parse(session.server.url));
         return;
     }
+    // 두 번 누르면 키가 2회 발급돼 **두 번째가 첫 번째를 폐기**하고, dev 서버 2개가 뜨고, 첫 서버는 UI 에서
+    // 끌 수 없는 고아가 된다(심의 경고). 첫 실행이 수 분짜리 설치라 실제로 자주 밟힌다.
+    if (previewStarting) {
+        void vscode.window.showInformationMessage("프리뷰를 준비하는 중입니다. 잠시만 기다려 주세요.");
+        return;
+    }
+    previewStarting = true;
     const dir = requireWorkspace();
     const api = await ensureApi();
     const config = await ensureHandshake();
     const runtime = embeddedNodeRuntime();
 
     setStatus("$(sync~spin) 프리뷰 준비 중");
-    const started = await vscode.window.withProgress<PreviewSession>(
+    const started = await withStartGuard(() => vscode.window.withProgress<PreviewSession>(
         { location: vscode.ProgressLocation.Notification, title: "프리뷰를 준비하는 중" },
         () =>
             startPreview({
@@ -314,9 +351,10 @@ async function startPreviewCommand(): Promise<void> {
                 onProgress: log,
                 onLog: log,
             }),
-    );
+    ));
 
-    session = { server: started.server, projectDir: dir };
+    previewStarting = false;
+    session = { server: started.server, projectDir: dir, keyId: started.keyId };
     sidebar.update({ previewUrl: started.server.url, keyExpiresAt: started.expiresAt });
     started.server.onExit((code) => {
         session = null;
@@ -336,7 +374,7 @@ async function startPreviewCommand(): Promise<void> {
     }
     if (started.expiresAt) {
         log(`프리뷰 자격증명 만료: ${new Date(started.expiresAt).toLocaleString("ko-KR")}`);
-        scheduleRenewal(started.expiresAt);
+        scheduleRenewal(started.expiresAt, config.previewKeyTtlSeconds);
     }
 
     // **웹뷰가 아니라 실제 브라우저로 연다**(§3.5) — 웹뷰는 쿠키·CSP 가 실제 탭과 달라
@@ -352,11 +390,19 @@ async function startPreviewCommand(): Promise<void> {
  *
  * 재기동은 알린다 — 말없이 서버가 재시작되면 그것도 고장으로 읽힌다.
  */
-function scheduleRenewal(expiresAt: string): void {
+function scheduleRenewal(expiresAt: string, ttlSeconds: number): void {
     clearRenewal();
-    const leadMs = 5 * 60_000;
+    // ⚠ 초판은 lead 가 5분 하드코딩이고 서버가 준 TTL(`previewKeyTtlSeconds`)을 **받아만 놓고 안 썼다**.
+    // TTL 을 5분 이하로 줄이면 `Math.max(delay, 1_000)` 때문에 **매초 재기동 루프**가 된다 — 매초 키 재발급
+    // (직전 키 폐기)에 브라우저 탭까지 다시 열린다. lead 를 TTL 에서 유도하고 **하한을 건다**(심의 경고).
+    const leadMs = Math.min(5 * 60_000, Math.max(30_000, (ttlSeconds * 1000) / 10));
     const delay = new Date(expiresAt).getTime() - Date.now() - leadMs;
     if (!Number.isFinite(delay)) return;
+    if (delay < MIN_RENEW_DELAY_MS) {
+        // 시계 오차나 아주 짧은 TTL 이면 즉시 재기동으로 달려들지 않는다 — 사람에게 말하고 멈춘다.
+        log("프리뷰 자격증명 만료가 임박했습니다. 필요하면 프리뷰를 다시 시작해 주세요.");
+        return;
+    }
 
     renewTimer = setTimeout(
         () => {
@@ -367,10 +413,23 @@ function scheduleRenewal(expiresAt: string): void {
                 await vscode.commands.executeCommand("zalkera.preview.restart");
             })();
         },
-        Math.max(delay, 1_000),
+        delay,
     );
     renewTimer.unref?.();
 }
+
+/** 시작이 실패해도 가드를 반드시 푼다 — 안 그러면 "준비 중" 에 영원히 갇힌다. */
+async function withStartGuard<T>(run: () => Thenable<T>): Promise<T> {
+    try {
+        return await run();
+    } catch (error) {
+        previewStarting = false;
+        setStatus("$(zap) 잘커라");
+        throw error;
+    }
+}
+
+const MIN_RENEW_DELAY_MS = 60_000;
 
 function clearRenewal(): void {
     if (renewTimer) clearTimeout(renewTimer);

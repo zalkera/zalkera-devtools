@@ -27,6 +27,8 @@ export interface PreviewOptions {
 
 export interface PreviewSession {
     server: DevServer;
+    /** 이 세션이 쓰는 프리뷰 키 id — 로그아웃·중지에서 **폐기**하려면 필요하다. */
+    keyId: number;
     /** 이 발급으로 끊긴 다른 기계의 프리뷰 수 — 0 이 아니면 사람에게 알려야 한다. */
     revokedPrevious: number;
     /** 키 만료 시각(ISO). 확장은 이 시각 전에 재발급한다(C6). */
@@ -51,15 +53,24 @@ export async function startPreview(options: PreviewOptions): Promise<PreviewSess
     if (deps.action === "installed") report("의존성 준비가 끝났습니다(다음부터는 즉시 시작합니다).");
 
     // 포트를 먼저 정한다 — `ZALKERA_SITE_URL` 이 실제 주소와 달라지면 링크·정규 URL 이 어긋난다.
-    const server = await startDevServerWithEnv(options, key.key);
+    const server = await startDevServerWithEnv(options, key.key, key.envName);
 
-    return { server, revokedPrevious: key.revokedPrevious, expiresAt: key.expiresAt };
+    return { server, keyId: key.id, revokedPrevious: key.revokedPrevious, expiresAt: key.expiresAt };
 }
 
-async function startDevServerWithEnv(options: PreviewOptions, storefrontKey: string): Promise<DevServer> {
+async function startDevServerWithEnv(
+    options: PreviewOptions,
+    storefrontKey: string,
+    envName: string,
+): Promise<DevServer> {
     const { pickPort } = await import("./dev.ts");
     const port = await pickPort(options.port);
 
+    // 서버가 알려 준 칸 이름을 **실제로 쓴다**(심의 경고 — 주석은 "하드코딩하지 않는다"인데 실물은 리터럴이었다).
+    // 서버가 이름을 바꾸면 확장을 안 고쳐도 따라간다. 모르는 이름이면 계약의 기본값으로 떨어진다.
+    if (envName !== "ZALKERA_STOREFRONT_KEY") {
+        options.onProgress?.(`서버가 알려 준 자격증명 칸 이름을 씁니다: ${envName}`);
+    }
     await writePreviewEnv(options.projectDir, {
         ZALKERA_API_BASE: options.apiBase,
         ZALKERA_TENANT: options.tenantCode,

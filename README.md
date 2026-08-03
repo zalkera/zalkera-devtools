@@ -12,7 +12,7 @@
 
 | 패키지 | 무엇 | 상태 |
 |---|---|---|
-| [`packages/core`](packages/core) | 러너 — 자격증명 획득 · 환경 조립 · 개발 서버 기동 · 패킹 · 발행 | **구현됨**(테스트 42) |
+| [`packages/core`](packages/core) | 러너 — 자격증명 획득 · 환경 조립 · 개발 서버 기동 · 패킹 · 발행 | **구현됨**(테스트 50) |
 | [`packages/cli`](packages/cli) | `npx zalkera` — 터미널에서 쓰는 길 | 착수 전 |
 | [`packages/vscode`](packages/vscode) | VS Code 확장 — 터미널 없이 쓰는 길 | **MVP 구현됨 · 미배포** |
 

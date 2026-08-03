@@ -95,6 +95,16 @@ export class ZalkeraApi {
         });
     }
 
+    /**
+     * 스토어프론트 키 폐기 — **로그아웃이 진짜 로그아웃이 되게 하는 조각**(심의 경고).
+     *
+     * 이것이 없으면 로그아웃해도 이미 발급된 프리뷰 키가 TTL(기본 12시간)까지 살아 있고, 그 키를 들고 있는
+     * dev 서버는 계속 상용 데이터를 읽는다. "로그아웃했다"는 화면과 실제가 어긋나는 자리다.
+     */
+    revokeStorefrontKey(keyId: number): Promise<unknown> {
+        return this.request("DELETE", `/api/partner/storefront-keys/${keyId}`);
+    }
+
     /** 시작 소스 팩 목록(B1). 공개된 것만 온다 — 고를 수 없는 것은 안 보이는 편이 정직하다. */
     listPresets(): Promise<SitePreset[]> {
         return this.request<SitePreset[]>("GET", "/api/partner/site-preset/presets");
@@ -180,8 +190,9 @@ async function toError(response: Response): Promise<DevtoolsError> {
     let errorCode = "";
     try {
         const body = (await response.json()) as { message?: string; errorCode?: string };
-        serverMessage = body.message ?? "";
-        errorCode = body.errorCode ?? "";
+        // 서버 메시지를 그대로 알림창에 넘기면 35KB 문자열이 그대로 뜬다(심의 실측 · 백엔드 차단의 대칭).
+        serverMessage = (body.message ?? "").slice(0, MAX_SERVER_MESSAGE);
+        errorCode = (body.errorCode ?? "").slice(0, MAX_ERROR_CODE);
     } catch {
         /* 본문이 JSON 이 아닐 수 있다 — 상태코드로만 판단한다. */
     }
@@ -202,6 +213,9 @@ async function toError(response: Response): Promise<DevtoolsError> {
         errorCode ? `오류 코드: ${errorCode}` : undefined,
     );
 }
+
+const MAX_SERVER_MESSAGE = 300;
+const MAX_ERROR_CODE = 64;
 
 function withTrailingSlash(base: string): string {
     return base.endsWith("/") ? base : `${base}/`;

@@ -188,11 +188,23 @@ function parseOctal(buffer: Buffer): number {
     return text.length === 0 ? 0 : Number.parseInt(text, 8);
 }
 
+/** 압축 폭탄 방어 — 무제한 해제는 확장 호스트를 OOM 으로 죽이고, 그러면 다른 확장까지 함께 죽는다. */
 async function gunzip(input: Buffer): Promise<Buffer> {
     const { gunzip: gunzipCb } = await import("node:zlib");
     const { promisify } = await import("node:util");
-    return promisify(gunzipCb)(input) as Promise<Buffer>;
+    try {
+        return (await promisify(gunzipCb)(input, { maxOutputLength: MAX_ARCHIVE_BYTES })) as Buffer;
+    } catch (cause) {
+        throw new DevtoolsError(
+            "SERVER_REJECTED",
+            "받은 파일이 너무 크거나 손상되었습니다.",
+            "다시 시도해도 같으면 잘커라에 문의해 주세요.",
+            cause,
+        );
+    }
 }
+
+const MAX_ARCHIVE_BYTES = 200 * 1024 * 1024;
 
 /** 큰 아카이브를 메모리에 다 올리지 않고 파일로 흘리고 싶을 때(현재 미사용 · CLI 대용량 경로 대비). */
 export async function streamToFile(body: ReadableStream<Uint8Array>, path: string): Promise<void> {
