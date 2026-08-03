@@ -14,6 +14,18 @@ export interface Handshake {
     minClientVersion: string;
     auth: { issuer: string; clientId: string; scopes: string[] };
     previewKeyTtlSeconds: number;
+    /**
+     * MCP 등록 좌표(서버가 마운트를 열었을 때만 온다 · memo146 T4).
+     *
+     * **없으면 「에이전트 연결」을 보여 주지 않는다** — 켜지지 않은 문을 안내하면 사용자는 자기 설정이
+     * 잘못됐다고 생각한다. 구버전 서버는 이 필드를 아예 안 보내므로 `undefined` 도 같은 뜻이다.
+     */
+    mcp?: {
+        sourceUrlTemplate: string;
+        clientId: string;
+        authServerMetadataUrl: string;
+        serverName: string;
+    } | null;
 }
 
 /** 서버 공통 응답 봉투. */

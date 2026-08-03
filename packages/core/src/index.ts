@@ -38,3 +38,5 @@ export {
 export { extractZip, type UnzipResult } from "./unzip.ts";
 export { startFromPreset, type StartFromPresetOptions, type StartFromPresetResult } from "./presets.ts";
 export { precheck, type PrecheckFinding, type PrecheckOptions } from "./precheck.ts";
+export { registerMcpServer, type McpRegistration, type RegisterMcpResult } from "./mcp.ts";
+export { ensureAgentDocs, type AgentDocsResult } from "./agents.ts";

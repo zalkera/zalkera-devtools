@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import {
     DevtoolsError,
+    ensureAgentDocs,
     fetchHandshake,
     fetchSiteSource,
     findProjectRoot,
@@ -9,6 +10,7 @@ import {
     logout,
     precheck,
     publish,
+    registerMcpServer,
     runDoctor,
     startFromPreset,
     startPreview,
@@ -76,6 +78,7 @@ export function activate(context: vscode.ExtensionContext): void {
         register("zalkera.publish", publishCommand),
         register("zalkera.rollback", rollback),
         register("zalkera.precheck", precheckCommand),
+        register("zalkera.agent.connect", connectAgent),
         register("zalkera.doctor", doctor),
     );
 }
@@ -404,6 +407,42 @@ async function publishCommand(): Promise<void> {
     );
     log(`발행 접수 — 파일 ${result.fileCount}개 · ${Math.round(result.byteSize / 1024)}KB`);
     void vscode.window.showInformationMessage(`발행이 접수되었습니다(파일 ${result.fileCount}개).`);
+}
+
+/**
+ * E1·E2 — 에이전트가 이 사이트를 도구로 다룰 수 있게 설정 파일에 한 줄 적어 준다.
+ *
+ * **우리가 대신 로그인해 주지 않는다.** 첫 사용 때 에이전트가 브라우저로 직접 로그인한다(그 편이 정직하고,
+ * 우리가 남의 에이전트의 토큰을 들고 있지 않게 된다).
+ */
+async function connectAgent(): Promise<void> {
+    const dir = requireWorkspace();
+    const config = await ensureHandshake();
+    if (!config.mcp) {
+        throw new DevtoolsError(
+            "SERVER_REJECTED",
+            "이 서버는 아직 에이전트 연결을 열지 않았습니다.",
+            "잘커라에 문의해 주세요.",
+        );
+    }
+    await ensureApi(); // 테넌트를 고르게 한다(아직 안 골랐다면).
+    const tenant = tenantCode();
+
+    const result = await registerMcpServer(dir, {
+        serverName: config.mcp.serverName,
+        url: config.mcp.sourceUrlTemplate.replace("{tenantCode}", encodeURIComponent(tenant)),
+        clientId: config.mcp.clientId,
+        authServerMetadataUrl: config.mcp.authServerMetadataUrl,
+    });
+    const docs = await ensureAgentDocs(dir);
+
+    log(`.mcp.json ${result.action === "created" ? "생성" : result.action === "updated" ? "갱신" : "변경 없음"} — ${result.path}`);
+    if (docs.agents === "created") log("AGENTS.md 스텁을 만들었습니다(규약 정본은 llms.txt 를 가리킵니다).");
+    if (docs.claude === "created") log("CLAUDE.md 를 만들었습니다(AGENTS.md 를 참조하는 한 줄).");
+
+    void vscode.window.showInformationMessage(
+        "에이전트 설정을 적었습니다. 에이전트를 다시 열면 이 사이트 도구가 보이고, 처음 쓸 때 브라우저 로그인이 한 번 필요합니다.",
+    );
 }
 
 // ── 진단 ────────────────────────────────────────────────────────────────

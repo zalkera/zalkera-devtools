@@ -27,7 +27,7 @@ zalkera.rollback                  이전 버전으로 되돌리기
 zalkera.precheck                  배포 전 검사 — **조언이지 차단이 아니다**
 zalkera.doctor                    무엇이 없어서 안 되는지 점검
 
-# 아직 없는 것: zalkera.agent.connect(MCP 등록)
+zalkera.agent.connect            에이전트에 연결(MCP) — 설정 한 줄을 적어 줍니다
 ```
 
 ## 편집은 하지 않는다

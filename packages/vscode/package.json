@@ -78,6 +78,11 @@
                 "command": "zalkera.precheck",
                 "title": "잘커라: 배포 전 검사",
                 "category": "잘커라"
+            },
+            {
+                "command": "zalkera.agent.connect",
+                "title": "잘커라: 에이전트에 연결(MCP)",
+                "category": "잘커라"
             }
         ],
         "configuration": {
