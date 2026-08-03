@@ -79,12 +79,24 @@ export async function fetchSiteSource(options: FetchSourceOptions): Promise<Fetc
 /**
  * tar.gz 해제. **경로 탈출(`../`·절대경로·심볼릭 링크)을 거절한다** — 서버가 주는 아카이브라도 해제기가
  * 안전해야 한다(우리 아카이브가 오염되는 날, 이 검사만이 고객 홈 디렉터리를 지킨다).
+ *
+ * ⚠ **GNU 긴 이름(`L`)·pax(`x`) 헤더를 반드시 해석한다**(심의 차단 · 2026-08-03).
+ *
+ * 초판은 그 헤더들을 **건너뛰며** 주석에 "우리 아카이브는 안 쓴다"고 적었는데 **거짓이었다** —
+ * 백엔드 패커가 `LONGFILE_GNU` 라서(`CanonicalTarballPacker.kt`) **경로가 100바이트를 넘으면 무조건**
+ * `L` 헤더를 낸다. 건너뛰면 뒤따르는 헤더의 **100자로 잘린 이름**이 쓰이고, 두 파일이 같은 잘린 경로로
+ * 겹쳐 **하나가 다른 하나를 덮어쓴다**. 사용자에게는 "4개 받았습니다"라고 말하고 디스크엔 3개다.
+ * 한글 경로는 UTF-8 3바이트/자라 **약 33자에서** 걸린다. 그 트리를 고쳐 발행하면 라이브에서 파일이 소멸한다.
+ *
+ * 그래서 이 해제기는 **모르는 타입을 만나면 조용히 넘어가지 않고 던진다.** 조용한 손상보다 실패가 낫다.
  */
 export async function extractTarGz(gzipped: Buffer, targetDir: string): Promise<number> {
     const tar = await gunzip(gzipped);
     const root = resolve(targetDir);
     let offset = 0;
     let count = 0;
+    /** 앞선 `L`/`x` 헤더가 지정한 다음 항목의 이름. 쓰고 나면 비운다. */
+    let pendingName: string | null = null;
 
     while (offset + BLOCK <= tar.length) {
         const header = tar.subarray(offset, offset + BLOCK);
@@ -93,20 +105,48 @@ export async function extractTarGz(gzipped: Buffer, targetDir: string): Promise<
         const rawName = cstring(header.subarray(0, 100));
         const prefix = cstring(header.subarray(345, 500));
         const size = parseOctal(header.subarray(124, 136));
+        if (!Number.isFinite(size) || size < 0) {
+            // 초판은 NaN 이면 루프가 조용히 끝나고 **성공으로 보고**했다(뒤 파일 유실).
+            throw new DevtoolsError("SERVER_REJECTED", "받은 파일이 손상되었습니다(길이 필드 오류).");
+        }
         const type = String.fromCharCode(header[156] ?? 0);
-        const name = prefix ? `${prefix}/${rawName}` : rawName;
+        const headerName = prefix ? `${prefix}/${rawName}` : rawName;
         offset += BLOCK;
 
         const dataBlocks = Math.ceil(size / BLOCK);
         const data = tar.subarray(offset, offset + size);
         offset += dataBlocks * BLOCK;
 
-        // 'x'/'g' 는 pax 확장 헤더, 'L' 은 GNU 긴 이름 — 이 트랜치에서는 건너뛴다(우리 아카이브는 안 쓴다).
+        // GNU 긴 이름 — 이 항목의 **데이터가 다음 항목의 이름**이다.
+        if (type === "L") {
+            pendingName = cstring(data);
+            continue;
+        }
+        // pax 확장 헤더 — `path=` 레코드가 다음 항목의 이름이다.
+        if (type === "x" || type === "g") {
+            const path = parsePaxPath(data);
+            if (path) pendingName = path;
+            continue;
+        }
+        // GNU 긴 링크 이름 — 링크 자체를 안 만들므로 이름만 버린다(데이터는 위에서 이미 건너뛰었다).
+        if (type === "K") continue;
+
+        const name = pendingName ?? headerName;
+        pendingName = null;
+
         if (type === "5") {
             await mkdir(safeJoin(root, name), { recursive: true });
             continue;
         }
-        if (type !== "0" && type !== "\0") continue;
+        // 링크류는 만들지 않는다(경로 탈출 매개). 건너뛰되 **조용히 지나가지 않는다**는 사실은 위 주석에 남긴다.
+        if (type === "1" || type === "2") continue;
+        if (type !== "0" && type !== "\0") {
+            throw new DevtoolsError(
+                "SERVER_REJECTED",
+                `받은 파일에 다룰 수 없는 항목이 있습니다(형식 ${type}).`,
+                "잘커라에 문의해 주세요. 잘못 받은 상태로 진행하지 않았습니다.",
+            );
+        }
 
         const path = safeJoin(root, name);
         await mkdir(dirname(path), { recursive: true });
@@ -134,6 +174,13 @@ function safeJoin(root: string, name: string): string {
 function cstring(buffer: Buffer): string {
     const end = buffer.indexOf(0);
     return buffer.subarray(0, end === -1 ? buffer.length : end).toString("utf8");
+}
+
+/** pax 레코드(`"<len> key=value\n"` 반복)에서 경로를 찾는다. `path` 가 없으면 null. */
+function parsePaxPath(data: Buffer): string | null {
+    const text = data.toString("utf8");
+    const match = /(?:^|\n)\d+ path=([^\n]*)\n/.exec(text);
+    return match?.[1] ?? null;
 }
 
 function parseOctal(buffer: Buffer): number {

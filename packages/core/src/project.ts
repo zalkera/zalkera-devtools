@@ -65,9 +65,17 @@ export async function inspectProject(dir: string): Promise<ProjectInfo> {
  * git 을 쓰지 않는 고객에게 git 파일을 만들어 주는 것은 우리 일이 아니다(업로드 경로는 git 이 안 보인다).
  * 대신 그 사실을 반환값으로 알린다.
  */
-export async function ensureEnvIgnored(dir: string): Promise<"already" | "added" | "no-gitignore"> {
+export async function ensureEnvIgnored(dir: string): Promise<"already" | "added" | "created" | "not-git"> {
     const path = join(dir, ".gitignore");
-    if (!existsSync(path)) return "no-gitignore";
+    if (!existsSync(path)) {
+        // ⚠ **판정 축이 틀렸었다**(심의 차단 · 2026-08-03): 초판은 "`.gitignore` 파일이 있는가"로 물었다.
+        // `git init` 만 한 폴더(신규 레포의 기본 상태)에서는 그 파일이 없으므로 아무것도 안 했고,
+        // 프리뷰가 쓴 `.env.local` 이 `git add -A` 에 그대로 걸려 **프리뷰 키가 커밋된다**(실측).
+        // 물어야 할 것은 "git 을 쓰는가"이고, 그 답은 `.git/` 존재다.
+        if (!existsSync(join(dir, ".git"))) return "not-git";
+        await writeFile(path, "# 로컬 자격증명 — 절대 커밋하지 않습니다(zalkera).\n.env.local\n", "utf8");
+        return "created";
+    }
 
     const content = await readFile(path, "utf8");
     const ignored = content

@@ -91,7 +91,8 @@
                 "zalkera.apiBase": {
                     "type": "string",
                     "default": "https://api.zalkera.com",
-                    "description": "잘커라 서버 주소. 값은 설정으로만 받습니다(소스에 박지 않습니다)."
+                    "description": "잘커라 서버 주소. **머신 범위**입니다 — 남의 소스 폴더(.vscode/settings.json)가 이 값을 바꿔 토큰을 가로채지 못하게 합니다.",
+                    "scope": "machine"
                 },
                 "zalkera.tenant": {
                     "type": "string",
@@ -127,5 +128,11 @@
     },
     "devDependencies": {
         "@types/vscode": "^1.90.0"
+    },
+    "capabilities": {
+        "untrustedWorkspaces": {
+            "supported": false,
+            "description": "이 확장은 폴더의 소스를 실행(개발 서버)하고 자격증명을 다룹니다. 신뢰한 폴더에서만 동작합니다."
+        }
     }
 }

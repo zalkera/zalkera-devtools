@@ -45,20 +45,30 @@ export async function ensureDependencies(options: DepsOptions): Promise<DepsResu
     const cacheDir = join(cacheRoot, cacheKey);
     const target = join(projectDir, "node_modules");
 
-    if (existsSync(target)) {
+    // ⚠ **존재가 아니라 완결로 판정한다**(심의 차단 · 2026-08-03). 초판은 `existsSync(target)` 만 봤고,
+    // 연결이 중간에 실패해 **반쯤 만들어진 트리**가 남으면 다음 실행이 그것을 "준비됨"으로 통과시켰다.
+    // 그 뒤 dev 서버는 `Cannot find module` 로 죽고, 우리가 안내하는 복구책("의존성 준비를 다시 하세요")은
+    // 같은 판정에 걸려 **아무 일도 하지 않는다** — 비개발자가 스스로 빠져나올 수 없는 자리였다.
+    if (existsSync(join(target, COMPLETE_MARKER))) {
         report("의존성이 이미 준비돼 있습니다.");
         return { action: "reused", cacheKey };
+    }
+    if (existsSync(target)) {
+        report("이전에 준비하다 만 의존성이 있어 지우고 다시 받습니다…");
+        await rm(target, { recursive: true, force: true });
     }
 
     if (existsSync(join(cacheDir, "node_modules"))) {
         report("준비해 둔 의존성을 연결합니다…");
         const linked = await linkOrCopy(join(cacheDir, "node_modules"), target);
+        await markComplete(target);
         return { action: linked, cacheKey };
     }
 
     report("의존성을 처음 한 번 내려받습니다. 몇 분 걸릴 수 있습니다…");
     await runNpmInstall(projectDir, options.npmCommand ?? ["npm", "install"], report);
     await seedCache(target, cacheDir, cacheKey, report);
+    await markComplete(target);
     return { action: "installed", cacheKey };
 }
 
@@ -101,6 +111,8 @@ async function linkOrCopy(source: string, target: string): Promise<"linked" | "c
         return "linked";
     } catch (cause) {
         if (!isCrossDevice(cause)) {
+            // **반쯤 만들어진 트리를 남기지 않는다**(심의 차단). 남기면 다음 실행이 그것을 "준비됨"으로 본다.
+            await rm(target, { recursive: true, force: true }).catch(() => {});
             throw new DevtoolsError(
                 "DEPENDENCIES_FAILED",
                 "준비해 둔 의존성을 프로젝트에 연결하지 못했습니다.",
@@ -145,6 +157,13 @@ async function hardlinkTree(source: string, target: string): Promise<void> {
     }
 }
 
+/** 완결 표식. 이것이 있어야 "준비됨"이다(존재만으로는 반쪽 트리와 구별되지 않는다). */
+async function markComplete(target: string): Promise<void> {
+    await writeFile(join(target, COMPLETE_MARKER), `${new Date().toISOString()}\n`, "utf8").catch(() => {});
+}
+
+const COMPLETE_MARKER = ".zalkera-deps-complete";
+
 function isCrossDevice(error: unknown): boolean {
     return (error as NodeJS.ErrnoException | undefined)?.code === "EXDEV";
 }
@@ -157,7 +176,10 @@ function isExists(error: unknown): boolean {
 async function seedCache(source: string, cacheDir: string, cacheKey: string, report: (m: string) => void): Promise<void> {
     try {
         await mkdir(cacheDir, { recursive: true });
-        await cp(source, join(cacheDir, "node_modules"), { recursive: true });
+        // ⚠ `verbatimSymlinks` 가 빠지면 Node 가 상대 심볼릭 링크를 **절대경로로 재작성**한다(심의 차단):
+        // 캐시의 `.bin` 이 첫 프로젝트 경로에 못 박히고, 그 프로젝트를 지우면 **이 기계의 다른 모든 프로젝트가
+        // 함께 깨진다**. 링크 연결 쪽(linkOrCopy)에는 있고 여기만 빠져 있었다.
+        await cp(source, join(cacheDir, "node_modules"), { recursive: true, verbatimSymlinks: true });
         await writeFile(join(cacheDir, "key.txt"), `${cacheKey}\n`, "utf8");
     } catch {
         report("의존성 캐시 적재를 건너뜁니다(다음에 다시 받습니다).");

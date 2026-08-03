@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join, relative, sep } from "node:path";
+import { DevtoolsError } from "./errors.ts";
 import { deflateRaw } from "node:zlib";
 import { promisify } from "node:util";
 
@@ -91,13 +92,25 @@ const ALWAYS_EXCLUDED = new Set([
     ".next",
     "dist",
     "out",
-    ".env",
-    ".env.local",
     ".DS_Store",
     ".turbo",
     ".vercel",
     ".claude",
 ]);
+
+/**
+ * `.env` 로 시작하는 것은 **전부** 뺀다(대소문자 무관).
+ *
+ * 초판은 `.env`·`.env.local` 정확 일치만 봤다. 심의가 실측으로 `.env.production`·`.env.development.local`·
+ * `.env.local.bak`·`.Env.Local` 에서 **`oqsk_` 키가 zip 에 실리는 것**을 확인했다 — 앞의 둘은 Next 가 실제로
+ * 읽는 표준 파일명이다. 자격증명이 새는 자리는 정확 일치로 막을 수 없다.
+ */
+function isSecretFile(name: string): boolean {
+    const lower = name.toLowerCase();
+    return lower === ".env" || lower.startsWith(".env.") || SECRET_NAMES.has(lower) || lower.endsWith(".pem");
+}
+
+const SECRET_NAMES = new Set(["id_rsa", "id_dsa", "id_ecdsa", "id_ed25519", "credentials.json", ".npmrc"]);
 
 export interface PackOptions {
     projectDir: string;
@@ -121,15 +134,22 @@ export async function packProject(options: PackOptions): Promise<PackResult> {
 
     const walk = async (dir: string): Promise<void> => {
         for (const item of await readdir(dir, { withFileTypes: true })) {
-            if (excluded.has(item.name)) continue;
+            if (excluded.has(item.name) || isSecretFile(item.name)) continue;
             const full = join(dir, item.name);
             if (item.isDirectory()) {
                 await walk(full);
             } else if (item.isFile()) {
                 const info = await stat(full);
                 if (info.size > MAX_FILE_BYTES) {
-                    report(`⚠ 너무 큰 파일은 건너뜁니다: ${relative(options.projectDir, full)}`);
-                    continue;
+                    // ⚠ **조용히 빼지 않는다**(심의 차단 · 2026-08-03). 초판은 건너뛰고 로그 한 줄만 남겼는데,
+                    // 사용자는 출력 채널을 열어 두지 않는다 — "발행 접수" 알림만 보고 **자기 동영상이 사라진 줄
+                    // 모른 채** 라이브가 바뀐다. 게다가 20MB 라는 선에 근거가 없었다(서버 상한은 아카이브 전체
+                    // 100MB 이고 그 검사는 publish 가 따로 한다). 넘으면 **끊고 이름을 말한다.**
+                    throw new DevtoolsError(
+                        "PACK_FAILED",
+                        `너무 큰 파일이 있습니다: ${relative(options.projectDir, full)} (${Math.round(info.size / 1024 / 1024)}MB)`,
+                        "동영상·원본 이미지는 소스에 넣지 말고 미디어로 올려 주세요. 업로드 상한은 전체 100MB 입니다.",
+                    );
                 }
                 entries.push({
                     path: relative(options.projectDir, full).split(sep).join("/"),
@@ -151,7 +171,8 @@ export async function writeZip(path: string, buffer: Buffer): Promise<void> {
     await writeFile(path, buffer);
 }
 
-const MAX_FILE_BYTES = 20 * 1024 * 1024;
+/** 파일 하나가 이보다 크면 어차피 전체 상한(100MB)을 다 먹는다 — 여기서 이름을 대고 끊는다. */
+const MAX_FILE_BYTES = 100 * 1024 * 1024;
 
 let crcTable: Uint32Array | null = null;
 

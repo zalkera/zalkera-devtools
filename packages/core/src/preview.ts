@@ -40,7 +40,9 @@ export async function startPreview(options: PreviewOptions): Promise<PreviewSess
     report(`사이트 소스를 확인했습니다: ${project.name}`);
 
     const ignored = await ensureEnvIgnored(options.projectDir);
+    // 침묵은 이 자리에서 위험하다 — 자격증명이 레포로 갈 수 있는 상태를 말하지 않고 넘어가지 않는다.
     if (ignored === "added") report(".gitignore 에 .env.local 을 추가했습니다(자격증명 커밋 방지).");
+    if (ignored === "created") report(".gitignore 를 만들어 .env.local 을 제외했습니다(자격증명 커밋 방지).");
 
     report("프리뷰 자격증명을 발급받는 중…");
     const key = await options.api.issuePreviewKey(options.label);
