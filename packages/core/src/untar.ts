@@ -62,6 +62,12 @@ export async function extractTarGz(gzipped: Buffer, targetDir: string, options: 
         if (isEndOfArchive(header)) break;
         const meta = parseHeader(header);
         offset += BLOCK;
+        // 스트리밍 경로는 짧은 읽기를 거절하는데 **버퍼 경로만 조용히 잘린 데이터를 썼다**(재심의 경고 1 ·
+        // 실측: 같은 아카이브가 한쪽은 REJECTED, 한쪽은 "1개 받았습니다" + 512B 파일). 파서를 하나로 묶은
+        // 이유가 이런 드리프트를 없애는 것이었는데 정작 여기 남아 있었다.
+        if (offset + meta.size > tar.length) {
+            throw new DevtoolsError("SERVER_REJECTED", "받은 파일이 중간에 끊겼습니다.");
+        }
         const data = tar.subarray(offset, offset + meta.size);
         offset += Math.ceil(meta.size / BLOCK) * BLOCK;
         await sink.consume(meta, data);
@@ -160,6 +166,19 @@ function parseHeader(header: Buffer): Entry {
         // 초판은 NaN 이면 루프가 조용히 끝나고 **성공으로 보고**했다(뒤 파일 유실).
         throw new DevtoolsError("SERVER_REJECTED", "받은 파일이 손상되었습니다(길이 필드 오류).");
     }
+    // 🔴 **신고된 크기를 그대로 믿으면 안 된다**(재심의 차단 1 · 실측).
+    // 스트리밍 경로가 `Buffer.alloc(size)` 를 하는데, 12바이트 8진 필드는 ~68GB 까지 표현한다.
+    // 2GB 를 넘겨 신고하면 `handle.read` 의 length 가 Int32 를 벗어나 **네이티브 어서션으로 프로세스가
+    // abort 된다** — JS 로 못 잡는 죽음이다. 실측: **65바이트 아카이브 하나로 exit 134**.
+    // 그러면 확장 호스트가 통째로 죽고, 이 파일 첫머리가 걱정한 "다른 확장까지 함께"가 그대로 일어난다.
+    // 헤더 하나가 신고만 하면 되므로 gz 산출 상한(maxBytes)으로는 보이지도 않는다.
+    if (size > MAX_ENTRY_BYTES) {
+        throw new DevtoolsError(
+            "SERVER_REJECTED",
+            `받은 파일에 비정상적으로 큰 항목이 있습니다(${size}B).`,
+            "잘못 받은 상태로 진행하지 않았습니다. 잘커라에 문의해 주세요.",
+        );
+    }
     const rawName = cstring(header.subarray(0, 100));
     const prefix = cstring(header.subarray(345, 500));
     return {
@@ -194,6 +213,13 @@ async function createSink(targetDir: string, options: UntarOptions) {
     await mkdir(targetDir, { recursive: true });
     // 뿌리 자체가 심링크일 수 있다(예: `/tmp` → `/private/tmp`). 기준을 실제 경로로 고정한다.
     const root = await realpath(targetDir);
+    /**
+     * 이미 "실제 디렉터리이고 심링크가 아님"을 확인한 자리. 같은 해제 안에서는 우리만 쓰므로 재검증이 없다.
+     *
+     * 없으면 항목마다 뿌리부터 조각 전부를 다시 `lstat` 한다 — 실측 +56%(1914ms → 2992ms · 14,229파일).
+     * 절대치는 `npm install` 대비 무해하지만, 공짜로 없앨 수 있는 비용을 남길 이유가 없다(재심의 경고 2).
+     */
+    const verified = new Set<string>([root]);
     const materializeLinks = options.symlinks === "materialize";
     const preserveMode = options.preserveMode === true;
     let count = 0;
@@ -230,13 +256,13 @@ async function createSink(targetDir: string, options: UntarOptions) {
             const segments = safeSegments(root, name);
 
             if (entry.type === "5") {
-                await descend(root, segments, true);
+                await descend(root, segments, verified);
                 return;
             }
 
             if (entry.type === "2") {
                 if (!materializeLinks) return;
-                await writeSymlink(root, segments, name, linkTarget);
+                await writeSymlink(root, segments, name, linkTarget, verified);
                 return;
             }
             // 하드링크(`1`)는 만들지 않는다. **실측**(2026-08-03 · examples 레포 node_modules 를 실제로 구워
@@ -255,7 +281,7 @@ async function createSink(targetDir: string, options: UntarOptions) {
 
             const leaf = segments[segments.length - 1];
             if (!leaf) throw new DevtoolsError("SERVER_REJECTED", `받은 파일에 이상한 경로가 있습니다: ${name}`);
-            const parent = await descend(root, segments.slice(0, -1), true);
+            const parent = await descend(root, segments.slice(0, -1), verified);
             const path = join(parent, leaf);
             // 마지막 조각이 이미 심링크면 **쓰기가 그 링크를 따라간다** — 조각 검사의 마지막 칸이다.
             await assertNotSymlink(path, name);
@@ -276,10 +302,14 @@ async function createSink(targetDir: string, options: UntarOptions) {
  * `mkdir(..., { recursive: true })` 를 쓰면 안 되는 이유가 여기 있다 — 그 호출은 기존 심링크를 따라가고,
  * 따라간 자리에 **뿌리 밖 디렉터리를 실제로 만들어 버린다**(검사에서 나중에 거절해도 부작용은 이미 남는다).
  */
-async function descend(root: string, segments: string[], create: boolean): Promise<string> {
+async function descend(root: string, segments: string[], verified: Set<string>): Promise<string> {
     let current = root;
     for (const part of segments) {
         const next = join(current, part);
+        if (verified.has(next)) {
+            current = next;
+            continue;
+        }
         const info = await lstat(next).catch(() => null);
         if (info?.isSymbolicLink()) {
             throw new DevtoolsError(
@@ -289,13 +319,13 @@ async function descend(root: string, segments: string[], create: boolean): Promi
             );
         }
         if (!info) {
-            if (!create) throw new DevtoolsError("SERVER_REJECTED", `받은 꾸러미의 경로가 이상합니다: ${part}`);
             await mkdir(next).catch((error: unknown) => {
                 if ((error as NodeJS.ErrnoException | undefined)?.code !== "EEXIST") throw error;
             });
         } else if (!info.isDirectory()) {
             throw new DevtoolsError("SERVER_REJECTED", `받은 꾸러미의 경로가 파일과 겹칩니다: ${part}`);
         }
+        verified.add(next);
         current = next;
     }
     return current;
@@ -319,7 +349,13 @@ async function assertNotSymlink(path: string, name: string): Promise<void> {
  * 링크는 해제 시점이 아니라 **따라가는 시점에** 해석된다 — 그래서 이 검사가 없으면 오염된 아카이브가
  * 고객 홈의 임의 파일을 가리키는 링크를 심고, 그 뒤 도구가 그 링크를 읽거나 쓴다.
  */
-async function writeSymlink(root: string, segments: string[], name: string, target: string): Promise<void> {
+async function writeSymlink(
+    root: string,
+    segments: string[],
+    name: string,
+    target: string,
+    verified: Set<string>,
+): Promise<void> {
     if (!target) return;
     if (isAbsolute(target) || /^[A-Za-z]:/.test(target)) {
         throw new DevtoolsError("SERVER_REJECTED", `받은 꾸러미에 절대경로 링크가 있습니다: ${name}`);
@@ -327,7 +363,7 @@ async function writeSymlink(root: string, segments: string[], name: string, targ
     const leaf = segments[segments.length - 1];
     if (!leaf) throw new DevtoolsError("SERVER_REJECTED", `받은 꾸러미에 이상한 링크 이름이 있습니다: ${name}`);
 
-    const parent = await descend(root, segments.slice(0, -1), true);
+    const parent = await descend(root, segments.slice(0, -1), verified);
     const resolved = resolve(parent, target);
     if (resolved !== root && !resolved.startsWith(root + sep)) {
         throw new DevtoolsError("SERVER_REJECTED", `받은 꾸러미의 링크가 폴더 밖을 가리킵니다: ${name}`);
@@ -338,7 +374,14 @@ async function writeSymlink(root: string, segments: string[], name: string, targ
     // 상대 형태 그대로 심는다 — 절대경로로 바꿔 심으면 캐시 트리를 다른 자리로 옮기는 순간 전부 끊긴다
     // (`deps.ts` 의 `verbatimSymlinks` 와 같은 이유).
     await symlink(relative(parent, resolved) || ".", linkPath).catch((error: unknown) => {
-        if ((error as NodeJS.ErrnoException | undefined)?.code !== "EEXIST") throw error;
+        // EEXIST 를 삼키면 **링크가 안 생긴 채 성공으로 보고**된다(재심의 경고 5). 그 결과가 하필
+        // 이 기능이 막으려던 증상 그대로다 — `next dev` 가 실행 파일을 못 찾는다. 조용한 손상보다 실패가 낫다.
+        throw new DevtoolsError(
+            "SERVER_REJECTED",
+            `링크를 만들지 못했습니다: ${name}`,
+            "받는 폴더를 비우고 다시 시도해 주세요.",
+            error,
+        );
     });
 }
 
@@ -394,3 +437,9 @@ async function gunzipBuffer(input: Buffer): Promise<Buffer> {
 }
 
 const MAX_ARCHIVE_BYTES = 200 * 1024 * 1024;
+
+/**
+ * 항목 **하나**의 상한. 트리 전체가 아니라 개별 파일 기준이다 — node_modules 의 개별 파일은 수 MB 를
+ * 넘지 않는다. 2GB 를 넘는 신고가 네이티브 abort 를 부르므로(재심의 차단 1) 그보다 훨씬 아래에서 자른다.
+ */
+const MAX_ENTRY_BYTES = 256 * 1024 * 1024;

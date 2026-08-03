@@ -1,6 +1,6 @@
 import { ok, rejects, strictEqual } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, readlink, symlink, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, readlink, realpath, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -216,4 +216,108 @@ test("기본값(reject)에서도 사다리는 뿌리 안에 갇힌다", async ()
     // 링크를 안 만드는 경로라도 **파일 쓰기가 기존 링크를 타고 나가면** 같은 사고다.
     await extractTarGzFile(gz, root, join(root, ".s")).catch(() => {});
     strictEqual(await readFile(join(base, "victim", "secret.txt"), "utf8"), "원본");
+});
+
+/** 링크 대상을 **받은 문자열 그대로** 담는 아카이브 — 정규화 심기가 없으면 여기서 탈출한다. */
+function indirectLinkTarGz(): Buffer {
+    const blocks: Buffer[] = [];
+    const header = (name: string, type: string, size: number, link: string): Buffer => {
+        const h = Buffer.alloc(512);
+        h.write(name.slice(0, 100), 0);
+        h.write("0000644\0", 100); h.write("0000000\0", 108); h.write("0000000\0", 116);
+        h.write(size.toString(8).padStart(11, "0") + "\0", 124);
+        h.write("00000000000\0", 136); h.write("        ", 148); h.write(type, 156);
+        h.write(link.slice(0, 100), 157);
+        let sum = 0; for (const b of h) sum += b;
+        h.write(sum.toString(8).padStart(6, "0") + "\0 ", 148);
+        return h;
+    };
+    blocks.push(header("node_modules/", "5", 0, ""));
+    // `self` 는 뿌리 안을 가리키는 **합법** 링크다. 그 뒤 대상을 `self/../..` 로 적으면 어휘 계산과
+    // 물리 도달지가 갈린다 — 받은 문자열을 그대로 심으면 그 차이가 그대로 디스크에 남는다.
+    blocks.push(header("node_modules/self", "2", 0, "."));
+    blocks.push(header("node_modules/pwn", "2", 0, "self/../../victim/secret.txt"));
+    blocks.push(Buffer.alloc(1024));
+    return gzipSync(Buffer.concat(blocks));
+}
+
+test("심은 링크의 **물리 도달지**가 뿌리 안이다 (정규화 심기 회귀)", async () => {
+    const base = await mkdtemp(join(tmpdir(), "zalkera-indirect-"));
+    const root = join(base, "cache");
+    await mkdir(root, { recursive: true });
+    await mkdir(join(base, "victim"), { recursive: true });
+    await writeFile(join(base, "victim", "secret.txt"), "원본");
+    const gz = join(base, "evil.tar.gz");
+    await writeFile(gz, indirectLinkTarGz());
+
+    await extractTarGzFile(gz, root, join(root, ".s"), { symlinks: "materialize" }).catch(() => {});
+
+    // ⚠ 이 축을 실제로 지키는 것은 `descend` 가 아니라 **받은 대상을 정규화해 심는 한 줄**이다
+    // (재심의 경고 4 — 그 줄을 되돌리면 86/86 을 유지한 채 탈출이 되살아났다).
+    // 그래서 "거절했는가"가 아니라 **"심긴 링크가 어디에 닿는가"**를 잰다.
+    const link = join(root, "node_modules", "pwn");
+    const info = await lstat(link).catch(() => null);
+    if (info?.isSymbolicLink()) {
+        const reached = await realpath(link).catch(async () => resolveManually(link));
+        const realRoot = await realpath(root);
+        ok(
+            reached === realRoot || reached.startsWith(realRoot + "/"),
+            `물리 도달지가 뿌리 밖이다: ${reached}`,
+        );
+    }
+    strictEqual(await readFile(join(base, "victim", "secret.txt"), "utf8"), "원본");
+});
+
+async function resolveManually(link: string): Promise<string> {
+    const { dirname, resolve } = await import("node:path");
+    return resolve(dirname(link), await readlink(link));
+}
+
+test("사다리는 버퍼 경로에서도 막힌다", async () => {
+    const base = await mkdtemp(join(tmpdir(), "zalkera-bufladder-"));
+    const root = join(base, "cache");
+    await mkdir(root, { recursive: true });
+    await mkdir(join(base, "victim"), { recursive: true });
+    await writeFile(join(base, "victim", "secret.txt"), "원본");
+
+    // 신규 픽스처가 전부 스트리밍 경로만 탔다(재심의 경고 6). 두 경로가 `createSink` 를 공유하지만,
+    // **공유가 깨지는 날**을 잡는 것이 회귀의 일이다.
+    await rejects(() => extractTarGz(ladderTarGz(3, "victim/secret.txt"), root, { symlinks: "materialize" }));
+    strictEqual(await readFile(join(base, "victim", "secret.txt"), "utf8"), "원본");
+});
+
+test("항목 크기를 과대 신고하면 거절한다 (프로세스 abort 회귀)", async () => {
+    const base = await mkdtemp(join(tmpdir(), "zalkera-huge-"));
+    const gz = join(base, "huge.tar.gz");
+    const h = Buffer.alloc(512);
+    h.write("big", 0); h.write("0000644\0", 100); h.write("0000000\0", 108); h.write("0000000\0", 116);
+    h.write((4 * 1024 * 1024 * 1024).toString(8).padStart(11, "0") + "\0", 124);
+    h.write("00000000000\0", 136); h.write("        ", 148); h.write("0", 156);
+    let sum = 0; for (const b of h) sum += b;
+    h.write(sum.toString(8).padStart(6, "0") + "\0 ", 148);
+    await writeFile(gz, gzipSync(Buffer.concat([h, Buffer.alloc(1024)])));
+
+    // 65바이트 아카이브가 **exit 134(SIGABRT)** 를 냈다 — JS 로 못 잡는 죽음이라 확장 호스트가 통째로 갔다.
+    await rejects(
+        () => extractTarGzFile(gz, base, join(base, ".s")),
+        (e: unknown) => e instanceof DevtoolsError && /비정상적으로 큰/.test((e as DevtoolsError).message),
+    );
+});
+
+test("버퍼 경로도 잘린 아카이브를 성공으로 보고하지 않는다", async () => {
+    const target = await mkdtemp(join(tmpdir(), "zalkera-out-"));
+    // 파일 항목 헤더가 999,999바이트를 신고하는데 데이터는 100바이트만 있는 아카이브.
+    // 잘린 지점이 **파일 항목의 데이터**여야 이 축을 잰다(디렉터리 항목에 떨어지면 크기가 0 이라 안 걸린다).
+    const h = Buffer.alloc(512);
+    h.write("cut.txt", 0); h.write("0000644\0", 100); h.write("0000000\0", 108); h.write("0000000\0", 116);
+    h.write((999999).toString(8).padStart(11, "0") + "\0", 124);
+    h.write("00000000000\0", 136); h.write("        ", 148); h.write("0", 156);
+    let sum = 0; for (const b of h) sum += b;
+    h.write(sum.toString(8).padStart(6, "0") + "\0 ", 148);
+
+    // 스트리밍은 거절하는데 **버퍼만 조용히 잘린 데이터를 썼다**(재심의 경고 1 · 파서 드리프트).
+    await rejects(
+        () => extractTarGz(gzipSync(Buffer.concat([h, Buffer.alloc(100)])), target),
+        (e: unknown) => e instanceof DevtoolsError && /중간에 끊/.test((e as DevtoolsError).message),
+    );
 });

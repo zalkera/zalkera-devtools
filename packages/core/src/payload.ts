@@ -64,6 +64,20 @@ interface DepsBlock {
  */
 export async function tryFetchPayload(options: PayloadOptions): Promise<PayloadResult | null> {
     const report = options.onProgress ?? (() => {});
+    try {
+        return await attempt(options, report);
+    } catch (cause) {
+        // 🔴 **이 함수는 절대 던지지 않는다**(재심의 차단 2). 종전엔 계약을 주석에만 적어 두고, 정작
+        // 에코 검사(`.toLowerCase()`)와 `new URL(apiBase)` 이 try 밖이라 **깨진 JSON·이상한 주소 하나가
+        // 의존성 준비 전체를 죽였다** — npm 폴백으로도 못 갔다. 그리고 그 깨진 응답을 만드는 것이 바로
+        // 우리가 방어하려던 "프록시가 답을 바꿔치기하는" 상황이다.
+        await rm(join(options.cacheDir, "node_modules"), { recursive: true, force: true }).catch(() => {});
+        report(`준비된 의존성 꾸러미를 쓰지 못해 직접 내려받습니다(${describe(cause)}).`);
+        return null;
+    }
+}
+
+async function attempt(options: PayloadOptions, report: (m: string) => void): Promise<PayloadResult | null> {
     const fetchImpl = options.fetchImpl ?? fetch;
 
     const block = await lookup(options, fetchImpl);
@@ -72,17 +86,30 @@ export async function tryFetchPayload(options: PayloadOptions): Promise<PayloadR
         report("미리 준비된 의존성 꾸러미가 없어 직접 내려받습니다(조금 더 걸립니다).");
         return null;
     }
-    if (block.lockfileSha256 && block.lockfileSha256.toLowerCase() !== options.lockfileSha256.toLowerCase()) {
+    const echo = typeof block.lockfileSha256 === "string" ? block.lockfileSha256 : "";
+    if (echo && echo.toLowerCase() !== options.lockfileSha256.toLowerCase()) {
         // 서버는 자기정합을 이미 확인하지만, 프록시가 다른 응답을 끼워 넣는 경우가 이 축의 실재 위협이다.
         report("서버가 다른 버전의 답을 주어 준비된 꾸러미를 쓰지 않습니다.");
         return null;
     }
-    if (!block.payload) {
+    const entry = block.payload;
+    if (!entry || typeof entry !== "object") {
         report("이 버전에 맞는 의존성 꾸러미가 아직 없어 직접 내려받습니다(조금 더 걸립니다).");
         return null;
     }
 
-    const { url, sha256, bytes, bakedAt } = block.payload;
+    // 🔴 **서버가 준 값의 형태를 믿지 않는다**(재심의 차단 3). 종전엔 `bytes` 가 0·누락이면 크기 강제·
+    // 최종 대조·디스크 점검 **셋이 한꺼번에 꺼졌다**(실측: `bytes:0` 신고에 180MB 를 전량 받았다).
+    // 사용자에겐 "(NaNMB)" 를 보이고 이어서 틀린 진단까지 냈다. 값이 이상하면 **쓰지 않는다** —
+    // 그게 이 축의 유일한 안전한 답이다(폴백이 있으므로 잃는 것은 속도뿐이다).
+    const url = typeof entry.url === "string" ? entry.url : "";
+    const sha256 = typeof entry.sha256 === "string" ? entry.sha256 : "";
+    const bytes = typeof entry.bytes === "number" ? entry.bytes : Number.NaN;
+    const bakedAt = typeof entry.bakedAt === "string" ? entry.bakedAt : null;
+    if (!isSafeHttpsUrl(url) || !/^[0-9a-f]{64}$/i.test(sha256) || !Number.isSafeInteger(bytes) || bytes <= 0) {
+        report("서버가 준 꾸러미 정보를 이해할 수 없어 직접 내려받습니다.");
+        return null;
+    }
     report(`준비된 의존성 꾸러미를 받는 중… (${formatMegabytes(bytes)})`);
 
     await mkdir(options.cacheDir, { recursive: true });
@@ -118,7 +145,10 @@ export async function tryFetchPayload(options: PayloadOptions): Promise<PayloadR
         if (!existsSync(treeDir)) {
             // 아카이브 모양이 우리 전제와 다르다(뿌리에 `node_modules/` 가 있어야 한다).
             report("받은 꾸러미의 모양이 예상과 달라 쓰지 않았습니다. 의존성을 직접 내려받습니다.");
-            await rm(treeDir, { recursive: true, force: true }).catch(() => {});
+            // `node_modules` 만 지우면 그 아카이브가 만든 **다른 최상위 항목이 영구 잔류**하고,
+            // 폐기기는 그 디렉터리를 살아 있는 한 세대로 센다(재심의 관찰 3). 캐시 자리는 우리 것이므로
+            // 통째로 되돌린다.
+            await rm(options.cacheDir, { recursive: true, force: true }).catch(() => {});
             return null;
         }
 
@@ -182,8 +212,18 @@ async function download(
     stallMs: number,
 ): Promise<string> {
     const controller = new AbortController();
+    // `unref()` 가 없으면 fetch 가 **거절**될 때(DNS·TLS·프록시 차단) 아무도 이 타이머를 안 지워
+    // 프로세스가 stall 값만큼 더 살아 있는다(실측: 24ms 에 끝난 일이 +4초 뒤 종료). 사내망이
+    // 이 기능의 표적 사용자라 하필 그쪽에서 드러난다(재심의 경고 3).
     let stall = setTimeout(() => controller.abort(), stallMs);
-    const response = await fetchImpl(url, { signal: controller.signal });
+    stall.unref?.();
+    let response: Response;
+    try {
+        response = await fetchImpl(url, { signal: controller.signal });
+    } catch (cause) {
+        clearTimeout(stall);
+        throw cause;
+    }
     if (!response.ok || !response.body) {
         clearTimeout(stall);
         throw new Error(`HTTP ${response.status}`);
@@ -197,6 +237,7 @@ async function download(
         transform(chunk: Buffer, _enc, done) {
             clearTimeout(stall);
             stall = setTimeout(() => controller.abort(), stallMs);
+            stall.unref?.();
             received += chunk.length;
             if (received > cap) {
                 done(new Error(`받는 양이 서버가 말한 크기(${cap}B)를 넘었습니다`));
@@ -247,7 +288,12 @@ async function hasRoomFor(dir: string, declaredBytes: number): Promise<boolean> 
  *
  * 실패는 삼킨다. 캐시 청소가 안 됐다고 사용자의 작업을 막을 이유가 없다.
  */
-export async function evictOldCaches(cacheRoot: string, keep = 3, onProgress?: (m: string) => void): Promise<number> {
+export async function evictOldCaches(
+    cacheRoot: string,
+    keep = 3,
+    onProgress?: (m: string) => void,
+    protectPath?: string,
+): Promise<number> {
     try {
         const entries = await readdir(cacheRoot, { withFileTypes: true });
         const dirs = entries.filter((e) => e.isDirectory());
@@ -266,6 +312,9 @@ export async function evictOldCaches(cacheRoot: string, keep = 3, onProgress?: (
 
         let removed = 0;
         for (const entry of withTime.slice(keep)) {
+            // 방금 만든/쓴 세대는 절대 지우지 않는다 — mtime 순서만 믿으면 시계 왜곡·동시 실행에서
+            // **자기가 쓰려던 캐시를 자기가 지우는** 자리가 생긴다(재심의 관찰 6).
+            if (protectPath && entry.path === protectPath) continue;
             await rm(entry.path, { recursive: true, force: true });
             removed += 1;
         }
@@ -302,10 +351,29 @@ export async function writePayloadStamp(cacheDir: string, result: PayloadResult,
     ).catch(() => {});
 }
 
+/**
+ * 저장처 좌표는 서버가 주지만(클라이언트에 저장처 지식 0), **스킴까지 아무거나 받을 이유는 없다**
+ * (재심의 관찰 2 — 실측 `data:` URL 통과). https 한정은 공짜다.
+ */
+function isSafeHttpsUrl(value: string): boolean {
+    try {
+        return new URL(value).protocol === "https:";
+    } catch {
+        return false;
+    }
+}
+
 const LOOKUP_TIMEOUT_MS = 5_000;
 const STALL_TIMEOUT_MS = 30_000;
-/** 여유 공간 배수 — 압축본 + 중간 tar + 펼친 트리가 동시에 존재하는 순간이 있다. */
-const DISK_HEADROOM = 6;
+/**
+ * 여유 공간 배수 — 압축본 + 중간 tar + 펼친 트리가 **동시에 존재하는 순간**이 있다.
+ *
+ * 6 이었는데 실측 소요가 **9.19×** 였다(재심의 차단 4): scratch 는 전량 기록된 뒤 루프가 읽고 finally
+ * 에서야 지워지고, gz 는 그보다 더 늦게까지 산다. 실 페이로드 비율(158MB→586MB)로도 ≈8.4× 다.
+ * 검사를 통과하고 나서 디스크가 차면 사용자는 **의존성도 없고 공간도 없는** 상태가 된다 — 그 실패는
+ * 우리가 아낀 여유보다 훨씬 비싸다.
+ */
+const DISK_HEADROOM = 10;
 /** 해제 상한 배수(실측 158MB → 586MB ≈ 3.7배). */
 const EXTRACT_RATIO_CAP = 8;
 /**

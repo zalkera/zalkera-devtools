@@ -105,14 +105,16 @@ export async function ensureDependencies(options: DepsOptions): Promise<DepsResu
                 report(`준비된 의존성 ${payload.fileCount}개를 연결합니다…`);
                 const linked = await linkOrCopy(join(cacheDir, "node_modules"), target);
                 await markComplete(target);
-                await evictOldCaches(cacheRoot, KEEP_CACHES, report);
+                await evictOldCaches(cacheRoot, KEEP_CACHES, report, cacheDir);
                 return { action: linked, cacheKey };
             }
         }
         else {
             // pnpm/yarn·lockfile 없음은 **조회조차 하지 않는다**(굽지 않으므로 항상 "없다"이고 왕복만 낭비다).
             // 그래도 **말은 한다**(심의 W6) — 침묵하면 "왜 나만 느린가"를 사용자도 우리도 설명할 수 없다.
-            report("이 프로젝트는 미리 준비된 꾸러미를 쓸 수 없어 직접 내려받습니다(npm lockfile 이 필요합니다).");
+            // ⚠ 문구를 정확히 한다(재심의 관찰 1): 우리가 굽는 것은 `package-lock.json` 세대뿐이다.
+            // "npm lockfile 이 필요합니다"는 `npm-shrinkwrap.json` 사용자에게 거짓이 된다.
+            report("이 프로젝트는 미리 준비된 꾸러미를 쓸 수 없어 직접 내려받습니다(package-lock.json 이 필요합니다).");
         }
     }
 
@@ -120,7 +122,7 @@ export async function ensureDependencies(options: DepsOptions): Promise<DepsResu
     await runNpmInstall(projectDir, options.npmCommand ?? ["npm", "install"], options.npmEnv ?? {}, report);
     await seedCache(target, cacheDir, cacheKey, report);
     await markComplete(target);
-    await evictOldCaches(cacheRoot, KEEP_CACHES, report);
+    await evictOldCaches(cacheRoot, KEEP_CACHES, report, cacheDir);
     return { action: "installed", cacheKey };
 }
 

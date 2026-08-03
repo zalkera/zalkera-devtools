@@ -147,7 +147,7 @@ test("lockfile 이 npm 계열이 아니면 말하고 내려간다", async () => 
     }).catch(() => {});
 
     // 침묵하면 "왜 나만 느린가"를 사용자도 우리도 설명할 수 없다(심의 W6).
-    ok(said.some((m) => m.includes("lockfile 이 필요합니다")), said.join(" / "));
+    ok(said.some((m) => m.includes("package-lock.json 이 필요합니다")), said.join(" / "));
 });
 
 test("캐시가 3세대를 넘으면 정리된다", async () => {
