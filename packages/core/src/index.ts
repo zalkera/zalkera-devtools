@@ -48,6 +48,15 @@ export { extractZip, type UnzipResult } from "./unzip.ts";
 export { isReceivable, meaningfulEntries } from "./emptyDir.ts";
 
 export { waitForBuild, type BuildOutcome, type WaitOptions } from "./build.ts";
+
+export {
+    decideReadyPrompt,
+    decideSwitch,
+    resolveHelpUrl,
+    say,
+    type ReadyPrompt,
+    type SwitchDecision,
+} from "./tenantScope.ts";
 export { startFromPreset, type StartFromPresetOptions, type StartFromPresetResult } from "./presets.ts";
 export { precheck, type PrecheckFinding, type PrecheckOptions } from "./precheck.ts";
 export { registerMcpServer, type McpRegistration, type RegisterMcpResult } from "./mcp.ts";

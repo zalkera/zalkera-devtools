@@ -20,6 +20,10 @@ import {
     stripCredentials,
     ZalkeraApi,
     waitForBuild,
+    decideReadyPrompt,
+    decideSwitch,
+    resolveHelpUrl,
+    say,
     type DevServer,
     type FetchSourceResult,
     type Handshake,
@@ -205,17 +209,11 @@ async function helpUrl(): Promise<string> {
             // 무시 — 기본값으로 간다.
         }
     }
-    const fromServer = handshake?.helpUrl;
-    if (typeof fromServer === "string") {
-        try {
-            const parsed = new URL(fromServer);
-            if (parsed.protocol === "https:" || parsed.protocol === "http:") return parsed.toString();
-            log(`서버가 보낸 도움말 주소를 쓰지 않습니다(${parsed.protocol}) — 기본 주소로 엽니다.`);
-        } catch {
-            log(`서버가 보낸 도움말 주소를 읽지 못했습니다 — 기본 주소로 엽니다.`);
-        }
-    }
-    return HELP_URL_FALLBACK;
+    // 판정은 core 가 한다(§tenantScope). 여기서는 그 판단을 **말하기만** 한다 —
+    // 조용히 기본값으로 돌아가면 운영자가 설정 오타를 영영 모른다.
+    const resolved = resolveHelpUrl(handshake?.helpUrl, HELP_URL_FALLBACK);
+    if (resolved.note) log(resolved.note);
+    return resolved.url;
 }
 
 /** 2초 안에 응답이 오는가. 오래 기다리면 "도움말이 안 열린다"가 된다 — 그게 더 나쁜 고장이다. */
@@ -515,10 +513,9 @@ async function switchVersion(preselected?: number, expectedTenant?: string): Pro
     const { api, tenant } = await ensureApiFor();
     // 「지금 전환」이 눌린 시점과 여기서 API 가 묶이는 시점 사이에도 사이트는 바뀔 수 있다.
     // 올린 곳과 켤 곳이 다르면 **아무것도 하지 않는다** — 조용히 남의 사이트를 켜는 것보다 낫다.
-    if (expectedTenant !== undefined && expectedTenant !== tenant) {
-        void vscode.window.showWarningMessage(
-            `작업 사이트가 「${tenant}」 로 바뀌어 전환하지 않았습니다(그 버전은 「${expectedTenant}」 의 것입니다).`,
-        );
+    const decision = decideSwitch(expectedTenant, tenant);
+    if (!decision.ok) {
+        void vscode.window.showWarningMessage(decision.message);
         return;
     }
     const revisions = await api.listRevisions();
@@ -560,19 +557,20 @@ async function switchVersion(preselected?: number, expectedTenant?: string): Pro
     const target = candidates.find((r) => `버전 ${r.revisionNo}` === choice?.label);
     if (!target) return;
 
+    const ask = say.switchConfirm(tenant, target.revisionNo);
     const confirm = await vscode.window.showWarningMessage(
-        `「${tenant}」 사이트를 버전 ${target.revisionNo} 로 바꿉니다.`,
-        { modal: true, detail: "방문자가 보는 화면이 바로 바뀝니다." },
-        "바꾸기",
+        ask.message,
+        { modal: true, detail: ask.detail },
+        ask.action,
     );
-    if (confirm !== "바꾸기") return;
+    if (confirm !== ask.action) return;
 
     await vscode.window.withProgress(
         { location: vscode.ProgressLocation.Notification, title: `버전 ${target.revisionNo} 로 바꾸는 중` },
         () => api.activateRevision(target.revisionNo),
     );
     log(`사이트를 버전 ${target.revisionNo} 로 바꿨습니다.`);
-    void vscode.window.showInformationMessage(`「${tenant}」 사이트를 버전 ${target.revisionNo} 로 바꿨습니다.`);
+    void vscode.window.showInformationMessage(say.switched(tenant, target.revisionNo));
 }
 
 /**
@@ -796,18 +794,15 @@ async function publishCommand(): Promise<void> {
     const dir = requireWorkspace();
     const { api, tenant } = await ensureApiFor();
 
+    // 문구는 core 가 만든다 — **`tenant` 를 인자로 요구하므로 라이브로 읽을 방법이 없다**(§tenantScope).
+    // 오늘 이 자리에서 난 결함이 정확히 "알림이 라이브로 다시 읽는 것"이었다.
+    const ask = say.publishConfirm(tenant);
     const confirm = await vscode.window.showWarningMessage(
-        // **어느 사이트인지 말한다**(심의 · 2026-08-10). 폴더와 사이트는 따로 정해지고 사이드바에서
-        // 사이트만 바꿀 수 있다 — 그러면 A 의 소스가 B 로 올라간다. 2단계 원칙은 손해를 **늦추기만
-        // 하고 막지는 못한다.** 두 확인창이 모두 침묵하면 두 번 물어도 소용이 없다.
-        `「${tenant}」 사이트에 지금 소스를 새 버전으로 올립니다.`,
-        {
-            modal: true,
-            detail: "올리기만 합니다 — 방문자가 보는 사이트는 그대로입니다.\n그 버전으로 바꾸려면 올린 뒤 따로 전환하십시오.",
-        },
-        "올리기",
+        ask.message,
+        { modal: true, detail: ask.detail },
+        ask.action,
     );
-    if (confirm !== "올리기") return;
+    if (confirm !== ask.action) return;
 
     const result = await vscode.window.withProgress<PublishResult>(
         { location: vscode.ProgressLocation.Notification, title: "올리는 중" },
@@ -835,7 +830,7 @@ async function awaitBuild(api: ZalkeraApi, revisionNo: number, tenant: string): 
     const outcome = await vscode.window.withProgress(
         {
             location: vscode.ProgressLocation.Notification,
-            title: `「${tenant}」 버전 ${revisionNo} 를 서버가 빌드하는 중`,
+            title: say.building(tenant, revisionNo),
             cancellable: true,
         },
         (_progress, token) =>
@@ -853,7 +848,7 @@ async function awaitBuild(api: ZalkeraApi, revisionNo: number, tenant: string): 
         case "failed": {
             log(`버전 ${revisionNo} 빌드 실패${outcome.reason ? `\n${outcome.reason}` : ""}`);
             const choice = await vscode.window.showErrorMessage(
-                `「${tenant}」 버전 ${revisionNo} 를 서버가 만들지 못했습니다. 사이트는 그대로입니다.`,
+                say.buildFailed(tenant, revisionNo),
                 ...(outcome.reason ? ["자세히 보기"] : []),
             );
             if (choice === "자세히 보기") output.show();
@@ -861,7 +856,7 @@ async function awaitBuild(api: ZalkeraApi, revisionNo: number, tenant: string): 
         }
         case "timeout":
             void vscode.window.showWarningMessage(
-                `「${tenant}」 버전 ${revisionNo} 가 아직 빌드 중입니다. 끝나면 「버전 전환」에서 고르실 수 있습니다.`,
+                say.buildTimedOut(tenant, revisionNo),
             );
             return false;
         case "cancelled":
@@ -871,7 +866,7 @@ async function awaitBuild(api: ZalkeraApi, revisionNo: number, tenant: string): 
             );
             return false;
         case "gone":
-            void vscode.window.showWarningMessage(`「${tenant}」 에서 버전 ${revisionNo} 를 찾지 못했습니다.`);
+            void vscode.window.showWarningMessage(say.buildGone(tenant, revisionNo));
             return false;
     }
 }
@@ -884,19 +879,14 @@ async function awaitBuild(api: ZalkeraApi, revisionNo: number, tenant: string): 
  */
 async function offerSwitch(revisionNo: number, tenant: string): Promise<void> {
     // 기다리는 동안 사이트를 바꿨을 수 있다. 그때 「지금 전환」을 그대로 두면 **다른 사이트를 켠다** —
-    // 알리되 원클릭은 내린다. 켜는 것은 「버전 전환」에서 눈으로 보고 고르게 한다.
-    if (tenantCode() !== tenant) {
-        void vscode.window.showInformationMessage(
-            `「${tenant}」 버전 ${revisionNo} 가 준비됐습니다. 지금 작업 사이트는 「${tenantCode()}」 라서 ` +
-                `여기서 바로 전환하지 않습니다 — 「${tenant}」 로 돌아가 「버전 전환」에서 고르십시오.`,
-        );
+    // 알리되 원클릭은 내린다. 판정은 core 가 하고 여기서는 그리기만 한다(시험이 그 판정을 잠근다).
+    const prompt = decideReadyPrompt(tenant, tenantCode(), revisionNo);
+    if (prompt.kind === "redirect") {
+        void vscode.window.showInformationMessage(prompt.message);
         return;
     }
-    const choice = await vscode.window.showInformationMessage(
-        `「${tenant}」 버전 ${revisionNo} 가 준비됐습니다. 사이트는 아직 바뀌지 않았습니다.`,
-        "지금 전환",
-    );
-    if (choice === "지금 전환") await switchVersion(revisionNo, tenant);
+    const choice = await vscode.window.showInformationMessage(prompt.message, prompt.action);
+    if (choice === prompt.action) await switchVersion(revisionNo, tenant);
 }
 
 /**
