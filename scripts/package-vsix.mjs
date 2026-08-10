@@ -68,6 +68,19 @@ console.log("· 번들");
 execFileSync("npm", ["run", "bundle"], { cwd: ext, stdio: "inherit" });
 if (!existsSync(join(ext, "dist", "extension.cjs"))) throw new Error("번들 산출물이 없다 — 중단");
 
+// ── 1.5 아이콘 온전성 ──────────────────────────────────────────────────────
+// 활동 표시줄 SVG 가 깨져도 vsce 는 통과시킨다(내용 검증을 안 한다). 실제로 편집 중
+// `<svg>` 여는 태그가 잘린 채로 VSIX 가 구워졌다(2026-08-10). 아이콘이 조용히 사라진다.
+{
+    const svgPath = join(ext, "media", "zalkera.svg");
+    const svg = readFileSync(svgPath, "utf8");
+    const opens = (svg.match(/<svg[\s>]/g) ?? []).length;
+    const closes = (svg.match(/<\/svg>/g) ?? []).length;
+    if (opens !== 1 || closes !== 1) throw new Error(`활동 표시줄 SVG 가 온전하지 않다(open=${opens} close=${closes}): ${svgPath}`);
+    if (!svg.includes("viewBox")) throw new Error("활동 표시줄 SVG 에 viewBox 가 없다 — 크기가 어긋난다");
+    if (!svg.includes("currentColor")) throw new Error("활동 표시줄 SVG 가 currentColor 를 안 쓴다 — 테마 색이 안 먹는다");
+}
+
 // ── 2. 스테이징 ─────────────────────────────────────────────────────────────
 console.log("· 스테이징");
 rmSync(stage, { recursive: true, force: true });
