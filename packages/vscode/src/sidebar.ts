@@ -82,6 +82,7 @@ export class ZalkeraSidebar implements vscode.TreeDataProvider<Node> {
         nodes.push(
             action("진단", "zalkera.doctor", "pulse"),
             action("로그아웃", "zalkera.signOut", "sign-out"),
+            action("초기화", "zalkera.reset", "clear-all", "처음 상태로 되돌립니다(받은 소스는 남깁니다)"),
         );
         return nodes;
     }

@@ -86,6 +86,7 @@ export function activate(context: vscode.ExtensionContext): void {
         vscode.window.registerTreeDataProvider("zalkera.sidebar", sidebar),
         register("zalkera.signIn", signIn),
         register("zalkera.site.choose", chooseSite),
+        register("zalkera.reset", resetAll),
         register("zalkera.signOut", signOut),
         register("zalkera.site.create", startFromExample),
         register("zalkera.site.open", openSite),
@@ -175,7 +176,7 @@ async function signIn(): Promise<void> {
     void vscode.window.showInformationMessage("잘커라에 로그인했습니다.");
 }
 
-async function signOut(): Promise<void> {
+async function signOut(options: { quiet?: boolean } = {}): Promise<void> {
     // ⚠ **로그아웃이 반쪽이었다**(심의 경고): 도는 프리뷰를 안 끄고 서버 키도 안 지웠다. 이미 뜬 dev 서버는
     // 부팅 때 읽은 키로 **최대 12시간 상용 데이터를 계속 읽는다** — "로그아웃했다"는 화면과 실제가 어긋난다.
     // 순서가 중요하다: 서버를 먼저 멈추고(그 키를 쓰는 프로세스를 없앤 뒤) 키를 지운다.
@@ -196,8 +197,62 @@ async function signOut(): Promise<void> {
         }
     }
     await refreshSidebar();
-    void vscode.window.showInformationMessage("로그아웃했습니다.");
+    // 초기화가 부를 때는 자기 문구로 끝낸다 — 알림이 두 번 뜨면 무엇이 끝난 건지 흐려진다.
+    if (!options.quiet) void vscode.window.showInformationMessage("로그아웃했습니다.");
 }
+
+/**
+ * 처음 상태로 되돌린다(오너 확정 2026-08-10 · memo146 §15.4).
+ *
+ * 종전에는 완전 초기화에 **세 곳을 사람이 기억해야 했다** — 로그아웃 · 설정의 `zalkera.tenant` ·
+ * 받은 폴더. 앞의 둘을 여기서 한 번에 한다.
+ *
+ * ⚠ **파일은 지우지 않는다.** 고치던 소스를 도구가 지우는 것이 이 도구가 낼 수 있는 가장 큰 손해다
+ * (`fetchSiteSource` 가 빈 폴더를 요구하는 것과 같은 규율). 대신 **경로를 알려주고 사람이 지우게** 한다.
+ */
+async function resetAll(): Promise<void> {
+    const dir = workspaceDir();
+    const confirmed = await vscode.window.showWarningMessage(
+        "잘커라를 처음 상태로 되돌릴까요?",
+        {
+            modal: true,
+            detail:
+                "지웁니다: 로그인 · 작업 사이트 설정 · 프리뷰 자격증명(서버에서도 폐기)\n" +
+                "남깁니다: 받은 소스 폴더와 그 안의 내 설정",
+        },
+        "초기화",
+    );
+    if (confirmed !== "초기화") return;
+
+    // 로그아웃이 이미 하는 일(프리뷰 중지 → 서버 키 폐기 → 토큰 삭제 → .env.local 키 줄 제거)을
+    // 그대로 쓴다. 두 벌로 만들면 한쪽만 고쳐진다.
+    await signOut({ quiet: true });
+
+    // 사이트 설정은 **두 범위 모두** 지운다 — 한쪽만 지우면 남은 쪽이 되살아난다.
+    const config = vscode.workspace.getConfiguration("zalkera");
+    await config.update("tenant", undefined, vscode.ConfigurationTarget.Global);
+    if ((vscode.workspace.workspaceFolders?.length ?? 0) > 0) {
+        await config.update("tenant", undefined, vscode.ConfigurationTarget.Workspace);
+    }
+
+    log("초기화했습니다 — 로그인·사이트 설정·프리뷰 자격증명을 지웠습니다.");
+    await refreshSidebar();
+
+    if (dir) {
+        // 폴더는 안 지운다. 다만 **지우고 싶은 사람이 어디를 지워야 하는지 모르는 것**이 진짜 불편이므로
+        // 경로를 손에 쥐여 준다.
+        const choice = await vscode.window.showInformationMessage(
+            "초기화했습니다. 받은 소스 폴더는 그대로 남아 있습니다.",
+            "폴더 위치 열기",
+        );
+        if (choice === "폴더 위치 열기") {
+            await vscode.commands.executeCommand("revealFileInOS", vscode.Uri.file(dir));
+        }
+        return;
+    }
+    void vscode.window.showInformationMessage("초기화했습니다.");
+}
+
 
 /**
  * 키 폐기는 **실패해도 로그아웃을 막지 않는다** — 사용자가 원한 것은 로그아웃이고, 서버가 잠깐 안 되는 것이
