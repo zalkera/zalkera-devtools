@@ -105,6 +105,21 @@ const ALWAYS_EXCLUDED = new Set([
     ".turbo",
     ".vercel",
     ".claude",
+    // ── 아래 넷은 심의 실측으로 추가됐다(2026-08-10) ──────────────────────────
+    // 이 목록이 옛 배치 기준으로 쓰인 뒤 **우리가 파일을 늘렸는데** 목록을 안 늘렸다.
+    //
+    // `.mcp.json` 은 **우리가 만든다**(「에이전트 연결」). 그리고 그 파일은 남의 MCP 서버 항목을
+    // 일부러 보존하는데(mcp.ts), stdio 형 서버는 관례적으로 `env: { GITHUB_TOKEN: … }` 를 들고 다닌다.
+    // 우리가 만든 파일이 정본 소스가 되어 그 버전을 받는 **모두에게** 배포되는 자리였다.
+    ".mcp.json",
+    // `.vscode/settings.json` 에는 **우리가 적은 `zalkera.tenant`** 가 들어 있다(`configTarget()`).
+    // 그것이 zip 에 실려 유통되면, 그 소스를 받아 연 사람의 확장이 조용히 그 테넌트를 가리킨다.
+    // 편집기 설정은 **배포되는 사이트의 내용이 아니다** — 빠져도 잃는 것이 없다.
+    ".vscode",
+    ".idea",
+    // 홈 디렉터리 자격증명이 프로젝트 안에 복사돼 있는 경우가 실제로 있다.
+    ".ssh",
+    ".aws",
 ]);
 
 /**
@@ -116,10 +131,28 @@ const ALWAYS_EXCLUDED = new Set([
  */
 function isSecretFile(name: string): boolean {
     const lower = name.toLowerCase();
-    return lower === ".env" || lower.startsWith(".env.") || SECRET_NAMES.has(lower) || lower.endsWith(".pem");
+    if (lower === ".env" || lower.startsWith(".env.")) return true;
+    if (SECRET_NAMES.has(lower)) return true;
+    if (SECRET_SUFFIXES.some((suffix) => lower.endsWith(suffix))) return true;
+    // `service-account.json`·`service-account-prod.json` … GCP 키의 관례적 이름이다.
+    return lower.startsWith("service-account") && lower.endsWith(".json");
 }
 
-const SECRET_NAMES = new Set(["id_rsa", "id_dsa", "id_ecdsa", "id_ed25519", "credentials.json", ".npmrc"]);
+const SECRET_NAMES = new Set([
+    "id_rsa",
+    "id_dsa",
+    "id_ecdsa",
+    "id_ed25519",
+    "credentials.json",
+    ".npmrc",
+    // 심의 추가(2026-08-10) — 셋 다 **평문 자격증명**을 담는 표준 파일명이다.
+    ".netrc",
+    ".git-credentials",
+    ".yarnrc.yml",
+]);
+
+/** 확장자로 거른다. 이름은 자유롭고 내용은 열쇠인 것들이다. */
+const SECRET_SUFFIXES = [".pem", ".key", ".p12", ".pfx"];
 
 export interface PackOptions {
     projectDir: string;

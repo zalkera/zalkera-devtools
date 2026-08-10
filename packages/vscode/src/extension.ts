@@ -540,7 +540,7 @@ async function switchVersion(preselected?: number): Promise<void> {
     if (!target) return;
 
     const confirm = await vscode.window.showWarningMessage(
-        `사이트를 버전 ${target.revisionNo} 로 바꿉니다.`,
+        `「${tenantCode()}」 사이트를 버전 ${target.revisionNo} 로 바꿉니다.`,
         { modal: true, detail: "방문자가 보는 화면이 바로 바뀝니다." },
         "바꾸기",
     );
@@ -551,7 +551,7 @@ async function switchVersion(preselected?: number): Promise<void> {
         () => api.activateRevision(target.revisionNo),
     );
     log(`사이트를 버전 ${target.revisionNo} 로 바꿨습니다.`);
-    void vscode.window.showInformationMessage(`사이트를 버전 ${target.revisionNo} 로 바꿨습니다.`);
+    void vscode.window.showInformationMessage(`「${tenantCode()}」 사이트를 버전 ${target.revisionNo} 로 바꿨습니다.`);
 }
 
 /**
@@ -773,7 +773,10 @@ async function publishCommand(): Promise<void> {
     const api = await ensureApi();
 
     const confirm = await vscode.window.showWarningMessage(
-        "지금 소스를 새 버전으로 올립니다.",
+        // **어느 사이트인지 말한다**(심의 · 2026-08-10). 폴더와 사이트는 따로 정해지고 사이드바에서
+        // 사이트만 바꿀 수 있다 — 그러면 A 의 소스가 B 로 올라간다. 2단계 원칙은 손해를 **늦추기만
+        // 하고 막지는 못한다.** 두 확인창이 모두 침묵하면 두 번 물어도 소용이 없다.
+        `「${tenantCode()}」 사이트에 지금 소스를 새 버전으로 올립니다.`,
         {
             modal: true,
             detail: "올리기만 합니다 — 방문자가 보는 사이트는 그대로입니다.\n그 버전으로 바꾸려면 올린 뒤 따로 전환하십시오.",
@@ -857,7 +860,7 @@ async function awaitBuild(api: ZalkeraApi, revisionNo: number): Promise<boolean>
  */
 async function offerSwitch(revisionNo: number): Promise<void> {
     const choice = await vscode.window.showInformationMessage(
-        `버전 ${revisionNo} 가 준비됐습니다. 사이트는 아직 바뀌지 않았습니다.`,
+        `「${tenantCode()}」 버전 ${revisionNo} 가 준비됐습니다. 사이트는 아직 바뀌지 않았습니다.`,
         "지금 전환",
     );
     if (choice === "지금 전환") await switchVersion(revisionNo);
