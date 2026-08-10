@@ -45,6 +45,7 @@ export {
     type FetchSourceResult,
 } from "./fetchSource.ts";
 export { extractZip, type UnzipResult } from "./unzip.ts";
+export { isReceivable, meaningfulEntries } from "./emptyDir.ts";
 export { startFromPreset, type StartFromPresetOptions, type StartFromPresetResult } from "./presets.ts";
 export { precheck, type PrecheckFinding, type PrecheckOptions } from "./precheck.ts";
 export { registerMcpServer, type McpRegistration, type RegisterMcpResult } from "./mcp.ts";

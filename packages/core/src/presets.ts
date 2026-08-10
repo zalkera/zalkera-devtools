@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { mkdir, readdir } from "node:fs/promises";
+import { mkdir } from "node:fs/promises";
+import { meaningfulEntries } from "./emptyDir.ts";
 import type { ZalkeraApi } from "./api.ts";
 import { DevtoolsError } from "./errors.ts";
 import { extractZip } from "./unzip.ts";
@@ -32,7 +33,8 @@ export async function startFromPreset(options: StartFromPresetOptions): Promise<
     const fetchImpl = options.fetchImpl ?? fetch;
 
     await mkdir(options.targetDir, { recursive: true });
-    if ((await readdir(options.targetDir)).length > 0) {
+    // 위와 같은 규율 — 편집기 설정·OS 부스러기는 "비어 있음"으로 본다(emptyDir.ts).
+    if ((await meaningfulEntries(options.targetDir)).length > 0) {
         throw new DevtoolsError(
             "NOT_A_SITE",
             "받을 폴더가 비어 있지 않습니다.",

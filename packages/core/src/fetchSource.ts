@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { createWriteStream } from "node:fs";
 import { mkdir, readdir } from "node:fs/promises";
+import { meaningfulEntries } from "./emptyDir.ts";
 import { join } from "node:path";
 import { createGunzip } from "node:zlib";
 import { pipeline } from "node:stream/promises";
@@ -68,7 +69,8 @@ export async function fetchSiteSource(options: FetchSourceOptions): Promise<Fetc
     }
 
     await mkdir(options.targetDir, { recursive: true });
-    const existing = await readdir(options.targetDir);
+    // **편집기가 만든 것 때문에 막히지 않는다**(emptyDir.ts) — `.vscode` 는 우리가 만드는 쪽이다.
+    const existing = await meaningfulEntries(options.targetDir);
     if (existing.length > 0) {
         // **덮어쓰지 않는다.** 고객이 고치던 소스를 서버 버전으로 조용히 밀어 버리는 것이 이 도구가 낼 수 있는
         // 가장 큰 손해다. 빈 폴더를 요구하는 편이 불편하지만 되돌릴 수 없는 손실보다 낫다.
