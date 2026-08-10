@@ -126,9 +126,17 @@
 
 | | 무엇 |
 | --- | --- |
-| **부품·산출물** | `node_modules` · `.next` · `dist` · `out` — 서버가 다시 만듭니다 |
-| **비밀** | `.env` 로 시작하는 **모든** 파일 · `.pem` `.key` `.p12` `.pfx` · `.netrc` · `.git-credentials` · `.npmrc` · `service-account*.json` · SSH 키 |
-| **편집기·도구 설정** | `.vscode` · `.idea` · `.mcp.json` · `.git` |
+| **부품·산출물** | `node_modules` · `.next` · `dist` · `out` · `.turbo` · `.vercel` — 서버가 다시 만듭니다 |
+| **비밀** | `.env` 로 시작하거나 `.env` 로 끝나는 **모든** 파일 · `.pem` `.key` `.p12` `.pfx` `.p8` · `.netrc` `_netrc` · `.git-credentials` · `.npmrc` · `.yarnrc.yml` · `credentials.json` · `service-account*.json` · `*firebase-adminsdk*.json` · SSH 키(`id_rsa` 등) |
+| **편집기·도구 설정** | `.vscode` · `.idea` · `.mcp.json` · `.claude` · `.git` |
+| **OS 부스러기** | `.DS_Store` |
+
+> **뺀 것은 이름을 알려 드립니다.** 비밀로 판단해 뺀 파일이 있으면 「출력」 패널의 **잘커라**
+> 채널에 이름이 남습니다. 이름만 비슷할 뿐 비밀이 아닌 파일(예: `turkey.key`)이 빠졌다면
+> 이름을 바꿔 다시 올리십시오 — 규칙을 느슨하게 하는 것보다 그쪽이 안전합니다.
+>
+> ⚠ `.env.example` 처럼 **값이 비어 있는 예시 파일도 함께 빠집니다.** 환경변수 설명이 필요하시면
+> `env.example.md` 같은 다른 이름으로 두십시오.
 
 > **왜 `.vscode` 와 `.mcp.json` 까지 빼나요.** 둘 다 저희가 만드는 파일이고, 그 안에는
 > **어느 사이트로 작업 중인지**와 연결하신 AI 도구 설정이 들어 있습니다. 사이트가 되는 데는

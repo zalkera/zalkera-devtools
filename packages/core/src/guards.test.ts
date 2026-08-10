@@ -205,6 +205,42 @@ test("가드 — 확장자·이름으로 거르는 자격증명이 발행 zip �
     ok(!packed.buffer.includes(Buffer.from("SECRET_MARKER_9f2a")), "아카이브 어디에도 비밀이 없어야 한다");
 });
 
+test("가드 — 심의가 실측으로 찾아낸 새던 이름 넷", async () => {
+    // 전부 **관례가 굳은 표준 이름**이라 블록리스트가 전수일 수 없다는 변명이 안 통하는 자리다.
+    const dir = await scratch();
+    await writeFile(join(dir, "package.json"), "{}");
+    for (const name of [
+        "production.env", // docker compose env_file 관례 — `.env` 로 시작하지 않는다
+        "AuthKey_ABC123.p8", // 애플 푸시 키
+        "myproj-firebase-adminsdk-x1y2.json", // GCP 콘솔이 주는 **기본** 파일명
+        "_netrc", // 윈도 변형
+        ".VSCode/settings.json".split("/")[0], // 대소문자 — 디렉터리 판정이 타면 안 된다
+    ]) {
+        if (name === ".VSCode") continue;
+        await writeFile(join(dir, name), "SECRET_MARKER_7c3e");
+    }
+    await mkdir(join(dir, ".VSCode"), { recursive: true });
+    await writeFile(join(dir, ".VSCode", "settings.json"), '{"zalkera.tenant":"leaked-tenant"}');
+
+    const packed = await packProject({ projectDir: dir });
+
+    strictEqual(packed.fileCount, 1, "package.json 하나만 실려야 한다");
+    ok(!packed.buffer.includes(Buffer.from("SECRET_MARKER_7c3e")));
+    ok(!packed.buffer.includes(Buffer.from("leaked-tenant")));
+});
+
+test("가드 — 비밀로 판단해 뺀 것은 이름을 대고 말한다", async () => {
+    // 이 코드베이스가 스스로 세운 원칙("조용히 빼지 않는다")이 이 경로에만 없었다.
+    const dir = await scratch();
+    await writeFile(join(dir, "package.json"), "{}");
+    await writeFile(join(dir, "turkey.key"), "이건 사실 비밀이 아니다");
+
+    const said: string[] = [];
+    await packProject({ projectDir: dir, onProgress: (m) => said.push(m) });
+
+    ok(said.some((m) => m.includes("turkey.key")), `이름을 대야 한다 — 실제 출력: ${said.join(" | ")}`);
+});
+
 test("가드 — 제외가 과하지 않다(평범한 소스는 실린다)", async () => {
     // **"전부 빼면 통과"하는 가짜 가드를 배제한다.** 위 두 시험만 있으면 제외 목록에 모든 것을 넣어도
     // 초록이다 — 그러면 아무것도 못 올리는 도구가 된다.

@@ -95,6 +95,10 @@ export async function createZip(entries: ZipEntry[]): Promise<Buffer> {
  * `node_modules` 가 첫 줄인 이유: 서버 업로드 정규화가 그것을 어차피 제거하고, 상한 100MB 에 먼저 걸린다.
  * `.env.local` 이 있는 이유는 더 무겁다 — **자격증명이 들어 있다.** 여기서 새면 프리뷰 키가 서버로 올라간다.
  */
+/**
+ * 이름이 같으면 뺀다. **소문자로 비교한다**(심의 실측: `.VSCode/settings.json` 이 실렸다) —
+ * 우리가 만드는 파일은 늘 소문자지만, 판정이 대소문자를 타면 그건 판정이 아니다.
+ */
 const ALWAYS_EXCLUDED = new Set([
     "node_modules",
     ".git",
@@ -134,8 +138,14 @@ function isSecretFile(name: string): boolean {
     if (lower === ".env" || lower.startsWith(".env.")) return true;
     if (SECRET_NAMES.has(lower)) return true;
     if (SECRET_SUFFIXES.some((suffix) => lower.endsWith(suffix))) return true;
-    // `service-account.json`·`service-account-prod.json` … GCP 키의 관례적 이름이다.
-    return lower.startsWith("service-account") && lower.endsWith(".json");
+    // GCP/Firebase 서비스계정 키. **기본 다운로드 이름이 `service-account` 로 시작하지 않는다** —
+    // 콘솔이 주는 이름은 `<project>-firebase-adminsdk-<hash>.json` 이다(심의 실측으로 새던 자리).
+    if (lower.endsWith(".json") && (lower.startsWith("service-account") || lower.includes("firebase-adminsdk"))) {
+        return true;
+    }
+    // `production.env`·`local.env` — docker compose `env_file` 관례다. `.env` 로 **시작**하는 규칙만으로는
+    // 안 걸린다(심의 실측).
+    return lower.endsWith(".env");
 }
 
 const SECRET_NAMES = new Set([
@@ -147,12 +157,13 @@ const SECRET_NAMES = new Set([
     ".npmrc",
     // 심의 추가(2026-08-10) — 셋 다 **평문 자격증명**을 담는 표준 파일명이다.
     ".netrc",
+    "_netrc", // 윈도 변형 — 같은 파일이다
     ".git-credentials",
     ".yarnrc.yml",
 ]);
 
 /** 확장자로 거른다. 이름은 자유롭고 내용은 열쇠인 것들이다. */
-const SECRET_SUFFIXES = [".pem", ".key", ".p12", ".pfx"];
+const SECRET_SUFFIXES = [".pem", ".key", ".p12", ".pfx", ".p8"];
 
 export interface PackOptions {
     projectDir: string;
@@ -174,9 +185,22 @@ export async function packProject(options: PackOptions): Promise<PackResult> {
     const entries: ZipEntry[] = [];
     const report = options.onProgress ?? (() => {});
 
+    /**
+     * 비밀로 판단해 뺀 것을 **이름 대고 말한다**(심의 제안 · 이 파일이 이미 세운 원칙 §"조용히 빼지 않는다").
+     *
+     * 이름만 비슷한 정상 파일(`turkey.key` · 공개 CA 번들 `cert-bundle.pem` · 데이터 픽스처
+     * `service-accounts.json`)이 조용히 빠지면, 사용자는 **배포된 사이트가 왜 다른지** 알 수 없다.
+     * 막지는 않는다 — 규칙을 느슨하게 하는 쪽이 더 나쁘다. 대신 보이게 한다.
+     */
+    const dropped: string[] = [];
+
     const walk = async (dir: string): Promise<void> => {
         for (const item of await readdir(dir, { withFileTypes: true })) {
-            if (excluded.has(item.name) || isSecretFile(item.name)) continue;
+            if (excluded.has(item.name.toLowerCase())) continue;
+            if (isSecretFile(item.name)) {
+                if (item.isFile()) dropped.push(relative(options.projectDir, join(dir, item.name)));
+                continue;
+            }
             const full = join(dir, item.name);
             if (item.isDirectory()) {
                 await walk(full);
@@ -202,6 +226,15 @@ export async function packProject(options: PackOptions): Promise<PackResult> {
         }
     };
     await walk(options.projectDir);
+    if (dropped.length > 0) {
+        // 개수만 말하면 "무엇이?" 가 남는다. 이름을 댄다 — 다만 많으면 앞의 몇만 대고 나머지는 센다.
+        const shown = dropped.slice(0, 10);
+        report(
+            `비밀로 판단해 뺀 파일 ${dropped.length}개: ${shown.join(", ")}` +
+                (dropped.length > shown.length ? ` 외 ${dropped.length - shown.length}개` : ""),
+        );
+    }
+
     entries.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0)); // 재현 가능한 순서
 
     const buffer = await createZip(entries);
