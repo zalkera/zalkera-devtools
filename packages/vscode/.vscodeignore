@@ -1,0 +1,14 @@
+# 번들(dist/extension.cjs)에 들어갔으므로 소스·타입·맵은 뺀다.
+src/**
+tsconfig.json
+dist/**/*.map
+dist/**/*.d.ts
+
+# core 는 번들에 들어갔다. 워크스페이스 링크는 확장 폴더 **밖**을 가리켜 VSIX 경로 규칙을 깬다.
+node_modules/@zalkera/**
+node_modules/.bin/**
+node_modules/.package-lock.json
+
+# npm CLI 는 남긴다(자식 프로세스로 실행하는 실물). 문서·맨페이지만 덜어낸다.
+node_modules/npm/docs/**
+node_modules/npm/man/**

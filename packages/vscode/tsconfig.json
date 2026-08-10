@@ -1,14 +1,19 @@
 {
-    "extends": "../../tsconfig.base.json",
-    "compilerOptions": {
-        "rootDir": "src",
-        "outDir": "dist",
-        "types": [
-            "node",
-            "vscode"
-        ]
-    },
-    "include": [
-        "src/**/*.ts"
-    ]
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "types": [
+      "node",
+      "vscode"
+    ],
+    "paths": {
+      "@zalkera/devtools-core": [
+        "../core/dist/index.d.ts"
+      ]
+    }
+  },
+  "include": [
+    "src/**/*.ts"
+  ]
 }
