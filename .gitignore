@@ -8,4 +8,8 @@ out/
 *.log
 .worktrees/
 .claude-wt/
+# ⚠ 실제 워크트리 경로는 `.claude/worktrees/` 다. 위 `.claude-wt/` 만 있던 동안 **공개 레포에서**
+# `git add -A` 가 워크트리 7개를 embedded git repo 로 스테이징했다(심의 실측 · 2026-08-10).
+.claude/
+shared/
 package-lock.json

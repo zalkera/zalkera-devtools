@@ -50,6 +50,13 @@ let status: vscode.StatusBarItem;
 let session: { server: DevServer; projectDir: string; keyId: number } | null = null;
 /** 프리뷰 시작 재진입 가드 — 첫 실행은 수 분짜리 설치라 사용자가 반드시 두 번 누른다(심의 경고). */
 let previewStarting = false;
+/**
+ * **마지막으로 발급받은 프리뷰 키.** `session` 이 아니라 여기 사는 이유(심의 경고 · 2026-08-10):
+ * 종전에는 keyId 가 `session` 에만 있어서, 「프리뷰 중지」 뒤 로그아웃하면 **서버 키를 못 지웠다.**
+ * 프로세스는 죽었지만 키는 TTL(최대 12시간)까지 살아 있었고, 도움말은 "서버에서도 폐기됩니다"라고
+ * 적혀 있었다 — 문서가 하지 않는 일을 했다고 말하는 자리였다.
+ */
+let issuedKeyId: number | null = null;
 let store: SecretTokenStore;
 let handshake: Handshake | null = null;
 let sidebar: ZalkeraSidebar;
@@ -270,13 +277,21 @@ async function signIn(): Promise<void> {
 }
 
 async function signOut(options: { quiet?: boolean } = {}): Promise<void> {
+    // 준비 중(수 분짜리 첫 설치)에 로그아웃하면, 이미 발급된 키로 진행 중인 시작이 **로그아웃 뒤에
+    // 완주해** 프리뷰가 선다 — 사이드바는 로그아웃 화면인데 상태바는 "프리뷰 N"이 된다(심의 경고).
+    // 지금은 준비를 중간에 끊을 수단이 없으므로 **거절하고 말한다.** 조용히 어긋나게 두지 않는다.
+    if (previewStarting) {
+        void vscode.window.showWarningMessage("프리뷰를 준비하는 중입니다. 끝난 뒤 다시 시도해 주세요.");
+        return;
+    }
     // ⚠ **로그아웃이 반쪽이었다**(심의 경고): 도는 프리뷰를 안 끄고 서버 키도 안 지웠다. 이미 뜬 dev 서버는
     // 부팅 때 읽은 키로 **최대 12시간 상용 데이터를 계속 읽는다** — "로그아웃했다"는 화면과 실제가 어긋난다.
     // 순서가 중요하다: 서버를 먼저 멈추고(그 키를 쓰는 프로세스를 없앤 뒤) 키를 지운다.
-    const running = session;
     await stopPreview();
-    if (running) {
-        await revokeKeyQuietly(running.keyId);
+    // `session` 이 아니라 [issuedKeyId] 를 본다 — 「중지」 뒤 로그아웃해도 서버 키가 지워져야 한다.
+    if (issuedKeyId) {
+        await revokeKeyQuietly(issuedKeyId);
+        issuedKeyId = null;
     }
 
     await logout(store);
@@ -304,6 +319,12 @@ async function signOut(options: { quiet?: boolean } = {}): Promise<void> {
  * (`fetchSiteSource` 가 빈 폴더를 요구하는 것과 같은 규율). 대신 **경로를 알려주고 사람이 지우게** 한다.
  */
 async function resetAll(): Promise<void> {
+    // signOut 과 **같은 이유로** 거절한다. 여기서 막지 않으면 signOut 이 조용히 되돌아온 뒤 설정만
+    // 지워져서 — 로그인은 살아 있고 프리뷰는 뒤늦게 뜨는데 사이트 설정만 사라진 — 최악의 중간 상태가 된다.
+    if (previewStarting) {
+        void vscode.window.showWarningMessage("프리뷰를 준비하는 중입니다. 끝난 뒤 다시 시도해 주세요.");
+        return;
+    }
     const dir = workspaceDir();
     const confirmed = await vscode.window.showWarningMessage(
         "잘커라를 처음 상태로 되돌릴까요?",
@@ -558,7 +579,27 @@ async function startPreviewCommand(): Promise<void> {
         void vscode.window.showInformationMessage("프리뷰를 준비하는 중입니다. 잠시만 기다려 주세요.");
         return;
     }
+    // ⚠ **가드는 반드시 finally 로 푼다**(심의 차단 · 2026-08-10). 종전에는 성공 경로에서만 풀어서,
+    // 바로 아래 세 호출 중 하나만 던져도(폴더 미개방·사이트 선택 ESC·네트워크 오류) 가드가 영영 잠겼다.
+    // 그 뒤로는 「프리뷰 시작」이 창을 새로 열 때까지 "준비하는 중입니다"만 반복했다 — 준비 중인 것이
+    // 없는데 준비 중이라고 말하는 막다른 길이었다.
     previewStarting = true;
+    try {
+        await startPreviewInner();
+    } catch (error) {
+        // 시작이 실패했으면 **발급받은 키를 여기서 되돌린다.** 로그아웃까지 미루면 그때까지 서버에
+        // 살아 있고, 사용자는 실패했다고 들었으므로 로그아웃할 이유도 못 느낀다.
+        if (issuedKeyId !== null && !session) {
+            await revokeKeyQuietly(issuedKeyId);
+            issuedKeyId = null;
+        }
+        throw error;
+    } finally {
+        previewStarting = false;
+    }
+}
+
+async function startPreviewInner(): Promise<void> {
     const dir = requireWorkspace();
     const api = await ensureApi();
     const config = await ensureHandshake();
@@ -578,18 +619,27 @@ async function startPreviewCommand(): Promise<void> {
                 // 동봉한 npm 을 넘긴다 — 없으면 코어가 PATH 의 npm 으로 떨어진다(개발자 기계 전용 경로).
                 ...(runtime.npmCommand ? { npmCommand: runtime.npmCommand, npmEnv: runtime.env } : {}),
                 label: `${vscode.env.appName} · ${process.platform}`,
+                // 발급 즉시 붙잡는다 — 뒤가 실패해도 로그아웃·초기화가 이 키를 지울 수 있어야 한다.
+                onKeyIssued: (keyId) => {
+                    issuedKeyId = keyId;
+                },
                 onProgress: log,
                 onLog: log,
             }),
     ));
 
-    previewStarting = false;
     session = { server: started.server, projectDir: dir, keyId: started.keyId };
+    issuedKeyId = started.keyId;
     sidebar.update({ previewUrl: started.server.url, keyExpiresAt: started.expiresAt });
     started.server.onExit((code) => {
         session = null;
-        sidebar.update({ previewUrl: null });
+        clearRenewal();
+        // 만료 표시도 함께 걷는다 — 프리뷰가 없는데 "자격증명 만료: …"가 남으면 낡은 화면이다.
+        sidebar.update({ previewUrl: null, keyExpiresAt: null });
         setStatus("$(zap) 잘커라");
+        // **상태바를 되돌린다.** 종전에는 텍스트만 바꾸고 command 를 stop 에 둬서, 크래시 뒤 상태바를
+        // 누르면 session 이 없어 아무 일도 안 하는 죽은 버튼이 됐다(심의 경고).
+        status.command = "zalkera.preview.start";
         if (code !== 0 && code !== null) log(`프리뷰가 종료되었습니다(코드 ${code}).`);
     });
 
@@ -671,7 +721,7 @@ async function stopPreview(): Promise<void> {
     if (!session) return;
     await session.server.stop();
     session = null;
-    sidebar.update({ previewUrl: null });
+    sidebar.update({ previewUrl: null, keyExpiresAt: null });
     setStatus("$(zap) 잘커라");
     status.command = "zalkera.preview.start";
     log("프리뷰를 멈췄습니다.");

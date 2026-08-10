@@ -26,6 +26,11 @@ export interface PreviewOptions {
     npmEnv?: Record<string, string>;
     onProgress?: (message: string) => void;
     onLog?: (line: string) => void;
+    /**
+     * 프리뷰 키가 **발급된 순간** 호출된다. 성공을 기다리지 않는 이유는, 이 뒤의 의존성 설치와 dev 기동이
+     * 던질 수 있고 그때도 키는 이미 서버에 나 있기 때문이다 — 호출부가 폐기할 수 있어야 한다.
+     */
+    onKeyIssued?: (keyId: number) => void;
 }
 
 export interface PreviewSession {
@@ -51,6 +56,10 @@ export async function startPreview(options: PreviewOptions): Promise<PreviewSess
 
     report("프리뷰 자격증명을 발급받는 중…");
     const key = await options.api.issuePreviewKey(options.label);
+    // ⚠ **발급 즉시 알린다**(심의 차단 · 2026-08-10). 키는 여기서 나고, 그 뒤의 의존성 설치와 dev 기동은
+    // 둘 다 던질 수 있다. 종전에는 성공해서 반환될 때만 keyId 가 호출부에 닿아, **실패하면 아무도 폐기할 수
+    // 없는 키**가 서버에 TTL(최대 12시간)까지 남았다. 그 키는 이미 `.env.local` 로도 나가 있다.
+    options.onKeyIssued?.(key.id);
 
     const deps = await ensureDependencies({
         projectDir: options.projectDir,

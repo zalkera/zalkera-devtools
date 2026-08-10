@@ -115,14 +115,26 @@ async function isFree(port: number): Promise<boolean> {
     });
 }
 
+/**
+ * "Ready" 가 뜰 때까지 기다린다.
+ *
+ * ⚠ **타임아웃은 자식을 죽인다**(심의 차단 · 2026-08-10). 종전에는 reject 만 하고 프로세스를 그대로
+ * 뒀다. 그런데 이 함수가 던지면 [DevServer] 가 **반환되지 않으므로 `stop` 핸들 자체가 없다** — 즉
+ * 확장에서 끌 방법이 사라진다. 저사양 기계의 첫 컴파일이 상한을 넘는 일은 흔하고, 그때 사용자는
+ * "안 떴습니다"를 보는데 서버는 뒤에서 계속 떠서 **프리뷰 키를 든 채 UI 밖에 남았다.**
+ * 안 떴다고 말했으면 실제로 없어야 한다 — 거짓 실패는 거짓 성공만큼 나쁘다.
+ */
 async function waitForReady(child: ChildProcess, isReady: () => boolean): Promise<void> {
     await new Promise<void>((resolve, reject) => {
         const timer = setTimeout(() => {
+            clearInterval(poll);
+            // 던지기 **전에** 죽인다. 뒤에 두면 호출부가 먼저 정리를 시도한다.
+            void stopChild(child);
             reject(
                 new DevtoolsError(
                     "DEV_SERVER_FAILED",
                     "개발 서버가 시간 안에 뜨지 않았습니다.",
-                    "로그의 마지막 오류를 확인해 주세요.",
+                    "로그의 마지막 오류를 확인해 주세요. 뜨다 만 서버는 정리했습니다.",
                 ),
             );
         }, READY_TIMEOUT_MS);
