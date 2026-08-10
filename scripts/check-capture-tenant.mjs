@@ -82,60 +82,87 @@ const hits = [];
 const aliases = [];
 const casts = [];
 
+/** 브랜드 선언 자체. 이 한 줄이 무너지면 아래 검사가 전부 무의미하다(6차 경고 ③-J). */
+const BRAND_DECL = /export\s+type\s+CapturedTenant\s*=\s*string\s*&\s*\{\s*readonly\s+__capturedTenant\s*:\s*unique\s+symbol\s*\}/;
+
+/** 제네릭 타입인자가 정상인 자리 — 컨테이너 생성은 브랜드를 만들지 않는다. */
+const CONTAINERS = /^(Set|Map|WeakSet|WeakMap|Array|ReadonlyArray|Promise|Record|Partial|Readonly)$/;
+
 /**
- * ⚠ **선언한 규칙을 그대로 구현한다**(5차 재심의 차단). 초판은 헤더에 *"낱말이 `(` 없이 나오면 위반"*
- * 이라 선언해 놓고, 구현은 `as`·`:`·따옴표 **3패턴 화이트리스트**였다. 그래서 가장 평범한 형태
- * (`const brand = captureTenant;` · `{ brand: captureTenant }`)가 통과했다 — 적대적이지도 않고
- * `tsc` 도 초록인 코드다.
+ * ⚠ **면제는 낱말 축에만 있었다**(6차 재심의 차단 ③-F). 5차에서 "정의 파일 통째 면제를 걷었다"고
+ * 적었는데, 걷힌 것은 ⑴·⑶ 뿐이고 **브랜드 축(⑵-b)은 두 파일에서 그대로 꺼져 있었다.**
+ * 그런데 타입 별칭·제네릭을 잡는 규칙이 정확히 그것 하나다 — 즉 **브랜드를 위조하는 별칭을
+ * 브랜드 정의 파일 안에서 만들 수 있었다.** 커밋 자신의 진단 그대로다:
+ * *"별칭을 놓기에 가장 자연스러운 파일이 곧 면제 파일이었다."*
+ * ⇒ 브랜드 축에는 면제가 없다. 정의는 **형태로** 예외 처리한다(파일 이름이 아니라).
  *
- * ⇒ **뒤집는다.** 허용을 열거하고 나머지는 전부 위반이다. 허용은 둘뿐이다:
- *   ⓐ 바로 뒤가 `(` — 호출
- *   ⓑ 바로 뒤가 `,` 또는 `}` — import/export 목록의 **맨 이름**(별칭 없는 것)
- * 그리고 바로 **앞**이 `:` 이면 위반이다 — 객체 값으로 넘기는 형태(`{ brand: captureTenant }`).
- *
- * 파일 전체를 공백 정규화해 본다 — 선언이 여러 줄에 걸치는 경우를 줄 단위 검사가 놓쳤다.
+ * 그리고 **허용 열거는 반대 방향으로 위험하다** — 정상 코드를 죽인다(6차 경고 ③-G, 3종 실측).
+ * import/export 문을 먼저 통째로 들어내고 나머지에만 규칙을 적용한다. 그러면 specifier 를
+ * `}` 로 어림잡을 필요가 없어져 객체 shorthand(`{ captureTenant }`)도 함께 닫힌다(③-K).
  */
 function scan(rel, raw) {
-    // 주석을 지운다(오탐 방향이 빨강이라 안전하지만, 설명에 이름을 쓰는 것까지 막을 이유는 없다).
     const stripped = raw.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:])\/\/[^\n]*/g, "$1 ");
-    const flat = stripped.replace(/\s+/g, " ");
+    let flat = stripped.replace(/\s+/g, " ");
 
-    // ⑵ 캐스트 — 공백 정규화 뒤에 보므로 줄바꿈 캐스트도 잡힌다.
-    for (const _ of flat.matchAll(/\bas\s+CapturedTenant\b/g)) casts.push(rel);
-
-    // ⑵-b **브랜드를 만드는 다른 길** — 타입 별칭 재선언과 제네릭 경유.
-    //     `type CT = CapturedTenant` 뒤에 `x as CT` 를 쓰면 위 캐스트 정규식이 눈이 먼다.
-    //     `identity<CapturedTenant>(x)` 도 `captureTenant` 를 한 번도 안 거치고 브랜드를 만든다.
-    if (rel !== DEFINITION && rel !== REEXPORT) {
-        for (const _ of flat.matchAll(/\btype\s+\w+\s*=\s*CapturedTenant\b/g)) {
-            aliases.push(`${rel}  ← \`CapturedTenant\` 를 다른 이름으로 재선언`);
-        }
-        for (const _ of flat.matchAll(/\w+\s*<\s*CapturedTenant\s*>\s*\(/g)) {
-            aliases.push(`${rel}  ← 제네릭 타입인자로 브랜드 생성`);
+    // ── import/export 문은 따로 본다 — 여기서는 **맨 이름**만 정상이다.
+    const MODULE_STMT = /\b(?:import|export)\s*\{([^}]*)\}\s*from\s*["'][^"']+["']/g;
+    for (const m of flat.matchAll(MODULE_STMT)) {
+        for (const spec of m[1].split(",")) {
+            if (!/\bcaptureTenant\b/.test(spec)) continue;
+            if (!/^\s*(?:type\s+)?captureTenant\s*$/.test(spec)) {
+                aliases.push(`${rel}  ← import/export 에서 개명(\`${spec.trim()}\`)`);
+            }
         }
     }
+    flat = flat.replace(MODULE_STMT, " ");
 
-    // ⑴·⑶ 낱말 전수.
+    // ── ⑵ 캐스트(공백 정규화 뒤라 줄바꿈 캐스트 포함)
+    for (const _ of flat.matchAll(/\bas\s+CapturedTenant\b/g)) casts.push(rel);
+
+    // ── ⑵-b 브랜드가 나는 **다른 길**. 면제 없음.
+    //    ⓐ 타입 별칭 — 래퍼 한 겹(`Exclude<CapturedTenant, never>`)에도 무너지지 않게 RHS 전체를 본다(③-I).
+    for (const m of flat.matchAll(/\btype\s+(\w+)\s*=\s*([^;]*?)(?=;|$)/g)) {
+        if (m[1] === "CapturedTenant") continue; // 선언 자체
+        if (/\bCapturedTenant\b/.test(m[2])) {
+            aliases.push(`${rel}  ← \`type ${m[1]} = …CapturedTenant…\` — 이 이름으로 캐스트하면 캐스트 검사가 눈이 먼다`);
+        }
+    }
+    //    ⓑ 제네릭 타입인자로 브랜드 생성. `new` 와 컨테이너는 뺀다 — 값을 만들지 브랜드를 만들지 않는다(③-G).
+    for (const m of flat.matchAll(/(new\s+)?(\w+)\s*<\s*CapturedTenant\s*>\s*\(/g)) {
+        if (m[1] || CONTAINERS.test(m[2])) continue;
+        aliases.push(`${rel}  ← \`${m[2]}<CapturedTenant>(…)\` — 제네릭 경유로 브랜드 생성`);
+    }
+    //    ⓒ **브랜드를 반환한다고 선언한 함수**. `as any` 한 줄이면 캐스트도 별칭도 안 거친다(③-H).
+    const withoutDef = flat.replace(/export function captureTenant\s*\([^)]*\)\s*:\s*CapturedTenant/g, " ");
+    for (const _ of withoutDef.matchAll(/\)\s*:\s*CapturedTenant\b/g)) {
+        aliases.push(`${rel}  ← 브랜드를 반환하는 함수가 또 있다 — 본문이 \`as any\` 면 이 검사가 전부 눈이 먼다`);
+    }
+
+    // ── ⑴·⑶ 낱말. import/export 를 들어냈으므로 **호출만** 정상이다.
     for (const m of flat.matchAll(/\bcaptureTenant\b/g)) {
         const before = flat.slice(Math.max(0, m.index - 40), m.index).trimEnd();
         const after = flat.slice(m.index + "captureTenant".length).trimStart();
-
-        if (/export function $/.test(before + " ") || before.endsWith("export function")) continue; // 정의
-        if (before.endsWith(":")) {
-            aliases.push(`${rel}  ← 객체 값으로 넘김(\`: captureTenant\`)`);
-            continue;
-        }
+        if (before.endsWith("export function")) continue; // 정의
+        // ⚠ **호출 판정이 먼저다**(③-G). `:` 를 먼저 보면 삼항(`c ? x : captureTenant(…)`)을
+        //   "객체 값으로 넘김" 으로 **오진**한다 — 정상 호출인데 값 누출로 보고했다.
         if (after.startsWith("(")) {
             if (!isTest(rel)) hits.push(rel);
             continue;
         }
-        if (after.startsWith(",") || after.startsWith("}")) continue; // 맨 이름 specifier
-        aliases.push(`${rel}  ← 호출도 specifier 도 아닌 형태(별칭·값 대입·동적 접근)`);
+        aliases.push(`${rel}  ← 호출이 아닌 형태(별칭·값 대입·shorthand·동적 접근)`);
     }
 }
 
-for (const file of targets.flatMap(walk)) {
-    scan(relative(root, file), readFileSync(file, "utf8"));
+const scanned = targets.flatMap(walk);
+for (const file of scanned) scan(relative(root, file), readFileSync(file, "utf8"));
+
+// 브랜드 선언이 살아 있는가 — `= string` 한 줄이면 생 string 이 어디서나 통과한다.
+const defFile = scanned.find((f) => relative(root, f) === DEFINITION);
+if (!defFile || !BRAND_DECL.test(readFileSync(defFile, "utf8"))) {
+    console.error(`✗ 브랜드 선언이 기대한 형태가 아닙니다 — ${DEFINITION}`);
+    console.error("\n  `export type CapturedTenant = string & { readonly __capturedTenant: unique symbol }`");
+    console.error("  이 한 줄이 무너지면 아래 검사가 전부 통과하면서 생 string 이 어디서나 지나갑니다.");
+    process.exit(1);
 }
 
 // ⚠ **시험 파일은 무엇도 export 하지 않는다**(4차 실측 — `.test.ts` 제외를 이용해 프로덕션 헬퍼를
