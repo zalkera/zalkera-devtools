@@ -98,6 +98,10 @@ export async function createZip(entries: ZipEntry[]): Promise<Buffer> {
 /**
  * 이름이 같으면 뺀다. **소문자로 비교한다**(심의 실측: `.VSCode/settings.json` 이 실렸다) —
  * 우리가 만드는 파일은 늘 소문자지만, 판정이 대소문자를 타면 그건 판정이 아니다.
+ *
+ * ⚠ **여기 항목은 전부 소문자여야 한다.** 조회를 소문자로 바꾸면서 유일한 혼합 대소문자 항목이던
+ * `.DS_Store` 가 조용히 안 걸리게 됐다(재심의 실측 — 시험 129건이 전부 초록인 채로). 대소문자를
+ * 없애려던 수정이 대소문자 때문에 깨진 것이다. 새 항목을 넣을 때 이 줄을 보라.
  */
 const ALWAYS_EXCLUDED = new Set([
     "node_modules",
@@ -105,7 +109,7 @@ const ALWAYS_EXCLUDED = new Set([
     ".next",
     "dist",
     "out",
-    ".DS_Store",
+    ".ds_store", // ⚠ 조회가 소문자라 **항목도 소문자여야 한다**(아래 참조)
     ".turbo",
     ".vercel",
     ".claude",
@@ -181,7 +185,9 @@ export interface PackResult {
 
 /** 프로젝트를 zip 으로 묶는다. 제외 규칙은 위 목록 + 호출부 추가분. */
 export async function packProject(options: PackOptions): Promise<PackResult> {
-    const excluded = new Set([...ALWAYS_EXCLUDED, ...(options.exclude ?? [])]);
+    const excluded = new Set(
+        [...ALWAYS_EXCLUDED, ...(options.exclude ?? [])].map((name) => name.toLowerCase()),
+    );
     const entries: ZipEntry[] = [];
     const report = options.onProgress ?? (() => {});
 
@@ -198,7 +204,10 @@ export async function packProject(options: PackOptions): Promise<PackResult> {
         for (const item of await readdir(dir, { withFileTypes: true })) {
             if (excluded.has(item.name.toLowerCase())) continue;
             if (isSecretFile(item.name)) {
-                if (item.isFile()) dropped.push(relative(options.projectDir, join(dir, item.name)));
+                // 디렉터리도 센다 — `config.env/` 하나면 그 아래 소스가 **통째로** 사라지는데,
+                // 파일만 세면 그때가 제일 조용하다(재심의 경고).
+                const shown = relative(options.projectDir, join(dir, item.name));
+                dropped.push(item.isDirectory() ? `${shown}/` : shown);
                 continue;
             }
             const full = join(dir, item.name);

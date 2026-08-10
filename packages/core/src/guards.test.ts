@@ -221,6 +221,10 @@ test("가드 — 심의가 실측으로 찾아낸 새던 이름 넷", async () =
     }
     await mkdir(join(dir, ".VSCode"), { recursive: true });
     await writeFile(join(dir, ".VSCode", "settings.json"), '{"zalkera.tenant":"leaked-tenant"}');
+    // ⚠ 이 줄이 없어서 회귀를 놓쳤다(재심의 실측). 제외 목록에서 **유일하게 혼합 대소문자**였던
+    // 항목이라, 조회를 소문자로 바꾸자 조용히 안 걸리게 됐는데 시험 129건이 전부 초록이었다.
+    // `.DS_Store` 는 형제 파일명(제외된 비밀 파일 이름까지)을 담는다.
+    await writeFile(join(dir, ".DS_Store"), "SECRET_MARKER_7c3e");
 
     const packed = await packProject({ projectDir: dir });
 

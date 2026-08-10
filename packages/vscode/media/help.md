@@ -129,11 +129,13 @@
 | **부품·산출물** | `node_modules` · `.next` · `dist` · `out` · `.turbo` · `.vercel` — 서버가 다시 만듭니다 |
 | **비밀** | `.env` 로 시작하거나 `.env` 로 끝나는 **모든** 파일 · `.pem` `.key` `.p12` `.pfx` `.p8` · `.netrc` `_netrc` · `.git-credentials` · `.npmrc` · `.yarnrc.yml` · `credentials.json` · `service-account*.json` · `*firebase-adminsdk*.json` · SSH 키(`id_rsa` 등) |
 | **편집기·도구 설정** | `.vscode` · `.idea` · `.mcp.json` · `.claude` · `.git` |
+| **자격증명 폴더** | `.ssh` · `.aws` — 폴더째 빠집니다 |
 | **OS 부스러기** | `.DS_Store` |
 
 > **뺀 것은 이름을 알려 드립니다.** 비밀로 판단해 뺀 파일이 있으면 「출력」 패널의 **잘커라**
 > 채널에 이름이 남습니다. 이름만 비슷할 뿐 비밀이 아닌 파일(예: `turkey.key`)이 빠졌다면
 > 이름을 바꿔 다시 올리십시오 — 규칙을 느슨하게 하는 것보다 그쪽이 안전합니다.
+> **폴더도 마찬가지입니다** — `config.env` 같은 이름의 폴더는 통째로 빠지고, 그것도 이름을 알려 드립니다.
 >
 > ⚠ `.env.example` 처럼 **값이 비어 있는 예시 파일도 함께 빠집니다.** 환경변수 설명이 필요하시면
 > `env.example.md` 같은 다른 이름으로 두십시오.
