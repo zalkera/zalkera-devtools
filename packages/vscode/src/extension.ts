@@ -699,13 +699,31 @@ async function chooseTenant(force = false): Promise<string> {
         accessToken: () => getAccessToken(config.auth, store),
         tenantCode: () => "",
     });
-    const tenants = await api.listMyTenants();
+    const { tenants, isSuperAdmin } = await api.whoAmI();
+
+    // **목록이 비었다고 "사이트가 없다"가 아니다.** 서버는 소속(admin_user_tenant)만 열거하는데,
+    // SUPER_ADMIN 은 소속과 무관하게 전 테넌트를 다룬다(`AdminUserAuth.canAccessTenant`).
+    // 그 둘을 뭉뚱그리면 다 할 수 있는 사람에게 "권한이 없다"고 말하게 된다(실사용 신고).
     if (tenants.length === 0) {
-        throw new DevtoolsError(
-            "FORBIDDEN",
-            "이 계정에 연결된 사이트가 없습니다.",
-            "잘커라 콘솔에서 사이트에 초대되었는지 확인해 주세요.",
-        );
+        if (!isSuperAdmin) {
+            throw new DevtoolsError(
+                "FORBIDDEN",
+                "이 계정에 연결된 사이트가 없습니다.",
+                "잘커라 콘솔에서 사이트에 초대되었는지 확인해 주세요.",
+            );
+        }
+        const typed = await vscode.window.showInputBox({
+            title: "작업할 사이트 코드",
+            prompt: "본사 관리자 계정입니다 — 사이트 코드를 직접 입력하세요.",
+            placeHolder: "예: credium",
+            ignoreFocusOut: true,
+            validateInput: (value) =>
+                /^[a-z0-9][a-z0-9-]{0,62}$/.test(value.trim()) ? undefined : "영문 소문자·숫자·하이픈만 씁니다.",
+        });
+        if (!typed) throw new DevtoolsError("CANCELLED", "사이트를 고르지 않았습니다.");
+        const code = typed.trim();
+        await vscode.workspace.getConfiguration("zalkera").update("tenant", code, false);
+        return code;
     }
     // 하나뿐이어도 **바꾸려고 부른 경우엔 보여 준다** — 안 보여 주면 누른 사람이 무시당했다고 느낀다.
     const picked =

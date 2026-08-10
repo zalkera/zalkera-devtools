@@ -88,9 +88,25 @@ export class ZalkeraApi {
     }
 
     /** 내 소속 테넌트 — 테넌트 선택(A3)에 쓴다. 이 경로만 `X-Tenant` 를 요구하지 않는다(닭과 달걀). */
+    /**
+     * 내가 고를 수 있는 사이트. **`isSuperAdmin` 을 함께 돌려준다** — 목록이 비었다고 해서
+     * "사이트가 없다"가 아니기 때문이다.
+     *
+     * 서버는 `admin_user_tenant` **소속만** 열거한다. SUPER_ADMIN 은 소속과 무관하게 전 테넌트에
+     * 접근하므로(`AdminUserAuth.canAccessTenant`), 소속 행이 없는 순수 super-admin 은 **목록이 빈 채로
+     * 모든 사이트를 다룰 수 있다.** 그 둘을 구분하지 않으면 사용자에게 거짓을 말하게 된다.
+     */
+    async whoAmI(): Promise<{ tenants: TenantSummary[]; isSuperAdmin: boolean }> {
+        const me = await this.request<{ tenants?: TenantSummary[]; isSuperAdmin?: boolean }>(
+            "GET",
+            "/api/me",
+            { withTenant: false },
+        );
+        return { tenants: me.tenants ?? [], isSuperAdmin: me.isSuperAdmin === true };
+    }
+
     async listMyTenants(): Promise<TenantSummary[]> {
-        const me = await this.request<{ tenants?: TenantSummary[] }>("GET", "/api/me", { withTenant: false });
-        return me.tenants ?? [];
+        return (await this.whoAmI()).tenants;
     }
 
     /**
