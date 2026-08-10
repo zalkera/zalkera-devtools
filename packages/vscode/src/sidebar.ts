@@ -47,15 +47,19 @@ export class ZalkeraSidebar implements vscode.TreeDataProvider<Node> {
         }
 
         const nodes: Node[] = [
-            info(tenant ? `사이트: ${tenant}` : "사이트를 아직 고르지 않았습니다", "account"),
+            // **누를 수 있어야 한다.** 종전에는 info() 라 클릭이 안 됐다 — "안 골랐다"고 알리면서
+            // 고를 방법을 주지 않는 것은 막다른 길이다.
+            tenant
+                ? action(`사이트: ${tenant}`, "zalkera.site.choose", "account", "다른 사이트로 바꿉니다")
+                : action("사이트 선택", "zalkera.site.choose", "account", "작업할 사이트를 고릅니다"),
         ];
 
         if (!site) {
             // 소스가 없는 사람에게 프리뷰·발행을 먼저 보여 주면 할 수 없는 일을 권하는 것이 된다.
             nodes.push(
                 action("예제로 시작", "zalkera.site.create", "add", "시작 소스를 받아 새로 시작합니다"),
-                action("내 사이트 소스 받기", "zalkera.site.open", "cloud-download", "지금 배포 중인 소스를 로컬로"),
-                action("이 폴더를 사이트로 연결", "zalkera.site.link", "link", "이미 가진 소스를 이 사이트에 붙입니다"),
+                action("사이트 소스 받기", "zalkera.site.open", "cloud-download", "지금 배포 중인 소스를 로컬로"),
+                action("폴더 연결", "zalkera.site.link", "link", "이미 가진 소스를 이 사이트에 붙입니다"),
             );
         } else {
             nodes.push(
@@ -70,7 +74,7 @@ export class ZalkeraSidebar implements vscode.TreeDataProvider<Node> {
             nodes.push(
                 action("발행", "zalkera.publish", "cloud-upload", "묶어서 올립니다"),
                 action("버전 이력", "zalkera.history", "list-flat", "읽기 전용 — 아무것도 바뀌지 않습니다"),
-                action("이전 버전으로", "zalkera.rollback", "history", "버전 이력에서 고릅니다"),
+                action("버전 되돌리기", "zalkera.rollback", "history", "버전 이력에서 고릅니다"),
                 action("배포 전 검사", "zalkera.precheck", "checklist", "조언입니다 — 발행을 막지 않습니다"),
             );
         }

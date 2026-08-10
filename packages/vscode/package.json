@@ -1,6 +1,6 @@
 {
   "name": "zalkera-devtools",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "private": true,
   "license": "MIT",
   "type": "module",
@@ -63,6 +63,10 @@
         "command": "zalkera.doctor",
         "title": "잘커라: 진단",
         "category": "잘커라"
+      },
+      {
+        "command": "zalkera.site.choose",
+        "title": "잘커라: 사이트 선택"
       },
       {
         "command": "zalkera.site.create",

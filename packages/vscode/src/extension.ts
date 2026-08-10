@@ -85,6 +85,7 @@ export function activate(context: vscode.ExtensionContext): void {
         vscode.workspace.onDidOpenTextDocument((doc) => warnProtectedPath(doc)),
         vscode.window.registerTreeDataProvider("zalkera.sidebar", sidebar),
         register("zalkera.signIn", signIn),
+        register("zalkera.site.choose", chooseSite),
         register("zalkera.signOut", signOut),
         register("zalkera.site.create", startFromExample),
         register("zalkera.site.open", openSite),
@@ -681,38 +682,67 @@ async function ensureHandshake(): Promise<Handshake> {
     return handshake;
 }
 
-async function ensureApi(): Promise<ZalkeraApi> {
+/**
+ * 작업할 사이트를 고른다. **명령으로도, 곁다리로도 같은 경로**를 쓴다 — 두 벌이면 한쪽만 고쳐진다.
+ *
+ * @param force 이미 고른 사이트가 있어도 다시 묻는다(사이드바에서 바꾸려고 누른 경우).
+ */
+async function chooseTenant(force = false): Promise<string> {
     const config = await ensureHandshake();
     if (!(await store.read())) await signIn();
 
-    let tenant = tenantCode();
-    if (!tenant) {
-        const api = new ZalkeraApi({
-            apiBase: apiBase(),
-            accessToken: () => getAccessToken(config.auth, store),
-            tenantCode: () => "",
-        });
-        const tenants = await api.listMyTenants();
-        if (tenants.length === 0) {
-            throw new DevtoolsError(
-                "FORBIDDEN",
-                "이 계정에 연결된 사이트가 없습니다.",
-                "잘커라 콘솔에서 사이트에 초대되었는지 확인해 주세요.",
-            );
-        }
-        const picked =
-            tenants.length === 1
-                ? tenants[0]
-                : await vscode.window
-                      .showQuickPick(
-                          tenants.map((t) => ({ label: t.name, description: t.code })),
-                          { title: "어느 사이트로 작업할까요?" },
-                      )
-                      .then((choice) => tenants.find((t) => t.code === choice?.description));
-        if (!picked) throw new DevtoolsError("NOT_A_SITE", "사이트를 고르지 않았습니다.");
-        tenant = picked.code;
-        await vscode.workspace.getConfiguration("zalkera").update("tenant", tenant, false);
+    const current = tenantCode();
+    if (current && !force) return current;
+
+    const api = new ZalkeraApi({
+        apiBase: apiBase(),
+        accessToken: () => getAccessToken(config.auth, store),
+        tenantCode: () => "",
+    });
+    const tenants = await api.listMyTenants();
+    if (tenants.length === 0) {
+        throw new DevtoolsError(
+            "FORBIDDEN",
+            "이 계정에 연결된 사이트가 없습니다.",
+            "잘커라 콘솔에서 사이트에 초대되었는지 확인해 주세요.",
+        );
     }
+    // 하나뿐이어도 **바꾸려고 부른 경우엔 보여 준다** — 안 보여 주면 누른 사람이 무시당했다고 느낀다.
+    const picked =
+        tenants.length === 1 && !force
+            ? tenants[0]
+            : await vscode.window
+                  .showQuickPick(
+                      tenants.map((t) => ({
+                          label: t.name,
+                          description: t.code,
+                          detail: t.code === current ? "지금 작업 중" : undefined,
+                      })),
+                      { title: "어느 사이트로 작업할까요?" },
+                  )
+                  .then((choice) => tenants.find((t) => t.code === choice?.description));
+    if (!picked) throw new DevtoolsError("CANCELLED", "사이트를 고르지 않았습니다.");
+
+    await vscode.workspace.getConfiguration("zalkera").update("tenant", picked.code, false);
+    return picked.code;
+}
+
+/** 사이드바·팔레트에서 부르는 사이트 선택. 취소는 조용히 끝낸다. */
+async function chooseSite(): Promise<void> {
+    try {
+        const code = await chooseTenant(true);
+        log(`작업 사이트를 ${code} 로 바꿨습니다.`);
+        await refreshSidebar();
+        void vscode.window.showInformationMessage(`사이트: ${code}`);
+    } catch (error) {
+        if (error instanceof DevtoolsError && error.code === "CANCELLED") return;
+        throw error;
+    }
+}
+
+async function ensureApi(): Promise<ZalkeraApi> {
+    const config = await ensureHandshake();
+    const tenant = await chooseTenant();
 
     return new ZalkeraApi({
         apiBase: apiBase(),
