@@ -63,11 +63,20 @@ export class ZalkeraSidebar implements vscode.TreeDataProvider<Node> {
         }
 
         const nodes: Node[] = [
-            // **누를 수 있어야 한다.** 종전에는 info() 라 클릭이 안 됐다 — "안 골랐다"고 알리면서
-            // 고를 방법을 주지 않는 것은 막다른 길이다. 그룹에 넣지 않는 이유는 이것이 **전제**여서다.
-            tenant
-                ? action(`사이트: ${tenant}`, "zalkera.site.choose", "account", "다른 사이트로 바꿉니다")
-                : action("사이트 선택", "zalkera.site.choose", "account", "작업할 사이트를 고릅니다"),
+            // 「사이트」는 **지금 누구로 어디에 붙어 있는가**다. 로그아웃이 여기 있는 이유가 그것이다 —
+            // 「도움」에 두면 문제 해결 도구처럼 보이지만, 실제로는 이 붙어 있음을 **끊는** 일이다(오너 지적).
+            //
+            // 이름 줄은 **누를 수 있어야 한다.** 종전에는 info() 라 클릭이 안 됐다 — "안 골랐다"고
+            // 알리면서 고를 방법을 주지 않는 것은 막다른 길이다.
+            //
+            // 라벨에 「사이트: 」를 다시 붙이지 않는다. 그룹 이름이 이미 그 말을 했고, 계층을 만든
+            // 이유가 그 반복을 없애는 것이다.
+            group("사이트", "account", undefined, [
+                tenant
+                    ? action(`${tenant}`, "zalkera.site.choose", "circle-filled", "다른 사이트로 바꿉니다")
+                    : action("사이트 선택", "zalkera.site.choose", "circle-outline", "작업할 사이트를 고릅니다"),
+                action("로그아웃", "zalkera.signOut", "sign-out"),
+            ], tenant),
         ];
 
         if (!site) {
@@ -113,9 +122,9 @@ export class ZalkeraSidebar implements vscode.TreeDataProvider<Node> {
         }
 
         nodes.push(
+            // 「도움」에 남는 것은 **막혔을 때 쓰는 것**뿐이다 — 왜 안 되는지 보는 것과, 안 되면 처음으로.
             group("도움", "question", undefined, [
                 action("진단", "zalkera.doctor", "pulse", "무엇이 없어서 안 되는지 확인합니다"),
-                action("로그아웃", "zalkera.signOut", "sign-out"),
                 action("초기화", "zalkera.reset", "clear-all", "처음 상태로 되돌립니다(받은 소스는 남깁니다)"),
             ]),
         );
@@ -144,13 +153,22 @@ function info(label: string, icon: string): Node {
  * 묶음. **기본은 펼침**이다 — 접혀 있으면 처음 쓰는 사람이 한 번 더 눌러야 명령을 본다.
  * 접는 것은 익숙해진 사람의 선택이고, VS Code 가 그 선택을 기억한다.
  */
-function group(label: string, icon: string, tooltip: string | undefined, children: Node[]): Node {
+function group(
+    label: string,
+    icon: string,
+    tooltip: string | undefined,
+    children: Node[],
+    description?: string,
+): Node {
     const item: Node = new vscode.TreeItem(label, vscode.TreeItemCollapsibleState.Expanded);
     // **안정적인 id 가 있어야 접힘이 유지된다.** 없으면 VS Code 가 라벨로 추정하는데, 새로고침마다
     // 새 객체를 만드는 이 구조에서는 사용자가 접어 둔 것이 상태 변화(프리뷰 시작 등)마다 도로 펼쳐진다.
     item.id = `zalkera.group.${label}`;
     item.iconPath = new vscode.ThemeIcon(icon);
     if (tooltip) item.tooltip = tooltip;
+    // 흐린 글씨로 라벨 옆에 붙는다. **접어도 보이는 자리**라 "지금 어느 사이트인가"를 여기 둔다 —
+    // 자식으로만 두면 접는 순간 사라져, 계층을 만든 대가로 정보를 잃는다.
+    if (description) item.description = description;
     item.children = children;
     return item;
 }
