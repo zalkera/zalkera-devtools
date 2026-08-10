@@ -6,10 +6,13 @@ out/
 .env.local
 .DS_Store
 *.log
+# ⚠ `package-lock.json` 은 **무시하지 않는다**(2026-08-10 · CI 도입 때 드러남).
+# 뼈대 커밋에서 무시 목록에 들어갔었는데, 이 레포는 라이브러리가 아니라 **고객에게 배달되는
+# VSIX 의 원본**이다. 락파일이 없으면 ①CI 가 `npm ci` 를 못 쓰고 ②VSIX 에 동봉하는 npm CLI 실물이
+# 빌드 기계 상태에 따라 달라진다(`"npm": "^12.0.2"` — 캐럿이라 굽는 날마다 다를 수 있다).
 .worktrees/
 .claude-wt/
 # ⚠ 실제 워크트리 경로는 `.claude/worktrees/` 다. 위 `.claude-wt/` 만 있던 동안 **공개 레포에서**
 # `git add -A` 가 워크트리 7개를 embedded git repo 로 스테이징했다(심의 실측 · 2026-08-10).
 /.claude/
 /shared/
-package-lock.json
