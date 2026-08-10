@@ -20,6 +20,8 @@ import {
     stripCredentials,
     ZalkeraApi,
     waitForBuild,
+    captureTenant,
+    type CapturedTenant,
     decideReadyPrompt,
     decideSwitch,
     resolveHelpUrl,
@@ -509,7 +511,7 @@ async function startFromExample(): Promise<void> {
  *   전환은 **방문자가 보는 화면이 즉시 바뀌는** 동작이다. 잘못 누르면 손님이 다른 화면을 본다.
  *   「새 버전 올리기」가 조용한 대신 여기가 시끄러워야 한다 — 두 단계로 나눈 이유가 그것이다.
  */
-async function switchVersion(preselected?: number, expectedTenant?: string): Promise<void> {
+async function switchVersion(preselected?: number, expectedTenant?: CapturedTenant): Promise<void> {
     const { api, tenant } = await ensureApiFor();
     // 「지금 전환」이 눌린 시점과 여기서 API 가 묶이는 시점 사이에도 사이트는 바뀔 수 있다.
     // 올린 곳과 켤 곳이 다르면 **아무것도 하지 않는다** — 조용히 남의 사이트를 켜는 것보다 낫다.
@@ -539,7 +541,7 @@ async function switchVersion(preselected?: number, expectedTenant?: string): Pro
     // 방금 올려 놓고 "지금 전환"을 누른 경우 — 고르라고 다시 묻지 않는다. 이미 고른 것이다.
     const direct = preselected === undefined ? undefined : candidates.find((r) => r.revisionNo === preselected);
     if (preselected !== undefined && !direct) {
-        void vscode.window.showWarningMessage(`버전 ${preselected} 로 바꿀 수 없습니다.`);
+        void vscode.window.showWarningMessage(say.cannotSwitch(tenant, preselected));
         return;
     }
 
@@ -826,7 +828,7 @@ async function publishCommand(): Promise<void> {
  * 취소는 **기다리기를 그만두는 것**이지 빌드를 멈추는 것이 아니다. 서버는 계속 짓는다 —
  * 그 사실을 말해 주지 않으면 사용자는 자기가 취소해서 안 된 줄 안다.
  */
-async function awaitBuild(api: ZalkeraApi, revisionNo: number, tenant: string): Promise<boolean> {
+async function awaitBuild(api: ZalkeraApi, revisionNo: number, tenant: CapturedTenant): Promise<boolean> {
     const outcome = await vscode.window.withProgress(
         {
             location: vscode.ProgressLocation.Notification,
@@ -861,9 +863,7 @@ async function awaitBuild(api: ZalkeraApi, revisionNo: number, tenant: string): 
             return false;
         case "cancelled":
             log(`버전 ${revisionNo} 기다리기를 그만뒀습니다 — 빌드는 서버에서 계속됩니다.`);
-            void vscode.window.showInformationMessage(
-                "기다리기만 그만뒀습니다. 빌드는 서버에서 계속되고, 끝나면 「버전 전환」에 나옵니다.",
-            );
+            void vscode.window.showInformationMessage(say.buildWaitCancelled(tenant, revisionNo));
             return false;
         case "gone":
             void vscode.window.showWarningMessage(say.buildGone(tenant, revisionNo));
@@ -877,7 +877,7 @@ async function awaitBuild(api: ZalkeraApi, revisionNo: number, tenant: string): 
  * 자동으로 켜지 않는 이유가 여기 있다 — 확인 없이 켜면 잘못 고친 것이 바로 손님에게 간다.
  * 다만 "이제 켤 수 있다"는 사실까지 숨기면 사람이 콘솔을 뒤지게 된다. 알리되, 누르는 것은 사람이다.
  */
-async function offerSwitch(revisionNo: number, tenant: string): Promise<void> {
+async function offerSwitch(revisionNo: number, tenant: CapturedTenant): Promise<void> {
     // 기다리는 동안 사이트를 바꿨을 수 있다. 그때 「지금 전환」을 그대로 두면 **다른 사이트를 켠다** —
     // 알리되 원클릭은 내린다. 판정은 core 가 하고 여기서는 그리기만 한다(시험이 그 판정을 잠근다).
     const prompt = decideReadyPrompt(tenant, tenantCode(), revisionNo);
@@ -1161,9 +1161,10 @@ async function ensureApi(): Promise<ZalkeraApi> {
  *
  * 사이트 이름을 적어 안심시키려던 트랜치가, 틀린 이름으로 **오인을 보증**하는 자리가 된다.
  */
-async function ensureApiFor(): Promise<{ api: ZalkeraApi; tenant: string }> {
+async function ensureApiFor(): Promise<{ api: ZalkeraApi; tenant: CapturedTenant }> {
     const config = await ensureHandshake();
-    const tenant = await chooseTenant();
+    // **여기가 유일한 캡처 지점이다.** 브랜드가 붙는 자리가 늘어나면 그것이 방어가 느슨해지는 신호다.
+    const tenant = captureTenant(await chooseTenant());
 
     return {
         tenant,

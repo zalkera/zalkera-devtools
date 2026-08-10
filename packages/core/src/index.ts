@@ -50,10 +50,12 @@ export { isReceivable, meaningfulEntries } from "./emptyDir.ts";
 export { waitForBuild, type BuildOutcome, type WaitOptions } from "./build.ts";
 
 export {
+    captureTenant,
     decideReadyPrompt,
     decideSwitch,
     resolveHelpUrl,
     say,
+    type CapturedTenant,
     type ReadyPrompt,
     type SwitchDecision,
 } from "./tenantScope.ts";

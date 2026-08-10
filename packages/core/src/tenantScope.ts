@@ -8,12 +8,34 @@
  *   틀린 이름으로 오인을 보증하는 자리가 됐다.*
  *
  * ■ 이 파일의 설계가 그 결함을 **구조적으로** 막는다
- *   문구를 만드는 함수가 전부 `tenant` 를 **인자로 요구한다.** 라이브로 읽을 방법이 없으므로,
- *   호출부는 캡처한 값을 넘길 수밖에 없다. 규율이 아니라 타입이 지킨다.
+ *   문구를 만드는 함수가 전부 [CapturedTenant] 를 요구한다. **생 `string` 은 컴파일이 안 된다** —
+ *   그래서 호출부는 캡처한 값을 넘길 수밖에 없다. 규율이 아니라 타입이 지킨다.
  *
- *   ⚠ 그러니 여기 어느 함수에도 "현재 테넌트를 읽는" 기능을 넣지 마라. 그 순간 이 파일의
- *   존재 이유가 사라진다.
+ *   ⚠ 초판은 인자 타입이 그냥 `string` 이었다. 심의가 `say.publishConfirm(tenant)` 를
+ *   `say.publishConfirm(tenantCode())` 로 한 줄 되돌려 보니 **시험 144건이 전부 초록**이었다 —
+ *   *"타입이 지킨다"* 고 적어 놓고 타입이 요구한 것은 `string` 하나였고 `tenantCode()` 도 `string`
+ *   이었다. 선언이 거짓이었던 것이다. 브랜드가 그 선언을 처음으로 참으로 만든다.
+ *
+ *   ⚠ 여기 어느 함수에도 "현재 테넌트를 읽는" 기능을 넣지 마라. 그 순간 존재 이유가 사라진다.
  */
+
+/**
+ * **캡처된** 테넌트 코드. 라이브로 읽은 값과 타입으로 구분된다.
+ *
+ * 만드는 곳은 [captureTenant] 하나뿐이고, 호출부는 **API 를 그 테넌트에 묶는 자리에서만** 부른다
+ * (`ensureApiFor`). 그러면 표기와 동작이 같은 값을 보는 것이 컴파일 시점에 강제된다.
+ */
+export type CapturedTenant = string & { readonly __capturedTenant: unique symbol };
+
+/**
+ * 캡처 지점 표시. **API 를 이 테넌트에 묶는 그 순간에만** 부른다.
+ *
+ * ⚠ `tenantCode()` 같은 라이브 조회의 반환을 여기 통과시키면 브랜드가 거짓이 된다. 이 함수를
+ * 호출하는 자리가 늘어나면 그것이 곧 이 방어가 느슨해지는 신호다 — 지금은 한 곳뿐이다.
+ */
+export function captureTenant(tenant: string): CapturedTenant {
+    return tenant as CapturedTenant;
+}
 
 /** 「지금 전환」을 눌렀을 때, 그 버전을 올린 사이트와 지금 작업 사이트가 같은가. */
 export type SwitchDecision =
@@ -27,7 +49,7 @@ export type SwitchDecision =
  * `expected` 가 없으면(팔레트에서 직접 「버전 전환」을 부른 경우) 대조할 것이 없으므로 통과다 —
  * 그 경로는 사용자가 목록에서 눈으로 보고 고른다.
  */
-export function decideSwitch(expected: string | undefined, current: string): SwitchDecision {
+export function decideSwitch(expected: CapturedTenant | undefined, current: string): SwitchDecision {
     if (expected === undefined || expected === current) return { ok: true };
     return {
         ok: false,
@@ -43,7 +65,7 @@ export type ReadyPrompt =
     /** 사이트가 바뀌었다 — 원클릭을 내리고 **어디로 가야 하는지** 말한다. */
     | { kind: "redirect"; message: string };
 
-export function decideReadyPrompt(uploaded: string, current: string, revisionNo: number): ReadyPrompt {
+export function decideReadyPrompt(uploaded: CapturedTenant, current: string, revisionNo: number): ReadyPrompt {
     if (uploaded !== current) {
         return {
             kind: "redirect",
@@ -66,7 +88,7 @@ export function decideReadyPrompt(uploaded: string, current: string, revisionNo:
  * 바꿀 수 있어서, 말하지 않으면 A 의 소스가 B 의 라이브가 된다.
  */
 export const say = {
-    publishConfirm(tenant: string): { message: string; detail: string; action: string } {
+    publishConfirm(tenant: CapturedTenant): { message: string; detail: string; action: string } {
         return {
             message: `「${tenant}」 사이트에 지금 소스를 새 버전으로 올립니다.`,
             detail:
@@ -75,26 +97,41 @@ export const say = {
             action: "올리기",
         };
     },
-    switchConfirm(tenant: string, revisionNo: number): { message: string; detail: string; action: string } {
+    switchConfirm(tenant: CapturedTenant, revisionNo: number): { message: string; detail: string; action: string } {
         return {
             message: `「${tenant}」 사이트를 버전 ${revisionNo} 로 바꿉니다.`,
             detail: "방문자가 보는 화면이 바로 바뀝니다.",
             action: "바꾸기",
         };
     },
-    switched(tenant: string, revisionNo: number): string {
+    switched(tenant: CapturedTenant, revisionNo: number): string {
         return `「${tenant}」 사이트를 버전 ${revisionNo} 로 바꿨습니다.`;
     },
-    building(tenant: string, revisionNo: number): string {
+    building(tenant: CapturedTenant, revisionNo: number): string {
         return `「${tenant}」 버전 ${revisionNo} 를 서버가 빌드하는 중`;
     },
-    buildFailed(tenant: string, revisionNo: number): string {
+    buildFailed(tenant: CapturedTenant, revisionNo: number): string {
         return `「${tenant}」 버전 ${revisionNo} 를 서버가 만들지 못했습니다. 사이트는 그대로입니다.`;
     },
-    buildTimedOut(tenant: string, revisionNo: number): string {
+    buildTimedOut(tenant: CapturedTenant, revisionNo: number): string {
         return `「${tenant}」 버전 ${revisionNo} 가 아직 빌드 중입니다. 끝나면 「버전 전환」에서 고르실 수 있습니다.`;
     },
-    buildGone(tenant: string, revisionNo: number): string {
+    /**
+     * 기다리기를 그만뒀을 때. ⚠ **취소는 빌드를 멈추는 것이 아니다** — 서버는 계속 짓는다.
+     * 그 사실을 말해 주지 않으면 사용자는 자기가 취소해서 안 된 줄 안다.
+     *
+     * 이 분기만 인라인 문자열로 남아 사이트 이름이 없었다(심의 경고) — 대기 중 사이트를 바꾼
+     * 사용자가 "어느 사이트가 빌드 중이라는 거지"로 오독하는 자리였다.
+     */
+    buildWaitCancelled(tenant: CapturedTenant, revisionNo: number): string {
+        return `「${tenant}」 버전 ${revisionNo} 는 서버에서 계속 빌드됩니다. 기다리기만 그만뒀습니다 — ` +
+            `끝나면 「버전 전환」에 나옵니다.`;
+    },
+    /** 전환 대상이 목록에 없을 때(빌드 중·실패·이미 활성). */
+    cannotSwitch(tenant: CapturedTenant, revisionNo: number): string {
+        return `「${tenant}」 버전 ${revisionNo} 로 바꿀 수 없습니다.`;
+    },
+    buildGone(tenant: CapturedTenant, revisionNo: number): string {
         return `「${tenant}」 에서 버전 ${revisionNo} 를 찾지 못했습니다.`;
     },
 };
