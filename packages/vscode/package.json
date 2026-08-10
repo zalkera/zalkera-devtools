@@ -1,6 +1,6 @@
 {
   "name": "zalkera-devtools",
-  "version": "0.1.16",
+  "version": "0.1.17",
   "private": true,
   "license": "MIT",
   "type": "module",
@@ -74,8 +74,8 @@
         "category": "잘커라"
       },
       {
-        "command": "zalkera.rollback",
-        "title": "잘커라: 버전 되돌리기",
+        "command": "zalkera.version.switch",
+        "title": "잘커라: 버전 전환",
         "category": "잘커라"
       },
       {

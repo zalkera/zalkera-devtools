@@ -106,7 +106,7 @@ export function activate(context: vscode.ExtensionContext): void {
             await startPreviewCommand();
         }),
         register("zalkera.publish", publishCommand),
-        register("zalkera.rollback", rollback),
+        register("zalkera.version.switch", switchVersion),
         register("zalkera.history", showHistory),
         register("zalkera.precheck", precheckCommand),
         register("zalkera.agent.connect", connectAgent),
@@ -376,43 +376,58 @@ async function startFromExample(): Promise<void> {
 }
 
 /**
- * D4「이전 버전으로」 — 버전 이력에서 골라 되돌린다. 백엔드 신작이 없다(activate 가 이미 있다).
+ * D4「버전 전환」 — 어느 버전을 켤지 고른다. 백엔드 신작이 없다(activate 가 이미 있다).
  *
- * **확인을 modal 로 받는다** — 되돌리기는 사이트가 바로 바뀌는 동작이고, 잘못 누르면 손님이 다른 화면을 본다.
+ * ■ 「되돌리기」와 합친 이유 (오너 확정 2026-08-10)
+ *   종전 이름은 「버전 되돌리기」였는데, 목록은 처음부터 **활성이 아닌 버전 전부**였다 — 방금 올린
+ *   새 버전도 거기 있었다. 앞으로 가는 것과 뒤로 가는 것이 **같은 연산**(`activateRevision`)인데
+ *   이름만 뒤를 가리켜, 방금 올린 것을 켜려는 사람이 이 자리를 찾지 못했다.
+ *
+ *   같은 API 를 두 이름으로 두면 언젠가 한쪽만 고쳐진다. 그래서 하나로 둔다.
+ *
+ * ■ 확인을 modal 로 받는다
+ *   전환은 **방문자가 보는 화면이 즉시 바뀌는** 동작이다. 잘못 누르면 손님이 다른 화면을 본다.
+ *   「새 버전 올리기」가 조용한 대신 여기가 시끄러워야 한다 — 두 단계로 나눈 이유가 그것이다.
  */
-async function rollback(): Promise<void> {
+async function switchVersion(): Promise<void> {
     const api = await ensureApi();
     const revisions = await api.listRevisions();
     const candidates = revisions.filter((r) => !r.isActive);
     if (candidates.length === 0) {
-        void vscode.window.showInformationMessage("되돌릴 이전 버전이 없습니다.");
+        void vscode.window.showInformationMessage("바꿀 다른 버전이 없습니다.");
         return;
     }
 
+    // 목록은 최신순이다. 맨 위가 대개 **방금 올린 것**이라 그렇다고 말해 준다 — 사람이 번호를
+    // 외우고 있지는 않다.
+    const active = revisions.find((r) => r.isActive);
     const choice = await vscode.window.showQuickPick(
-        candidates.map((r) => ({
+        candidates.map((r, index) => ({
             label: `버전 ${r.revisionNo}`,
             description: new Date(r.createdAt).toLocaleString("ko-KR"),
-            detail: r.status,
+            detail:
+                index === 0 && (active === undefined || r.revisionNo > active.revisionNo)
+                    ? `${r.status} · 가장 최근에 올린 것`
+                    : r.status,
         })),
-        { title: "어느 버전으로 되돌릴까요?" },
+        { title: active ? `지금은 버전 ${active.revisionNo} 입니다 — 어느 버전으로 바꿀까요?` : "어느 버전으로 바꿀까요?" },
     );
     const target = candidates.find((r) => `버전 ${r.revisionNo}` === choice?.label);
     if (!target) return;
 
     const confirm = await vscode.window.showWarningMessage(
-        `버전 ${target.revisionNo} 로 되돌립니다. 지금 배포 중인 화면이 바뀝니다.`,
-        { modal: true },
-        "되돌리기",
+        `사이트를 버전 ${target.revisionNo} 로 바꿉니다.`,
+        { modal: true, detail: "방문자가 보는 화면이 바로 바뀝니다." },
+        "바꾸기",
     );
-    if (confirm !== "되돌리기") return;
+    if (confirm !== "바꾸기") return;
 
     await vscode.window.withProgress(
-        { location: vscode.ProgressLocation.Notification, title: `버전 ${target.revisionNo} 로 되돌리는 중` },
+        { location: vscode.ProgressLocation.Notification, title: `버전 ${target.revisionNo} 로 바꾸는 중` },
         () => api.activateRevision(target.revisionNo),
     );
-    log(`버전 ${target.revisionNo} 로 되돌렸습니다.`);
-    void vscode.window.showInformationMessage(`버전 ${target.revisionNo} 로 되돌렸습니다.`);
+    log(`사이트를 버전 ${target.revisionNo} 로 바꿨습니다.`);
+    void vscode.window.showInformationMessage(`사이트를 버전 ${target.revisionNo} 로 바꿨습니다.`);
 }
 
 /**
@@ -651,7 +666,7 @@ async function connectAgent(): Promise<void> {
 }
 
 /**
- * D5「이력」 — 버전 목록을 읽기 전용으로 보여 준다. 되돌리기는 별도 명령(D4)이라 **여기서는 아무것도 바뀌지
+ * D5「이력」 — 버전 목록을 읽기 전용으로 보여 준다. 전환은 별도 명령(D4)이라 **여기서는 아무것도 바뀌지
  * 않는다** — 보러 들어왔다가 실수로 라이브를 바꾸는 일이 없어야 한다.
  */
 async function showHistory(): Promise<void> {
@@ -668,7 +683,7 @@ async function showHistory(): Promise<void> {
         const when = new Date(r.createdAt).toLocaleString("ko-KR");
         log(`${r.isActive ? "▶" : " "} 버전 ${r.revisionNo} · ${r.status} · ${when}${r.note ? ` · ${r.note}` : ""}`);
     }
-    log(`(총 ${revisions.length}개 · 바꾸려면 「버전 되돌리기」를 쓰세요)`);
+    log(`(총 ${revisions.length}개 · 바꾸려면 「버전 전환」을 쓰세요)`);
 }
 
 /** F2 — 문서 하나를 보고 진단을 갱신한다. 우리 프로젝트 밖 파일은 보지 않는다. */

@@ -16,7 +16,7 @@ import * as vscode from "vscode";
  *   안 쓰는 묶음은 사용자가 접어 둘 수 있다. 소제목은 그게 안 된다.
  *
  * ■ 순서는 작업 흐름이다
- *   사이트(어디서) → 소스(가져오기) → 만들기(고치고 보기) → 내보내기(살펴보고 올리기) → 되돌리기 → 도움.
+ *   사이트(어디서) → 소스(가져오기) → 만들기(고치고 보기) → 내보내기(살펴보고 올리기) → 버전 → 도움.
  *   ⚠ 종전에는 **「배포 전 검사」가 「발행」 아래**에 있었다 — 이름이 약속한 순서와 화면이 어긋났다.
  */
 export interface SidebarState {
@@ -115,9 +115,11 @@ export class ZalkeraSidebar implements vscode.TreeDataProvider<Node> {
                     // 이름이 하는 일과 같아야 한다 — 이 명령은 **올리기까지**다(전환은 따로).
                     action("새 버전 올리기", "zalkera.publish", "cloud-upload", "올리기만 합니다 — 사이트는 아직 안 바뀝니다"),
                 ]),
-                group("되돌리기", "history", "지난 버전으로 갑니다", [
+                // 「되돌리기」가 아니라 「버전」이다 — 여기서 하는 일은 **어느 버전을 켤지 고르는 것**이고,
+                // 뒤로 가는 것은 그 한 경우일 뿐이다(오너 확정).
+                group("버전", "history", "어느 버전을 켤지 정합니다", [
                     action("버전 이력", "zalkera.history", "list-flat", "읽기 전용 — 아무것도 바뀌지 않습니다"),
-                    action("버전 되돌리기", "zalkera.rollback", "discard", "버전 이력에서 고릅니다"),
+                    action("버전 전환", "zalkera.version.switch", "arrow-swap", "방문자가 보는 화면이 바뀝니다"),
                 ]),
             );
         }
