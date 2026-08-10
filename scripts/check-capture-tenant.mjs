@@ -81,41 +81,61 @@ const isTest = (rel) => /\.(test|spec)\.[mc]?tsx?$/.test(rel);
 const hits = [];
 const aliases = [];
 const casts = [];
+
+/**
+ * ⚠ **선언한 규칙을 그대로 구현한다**(5차 재심의 차단). 초판은 헤더에 *"낱말이 `(` 없이 나오면 위반"*
+ * 이라 선언해 놓고, 구현은 `as`·`:`·따옴표 **3패턴 화이트리스트**였다. 그래서 가장 평범한 형태
+ * (`const brand = captureTenant;` · `{ brand: captureTenant }`)가 통과했다 — 적대적이지도 않고
+ * `tsc` 도 초록인 코드다.
+ *
+ * ⇒ **뒤집는다.** 허용을 열거하고 나머지는 전부 위반이다. 허용은 둘뿐이다:
+ *   ⓐ 바로 뒤가 `(` — 호출
+ *   ⓑ 바로 뒤가 `,` 또는 `}` — import/export 목록의 **맨 이름**(별칭 없는 것)
+ * 그리고 바로 **앞**이 `:` 이면 위반이다 — 객체 값으로 넘기는 형태(`{ brand: captureTenant }`).
+ *
+ * 파일 전체를 공백 정규화해 본다 — 선언이 여러 줄에 걸치는 경우를 줄 단위 검사가 놓쳤다.
+ */
+function scan(rel, raw) {
+    // 주석을 지운다(오탐 방향이 빨강이라 안전하지만, 설명에 이름을 쓰는 것까지 막을 이유는 없다).
+    const stripped = raw.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:])\/\/[^\n]*/g, "$1 ");
+    const flat = stripped.replace(/\s+/g, " ");
+
+    // ⑵ 캐스트 — 공백 정규화 뒤에 보므로 줄바꿈 캐스트도 잡힌다.
+    for (const _ of flat.matchAll(/\bas\s+CapturedTenant\b/g)) casts.push(rel);
+
+    // ⑵-b **브랜드를 만드는 다른 길** — 타입 별칭 재선언과 제네릭 경유.
+    //     `type CT = CapturedTenant` 뒤에 `x as CT` 를 쓰면 위 캐스트 정규식이 눈이 먼다.
+    //     `identity<CapturedTenant>(x)` 도 `captureTenant` 를 한 번도 안 거치고 브랜드를 만든다.
+    if (rel !== DEFINITION && rel !== REEXPORT) {
+        for (const _ of flat.matchAll(/\btype\s+\w+\s*=\s*CapturedTenant\b/g)) {
+            aliases.push(`${rel}  ← \`CapturedTenant\` 를 다른 이름으로 재선언`);
+        }
+        for (const _ of flat.matchAll(/\w+\s*<\s*CapturedTenant\s*>\s*\(/g)) {
+            aliases.push(`${rel}  ← 제네릭 타입인자로 브랜드 생성`);
+        }
+    }
+
+    // ⑴·⑶ 낱말 전수.
+    for (const m of flat.matchAll(/\bcaptureTenant\b/g)) {
+        const before = flat.slice(Math.max(0, m.index - 40), m.index).trimEnd();
+        const after = flat.slice(m.index + "captureTenant".length).trimStart();
+
+        if (/export function $/.test(before + " ") || before.endsWith("export function")) continue; // 정의
+        if (before.endsWith(":")) {
+            aliases.push(`${rel}  ← 객체 값으로 넘김(\`: captureTenant\`)`);
+            continue;
+        }
+        if (after.startsWith("(")) {
+            if (!isTest(rel)) hits.push(rel);
+            continue;
+        }
+        if (after.startsWith(",") || after.startsWith("}")) continue; // 맨 이름 specifier
+        aliases.push(`${rel}  ← 호출도 specifier 도 아닌 형태(별칭·값 대입·동적 접근)`);
+    }
+}
+
 for (const file of targets.flatMap(walk)) {
-    readFileSync(file, "utf8")
-        .split("\n")
-        .forEach((line, i) => {
-            // 주석은 세지 않는다 — 설명에 등장하는 것까지 세면 문서를 못 쓴다.
-            // (오탐 방향이 빨강이라 안전하다: 코드를 주석으로 위장해도 tsc 가 먼저 죽는다.)
-            const trimmed = line.trim();
-            if (trimmed.startsWith("//") || trimmed.startsWith("*")) return;
-            const where = `${relative(root, file)}:${i + 1}`;
-
-            // ⑵ 캐스트 — 함수를 **안 거치고** 브랜드를 만드는 자리.
-            if (/\bas\s+CapturedTenant\b/.test(line)) casts.push(where);
-
-            // ⑶ **낱말이 값으로 새는 자리.** `captureTenant` 뒤에 `(` 가 없으면 별칭·구조분해·
-            //    동적 인덱스·re-export 중 하나이고, 그 순간 ⑴ 의 리터럴 검사가 눈이 먼다.
-            //    한 규칙으로 그 넷을 함께 잡는다(4차 실측: 별칭만 막았더니 나머지 셋이 통과했다).
-            const rel = relative(root, file);
-            if (rel !== DEFINITION && rel !== REEXPORT) {
-                // 평범한 named import(`{ captureTenant, … }`)는 정상이다 — **이름을 바꾸거나 문자열로
-                // 만드는** 형태만 잡는다. 그 셋이 리터럴 검사를 눈멀게 하는 전부다(4차 실측).
-                const disguises = [
-                    [/\bcaptureTenant\s+as\b/, "별칭(`as`)"],
-                    [/\bcaptureTenant\s*:/, "구조분해 개명(`:`)"],
-                    [/["'`]captureTenant["'`]/, "문자열 인덱스"],
-                ];
-                for (const [re, what] of disguises) {
-                    if (re.test(line)) aliases.push(`${where}  ← ${what}`);
-                }
-            }
-
-            // ⑴ 호출. 정의 줄은 세지 않는다 — 만드는 곳이 아니라 **쓰는 곳**을 센다.
-            if (/export\s+function\s+captureTenant\s*\(/.test(line)) return;
-            if (isTest(rel)) return;
-            if (/\bcaptureTenant\s*\(/.test(line)) hits.push(where);
-        });
+    scan(relative(root, file), readFileSync(file, "utf8"));
 }
 
 // ⚠ **시험 파일은 무엇도 export 하지 않는다**(4차 실측 — `.test.ts` 제외를 이용해 프로덕션 헬퍼를
