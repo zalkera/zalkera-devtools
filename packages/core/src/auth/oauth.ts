@@ -11,7 +11,13 @@ export interface AuthConfig {
 }
 
 export interface LoginOptions {
-    /** 브라우저를 여는 방법. 확장은 `vscode.env.openExternal`, CLI 는 OS 열기 명령을 꽂는다. */
+    /**
+     * 브라우저를 여는 방법. 확장은 `vscode.env.openExternal`, CLI 는 OS 열기 명령을 꽂는다.
+     *
+     * ⚠ **열지 못했으면 `CANCELLED` 로 던져라.** 호스트가 "외부 사이트를 여시겠습니까?" 같은 확인을
+     * 띄우고 사용자가 거절할 수 있다(VS Code 는 그때 `openExternal` 이 `false` 를 준다).
+     * 조용히 넘어가면 **브라우저는 열리지도 않았는데** 여기서 콜백을 기다려 매달린다.
+     */
     openBrowser(url: string): Promise<void>;
     /** 사람이 로그인하는 시간. 기본 5분. */
     timeoutMs?: number;

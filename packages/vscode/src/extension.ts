@@ -143,7 +143,12 @@ async function signIn(): Promise<void> {
                 await login(config.auth, store, {
                     // 브라우저를 여는 방법만 확장이 안다 — 나머지 흐름은 코어가 갖는다.
                     openBrowser: async (url) => {
-                        await vscode.env.openExternal(vscode.Uri.parse(url));
+                        // ⚠ **반환값을 본다.** VS Code 는 외부 주소를 열기 전에 "이 사이트를 여시겠습니까?"
+                        // 확인창을 띄우고, 사용자가 거기서 취소하면 `false` 를 돌려준다. 이걸 무시하면
+                        // **브라우저는 열리지도 않았는데** 코어가 콜백을 기다려, 진행 알림이 남고
+                        // 사용자는 취소를 두 번 하게 된다(실사용 신고).
+                        const opened = await vscode.env.openExternal(vscode.Uri.parse(url));
+                        if (!opened) throw new DevtoolsError("CANCELLED", "로그인을 취소했습니다.");
                     },
                     signal: controller.signal,
                 });

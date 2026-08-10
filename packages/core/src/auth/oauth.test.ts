@@ -133,3 +133,23 @@ test("이미 취소된 신호를 주면 브라우저를 열기도 전에 끝난�
     );
     ok(!opened, "이미 취소됐으면 브라우저를 열지 않는다");
 });
+
+test("브라우저를 못 열면(호스트 확인창 거절) 기다리지 않고 끝난다", async () => {
+    // VS Code 는 외부 주소를 열기 전에 확인창을 띄운다. 거기서 취소하면 브라우저가 열리지 않으므로
+    // 콜백이 올 리 없다 — 그런데도 기다리면 진행 알림이 남아 사용자가 취소를 두 번 하게 된다.
+    const store = new MemoryTokenStore();
+    const started = Date.now();
+    await rejects(
+        login(config, store, {
+            openBrowser: async () => {
+                throw new DevtoolsError("CANCELLED", "로그인을 취소했습니다.");
+            },
+        }),
+        (error: unknown) => {
+            ok(error instanceof DevtoolsError);
+            strictEqual(error.code, "CANCELLED");
+            return true;
+        },
+    );
+    ok(Date.now() - started < 5_000, "타임아웃(5분)을 기다리면 안 된다");
+});
