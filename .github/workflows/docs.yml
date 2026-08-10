@@ -9,12 +9,14 @@
 #   레포에 의존성을 안 늘린다. 마크다운 렌더러를 devDependency 로 들이면 확장 빌드와 문서
 #   빌드가 같은 lockfile 을 나눠 쓰게 되고, 문서 때문에 확장이 깨지는 날이 온다.
 #
-# ■ Pages 켜기
-#   `configure-pages` 가 `enablement: true` 로 **스스로 켠다**(pages: write 권한으로 API 를 부른다).
-#   손으로 Settings 를 만질 일이 없다.
+# ■ Pages 켜기 — **손으로 한 번 켜야 했다**(실측)
+#   `enablement: true` 를 줬는데도 워크플로 토큰으로는 못 켰다(31368435292 실패, `has_pages` 그대로 false).
+#   결국 오너가 Settings → Pages → Source: **GitHub Actions** 를 눌러서 켰다(2026-08-10).
+#   옵션은 남긴다 — 켜진 뒤에는 무해하고(멱등), 레포를 새로 파는 날 한 번은 스스로 될 수도 있다.
 #
-#   ⚠ 그 전 판(8179dbe)은 이 옵션이 없어 `configure-pages` 에서 죽었다 — 그리고 그 단계는 build 잡에
-#   있으므로 **빌드도 못 갔다.** "deploy 에서만 실패한다"고 적어 뒀던 주석이 틀렸다(실측 31367688893).
+#   ⚠ **여기서 두 번 틀렸다.** 처음엔 "deploy 단계에서만 실패한다"고 적었는데 `configure-pages` 는
+#   build 잡이라 빌드도 못 갔다. 다음엔 "스스로 켠다"고 적었는데 안 켜졌다. 둘 다 **해 보기 전에
+#   적은 말**이었다 — 이 파일의 주석은 실행 결과만 적는다.
 name: docs
 
 on:
