@@ -23,6 +23,12 @@
  *   ⑶ `captureTenant` 라는 **낱말이 `(` 없이** 나오는 자리 — 별칭·구조분해·동적 인덱스·re-export.
  *      값으로 넘어가는 순간 ⑴ 의 리터럴 검사가 눈이 먼다.
  *
+ * ■ **못 잡는 것**(7차 경고 ③-O — 다음 사람이 이 검사를 전수로 믿지 않게)
+ *   · 파일 전체를 문자열로 조립하는 등 **적대적 문자열 조작**. 텍스트 검사의 원리적 한계다.
+ *   · `packages/` 밖의 소스, `.js`/`.mjs`. 관할이 `packages/**` 의 `.ts` 계열 4종이다.
+ *   · 타입 시스템 자체를 우회하는 `@ts-ignore`·`declare` 병합. 이건 `tsc` 의 일이지 이 검사의 일이 아니다.
+ *   이 검사가 지키는 것은 *"브랜드가 나는 자리는 하나"* 라는 **규율의 가시화**이지 봉인이 아니다.
+ *
  * ■ 늘려야 한다면
  *   막지 않는다 — 아래 EXPECTED 를 올리고 **왜 늘었는지 커밋에 적어라.** 그 커밋이 곧 심의 대상이다.
  */
@@ -121,7 +127,9 @@ function scan(rel, raw) {
 
     // ── ⑵-b 브랜드가 나는 **다른 길**. 면제 없음.
     //    ⓐ 타입 별칭 — 래퍼 한 겹(`Exclude<CapturedTenant, never>`)에도 무너지지 않게 RHS 전체를 본다(③-I).
-    for (const m of flat.matchAll(/\btype\s+(\w+)\s*=\s*([^;]*?)(?=;|$)/g)) {
+    // ⚠ 타입 **파라미터 목록**을 건너뛴다(7차 경고 ③-L). `type W<T> = T & CapturedTenant` 는
+    //    이름 뒤 즉시 `=` 가 아니라서 눈이 멀었다 — `tsc` 초록·검사기 초록으로 브랜드가 났다.
+    for (const m of flat.matchAll(/\btype\s+(\w+)\s*(?:<[^=<>]*(?:<[^<>]*>[^=<>]*)*>)?\s*=\s*([^;]*?)(?=;|$)/g)) {
         if (m[1] === "CapturedTenant") continue; // 선언 자체
         if (/\bCapturedTenant\b/.test(m[2])) {
             aliases.push(`${rel}  ← \`type ${m[1]} = …CapturedTenant…\` — 이 이름으로 캐스트하면 캐스트 검사가 눈이 먼다`);
@@ -132,8 +140,14 @@ function scan(rel, raw) {
         if (m[1] || CONTAINERS.test(m[2])) continue;
         aliases.push(`${rel}  ← \`${m[2]}<CapturedTenant>(…)\` — 제네릭 경유로 브랜드 생성`);
     }
+    //    ⓑ' **타입 파라미터 기본값**도 같은 길이다 — `f<T = CapturedTenant>(x): T { return x as T }`.
+    for (const _ of flat.matchAll(/<[^<>]*\bT\s*=\s*CapturedTenant\b/g)) {
+        aliases.push(`${rel}  ← 타입 파라미터 기본값으로 브랜드 생성`);
+    }
     //    ⓒ **브랜드를 반환한다고 선언한 함수**. `as any` 한 줄이면 캐스트도 별칭도 안 거친다(③-H).
-    const withoutDef = flat.replace(/export function captureTenant\s*\([^)]*\)\s*:\s*CapturedTenant/g, " ");
+    // ⚠ 정의를 화살표 const 로 바꾸거나 인자에 `)` 가 들어가도 빗나가지 않게 넓게 잡는다(③-N).
+    //    빗나가면 **정의 자신**이 "브랜드를 반환하는 함수가 또 있다" 로 보고돼 없는 결함을 찾게 된다.
+    const withoutDef = flat.replace(/(?:export\s+)?(?:function\s+captureTenant|const\s+captureTenant\s*[:=])[\s\S]*?\)\s*:\s*CapturedTenant/g, " ");
     for (const _ of withoutDef.matchAll(/\)\s*:\s*CapturedTenant\b/g)) {
         aliases.push(`${rel}  ← 브랜드를 반환하는 함수가 또 있다 — 본문이 \`as any\` 면 이 검사가 전부 눈이 먼다`);
     }
