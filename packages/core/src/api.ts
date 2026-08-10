@@ -152,6 +152,15 @@ export class ZalkeraApi {
         return this.request("POST", "/api/partner/site-archive/confirm", { body: { storageKey } });
     }
 
+    /**
+     * 요청 상한. **Node 의 `fetch` 는 기본 타임아웃이 없다** — 서버가 연결만 붙들고 응답을 안 주면
+     * 호출자가 영원히 매달린다. 로그아웃의 키 폐기는 진행 표시조차 없어 화면이 그냥 멈춘 것처럼 보인다.
+     *
+     * 이 값은 **제어 평면 호출**(수 KB JSON)의 상한이다. 대용량 업로드는 이 클래스를 통과하지 않는다
+     * (presign 으로 받은 URL 에 직접 올린다) — 그래서 짧게 잡아도 큰 전송을 끊지 않는다.
+     */
+    private static readonly REQUEST_TIMEOUT_MS = 30_000;
+
     private async request<T>(
         method: string,
         path: string,
@@ -169,13 +178,16 @@ export class ZalkeraApi {
             response = await this.fetchImpl(new URL(path, withTrailingSlash(this.options.apiBase)), {
                 method,
                 headers,
+                signal: AbortSignal.timeout(ZalkeraApi.REQUEST_TIMEOUT_MS),
                 ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
             });
         } catch (cause) {
+            // 시간 초과와 연결 실패를 **갈라서 말한다** — 사람이 할 일이 다르다(기다리기 vs 네트워크 점검).
+            const timedOut = cause instanceof Error && (cause.name === "TimeoutError" || cause.name === "AbortError");
             throw new DevtoolsError(
                 "SERVER_UNREACHABLE",
-                "잘커라 서버에 연결하지 못했습니다.",
-                "인터넷·사내망 프록시를 확인해 주세요.",
+                timedOut ? "잘커라 서버가 제때 응답하지 않았습니다." : "잘커라 서버에 연결하지 못했습니다.",
+                timedOut ? "잠시 뒤 다시 시도해 주세요." : "인터넷·사내망 프록시를 확인해 주세요.",
                 cause,
             );
         }

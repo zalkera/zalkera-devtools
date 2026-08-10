@@ -1,6 +1,6 @@
 {
   "name": "zalkera-devtools",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "private": true,
   "license": "MIT",
   "type": "module",
@@ -31,12 +31,12 @@
       },
       {
         "command": "zalkera.site.open",
-        "title": "잘커라: 내 사이트 소스 받기",
+        "title": "잘커라: 사이트 소스 받기",
         "category": "잘커라"
       },
       {
         "command": "zalkera.site.link",
-        "title": "잘커라: 이 폴더를 내 사이트로 연결",
+        "title": "잘커라: 폴더 연결",
         "category": "잘커라"
       },
       {
@@ -71,7 +71,7 @@
       },
       {
         "command": "zalkera.rollback",
-        "title": "잘커라: 이전 버전으로",
+        "title": "잘커라: 버전 되돌리기",
         "category": "잘커라"
       },
       {
@@ -81,7 +81,7 @@
       },
       {
         "command": "zalkera.agent.connect",
-        "title": "잘커라: 에이전트에 연결(MCP)",
+        "title": "잘커라: 에이전트 연결(MCP)",
         "category": "잘커라"
       },
       {

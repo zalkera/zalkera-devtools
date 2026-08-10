@@ -35,6 +35,9 @@ export interface FetchSourceResult {
     fileCount: number;
 }
 
+/** 대용량 전송 상한(15분) — publish 와 같은 근거. 짧으면 느린 회선의 정상 수신을 끊는다. */
+const TRANSFER_TIMEOUT_MS = 15 * 60 * 1000;
+
 export async function fetchSiteSource(options: FetchSourceOptions): Promise<FetchSourceResult> {
     const report = options.onProgress ?? (() => {});
     const fetchImpl = options.fetchImpl ?? fetch;
@@ -55,7 +58,7 @@ export async function fetchSiteSource(options: FetchSourceOptions): Promise<Fetc
 
     report(`버전 ${revisionNo} 소스를 받는 중…`);
     const source = await options.api.sourceUrl(revisionNo);
-    const response = await fetchImpl(source.url);
+    const response = await fetchImpl(source.url, { signal: AbortSignal.timeout(TRANSFER_TIMEOUT_MS) });
     if (!response.ok || !response.body) {
         throw new DevtoolsError(
             "SERVER_REJECTED",

@@ -158,7 +158,10 @@ async function signIn(): Promise<void> {
         },
     );
     if (cancelled) {
+        // **토스트로 끝을 알린다.** 조용히 사라지면 "취소가 먹은 건가"를 남긴다 — 그 불확실이
+        // 사용자를 다시 누르게 만든다. 오류 창(showErrorMessage)이 아닌 것은 실패가 아니어서다.
         log("로그인을 취소했습니다.");
+        void vscode.window.showInformationMessage("로그인을 취소했습니다.");
         return;
     }
     log("로그인했습니다.");

@@ -24,6 +24,9 @@ export interface PublishResult {
 /** 업로드 상한(서버 `maxArchiveSize`). 넘으면 **올리기 전에** 끊어 준다 — 5분 올리고 거절당하지 않게. */
 const MAX_ARCHIVE_BYTES = 100 * 1024 * 1024;
 
+/** 대용량 전송 상한(15분). 100MB 를 아주 느린 회선(≈1Mbps)으로 올려도 닿지 않는 값이다. */
+const TRANSFER_TIMEOUT_MS = 15 * 60 * 1000;
+
 export async function publish(options: PublishOptions): Promise<PublishResult> {
     const report = options.onProgress ?? (() => {});
     const fetchImpl = options.fetchImpl ?? fetch;
@@ -44,10 +47,14 @@ export async function publish(options: PublishOptions): Promise<PublishResult> {
     report(`${packed.fileCount}개 파일을 올리는 중…`);
     const presigned = await options.api.presignArchive("site.zip", packed.buffer.byteLength);
 
+    // **상한을 둔다.** Node 의 fetch 는 기본 타임아웃이 없어, 연결만 붙들린 채 응답이 없으면 영원히
+    // 매달린다. 제어 평면(30초)보다 훨씬 길게 잡는다 — 여기는 100MB 까지 오르는 자리라
+    // 짧은 값은 **느린 회선의 정상 전송을 끊는다**(그쪽이 더 나쁜 고장이다).
     const upload = await fetchImpl(presigned.uploadUrl, {
         method: "PUT",
         headers: { "content-type": "application/zip" },
         body: new Uint8Array(packed.buffer),
+        signal: AbortSignal.timeout(TRANSFER_TIMEOUT_MS),
     });
     if (!upload.ok) {
         throw new DevtoolsError(
