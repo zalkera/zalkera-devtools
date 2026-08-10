@@ -363,7 +363,7 @@ async function linkFolder(): Promise<void> {
         { title: "이 폴더를 어느 사이트로 연결할까요?" },
     );
     if (!choice?.description) return;
-    await vscode.workspace.getConfiguration("zalkera").update("tenant", choice.description, false);
+    await saveTenant(choice.description);
     log(`이 작업 공간을 ${choice.label}(${choice.description}) 에 연결했습니다.`);
 }
 
@@ -722,7 +722,27 @@ async function chooseTenant(force = false): Promise<string> {
         });
         if (!typed) throw new DevtoolsError("CANCELLED", "사이트를 고르지 않았습니다.");
         const code = typed.trim();
-        await vscode.workspace.getConfiguration("zalkera").update("tenant", code, false);
+
+        // **저장 전에 실재를 확인한다.** 형식만 맞으면 통과시키면, 오타 하나가 저장된 뒤
+        // 프리뷰·발행에서 엉뚱한 오류로 튀어나온다 — 그때는 원인이 "설정에 적힌 코드"라는 걸
+        // 사용자가 알 방법이 없다. 읽기 전용 호출 하나로 여기서 끝낸다.
+        const probe = new ZalkeraApi({
+            apiBase: apiBase(),
+            accessToken: () => getAccessToken(config.auth, store),
+            tenantCode: () => code,
+        });
+        try {
+            await probe.listRevisions();
+        } catch (error) {
+            throw new DevtoolsError(
+                "NOT_A_SITE",
+                `'${code}' 사이트를 찾지 못했습니다.`,
+                "사이트 코드를 다시 확인해 주세요. 잘커라 콘솔의 주소에서 볼 수 있습니다.",
+                error,
+            );
+        }
+
+        await saveTenant(code);
         return code;
     }
     // 하나뿐이어도 **바꾸려고 부른 경우엔 보여 준다** — 안 보여 주면 누른 사람이 무시당했다고 느낀다.
@@ -741,7 +761,7 @@ async function chooseTenant(force = false): Promise<string> {
                   .then((choice) => tenants.find((t) => t.code === choice?.description));
     if (!picked) throw new DevtoolsError("CANCELLED", "사이트를 고르지 않았습니다.");
 
-    await vscode.workspace.getConfiguration("zalkera").update("tenant", picked.code, false);
+    await saveTenant(picked.code);
     return picked.code;
 }
 
@@ -771,6 +791,24 @@ async function ensureApi(): Promise<ZalkeraApi> {
 
 function apiBase(): string {
     return vscode.workspace.getConfiguration("zalkera").get<string>("apiBase") ?? "https://api.zalkera.com";
+}
+
+/**
+ * 작업 사이트를 어디에 적을지 고른다.
+ *
+ * **폴더별로 다른 사이트를 다룰 수 있어야 하므로** 기본은 워크스페이스다. 그런데 폴더를 열지 않은
+ * 창에서는 쓸 곳이 없어 VS Code 가 던진다 — `Unable to write to Workspace Settings because no
+ * workspace is opened`(실사용 신고). 확장은 폴더 없이도 시작할 수 있으므로(사이트 선택 → 예제로
+ * 시작 순서가 자연스럽다) 그때는 전역에 적는다. 뒤에 폴더를 열고 다시 고르면 그 폴더 값이 이긴다.
+ */
+function configTarget(): vscode.ConfigurationTarget {
+    return (vscode.workspace.workspaceFolders?.length ?? 0) > 0
+        ? vscode.ConfigurationTarget.Workspace
+        : vscode.ConfigurationTarget.Global;
+}
+
+async function saveTenant(code: string): Promise<void> {
+    await vscode.workspace.getConfiguration("zalkera").update("tenant", code, configTarget());
 }
 
 function tenantCode(): string {
