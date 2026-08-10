@@ -15,7 +15,20 @@
 //   자식 프로세스로 실행하는 실물이라 번들에 못 넣는다(`packages/vscode/src/runtime.ts`).
 //   레지스트리를 안 타고 루트에 이미 설치된 것을 복사한다 — 재현 가능하고 오프라인에서도 된다.
 //
-// 사용: node scripts/package-vsix.mjs   →  dist/<name>-<version>.vsix
+// ■ 버전
+//   확장은 고객 기계에 깔려 **강제 업데이트가 안 된다**. 같은 버전으로 다시 구우면 VS Code 가
+//   갱신을 건너뛰어(제거 후 재설치나 --force 가 필요해진다) 시험 루프가 매번 번거로워진다.
+//   그래서 굽기 전에 버전을 올린다.
+//
+//   ⚠ **올리는 것은 확장 버전이지 계약 버전이 아니다.** 백엔드의 `min-extension-version` 은
+//   **실제로 계약을 깬 릴리스에서만** 올린다(습관적으로 올리면 고객 노트북이 이유 없이 멈춘다).
+//
+// 사용:
+//   node scripts/package-vsix.mjs                 현재 버전 그대로
+//   node scripts/package-vsix.mjs --bump patch    0.1.0 → 0.1.1
+//   node scripts/package-vsix.mjs --bump minor    0.1.0 → 0.2.0
+//   node scripts/package-vsix.mjs --bump major    0.1.0 → 1.0.0
+//   → dist/<name>-<version>.vsix  (+ shared/ 로 사본)
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync, readdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -26,7 +39,27 @@ const ext = join(root, "packages", "vscode");
 const stage = join(root, ".vsix-stage");
 const out = join(root, "dist");
 
-const manifest = JSON.parse(readFileSync(join(ext, "package.json"), "utf8"));
+const manifestPath = join(ext, "package.json");
+const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+
+// ── 0. 버전 (요청 시) ───────────────────────────────────────────────────────
+const bumpAt = process.argv.indexOf("--bump");
+if (bumpAt !== -1) {
+    const kind = process.argv[bumpAt + 1];
+    const order = ["major", "minor", "patch"];
+    const at = order.indexOf(kind);
+    if (at === -1) throw new Error(`--bump 은 major|minor|patch 중 하나여야 한다 (받은 값: ${kind})`);
+    const parts = String(manifest.version).split(".").map(Number);
+    if (parts.length !== 3 || parts.some(Number.isNaN)) {
+        throw new Error(`버전이 semver 가 아니다: ${manifest.version} — 중단`);
+    }
+    const before = manifest.version;
+    parts[at] += 1;
+    for (let i = at + 1; i < 3; i += 1) parts[i] = 0;
+    manifest.version = parts.join(".");
+    writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + "\n");
+    console.log(`· 버전 ${before} → ${manifest.version}`);
+}
 
 // ── 1. core 빌드 + 번들 (alias 로 산출물을 끌어온다 — 의존성 선언 0) ─────────
 console.log("· core 빌드");
@@ -70,12 +103,21 @@ mkdirSync(out, { recursive: true });
 execFileSync("npx", ["vsce", "package", "--out", out], { cwd: stage, stdio: "inherit" });
 
 // ── 5. 검수 — 담겼어야 할 것이 실제로 담겼는가 ────────────────────────────────
-const vsix = readdirSync(out).filter((f) => f.endsWith(".vsix")).map((f) => join(out, f)).sort();
-const made = vsix.at(-1);
-if (!made) throw new Error("VSIX 가 안 나왔다 — 중단");
+// 목록에서 "마지막 것"을 고르면 안 된다 — 문자열 정렬은 0.1.10 을 0.1.9 앞에 둔다.
+// 방금 구운 파일 이름을 **매니페스트에서 직접 조립**해 그것만 검수한다.
+const made = join(out, `${manifest.name}-${manifest.version}.vsix`);
+if (!existsSync(made)) throw new Error(`VSIX 가 안 나왔다: ${made} — 중단`);
 const listed = execFileSync("unzip", ["-Z1", made], { encoding: "utf8" }).split("\n");
 const must = ["extension/dist/extension.cjs", "extension/package.json", "extension/node_modules/npm/bin/npm-cli.js"];
 const missing = must.filter((m) => !listed.includes(m));
 if (missing.length) throw new Error(`VSIX 에 빠진 것: ${missing.join(", ")}`);
+// 전달용 사본. `shared/` 는 .gitignore(*.vsix)로 커밋되지 않는다 — 손으로 건네는 자리다.
+const shared = join(root, "shared");
+mkdirSync(shared, { recursive: true });
+for (const old of readdirSync(shared).filter((f) => f.endsWith(".vsix"))) rmSync(join(shared, old));
+cpSync(made, join(shared, `${manifest.name}-${manifest.version}.vsix`));
+
 console.log(`\n✅ ${made}\n   항목 ${listed.length - 1}개 · 필수 3종 확인`);
+console.log(`   사본: shared/${manifest.name}-${manifest.version}.vsix`);
+console.log(`\n   설치: code --install-extension shared/${manifest.name}-${manifest.version}.vsix --force`);
 rmSync(stage, { recursive: true, force: true });

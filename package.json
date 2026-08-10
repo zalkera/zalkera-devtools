@@ -17,6 +17,8 @@
     "test": "npm run test -w @zalkera/devtools-core",
     "typecheck": "npm run build -w @zalkera/devtools-core && npm run typecheck --workspaces --if-present",
     "verify": "npm run typecheck && npm run test",
-    "package": "node scripts/package-vsix.mjs"
+    "package": "node scripts/package-vsix.mjs",
+    "package:patch": "node scripts/package-vsix.mjs --bump patch",
+    "package:minor": "node scripts/package-vsix.mjs --bump minor"
   }
 }
