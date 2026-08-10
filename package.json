@@ -21,6 +21,7 @@
     "package:patch": "node scripts/package-vsix.mjs --bump patch",
     "package:minor": "node scripts/package-vsix.mjs --bump minor",
     "check:labels": "node scripts/check-sidebar-labels.mjs",
-    "package:ci": "node scripts/package-vsix.mjs --skip-verify"
+    "package:ci": "node scripts/package-vsix.mjs --skip-verify",
+    "check:audit": "node scripts/check-audit.mjs"
   }
 }
