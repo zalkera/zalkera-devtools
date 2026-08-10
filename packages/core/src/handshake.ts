@@ -15,6 +15,16 @@ export interface Handshake {
     auth: { issuer: string; clientId: string; scopes: string[] };
     previewKeyTtlSeconds: number;
     /**
+     * 매뉴얼 주소. **서버가 정한다** — auth 좌표를 하드코딩하지 않는 이유와 같다.
+     *
+     * 확장은 고객 기계에 깔려 강제 업데이트가 안 되므로, 주소를 코드에 박으면 **호스트를 옮기는 날
+     * 전원이 새 VSIX 를 깔아야 한다.** 여기로 내려보내면 서버 설정 한 줄로 옮겨진다
+     * (지금 GitHub Pages → 나중에 www.zalkera.com).
+     *
+     * 없으면(구버전 서버) 확장에 박힌 기본값을 쓰고, 그것도 안 닿으면 동봉본을 연다.
+     */
+    helpUrl?: string | null;
+    /**
      * MCP 등록 좌표(서버가 마운트를 열었을 때만 온다 · memo146 T4).
      *
      * **없으면 「에이전트 연결」을 보여 주지 않는다** — 켜지지 않은 문을 안내하면 사용자는 자기 설정이

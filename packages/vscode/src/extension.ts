@@ -137,17 +137,53 @@ export async function deactivate(): Promise<void> {
  *   `openExternal` 은 **브라우저를 띄웠는가**만 알려 준다 — 그 페이지가 떴는지는 모른다. 그래서 그냥
  *   열면 오프라인 사용자는 브라우저 오류 화면을 보고 끝난다. 짧은 요청 한 번으로 먼저 확인한다.
  *   실패는 **정상 경로**다(오프라인·사내망 차단) — 조용히 동봉본으로 간다.
+ *
+ * ■ 주소는 **서버가 정한다**
+ *   확장은 강제 업데이트가 안 되므로 주소를 박아 두면 호스트를 옮기는 날 전원이 새 VSIX 를 깔아야 한다.
+ *   핸드셰이크의 `helpUrl` 을 먼저 보고, 없을 때만 아래 기본값을 쓴다. 지금 기본값이 GitHub Pages 인
+ *   것은 **임시**이고, www 가 서면 서버 설정 한 줄로 옮겨진다 — 클라이언트 배포 0.
  */
-const HELP_URL = "https://zalkera.github.io/zalkera-devtools/";
+const HELP_URL_FALLBACK = "https://zalkera.github.io/zalkera-devtools/";
 
 async function showHelp(): Promise<void> {
-    if (await reachable(HELP_URL)) {
-        const opened = await vscode.env.openExternal(vscode.Uri.parse(HELP_URL));
+    const url = await helpUrl();
+    if (await reachable(url)) {
+        const opened = await vscode.env.openExternal(vscode.Uri.parse(url));
         if (opened) return;
         // 브라우저를 못 띄운 경우(원격·컨테이너 환경) — 여기서 끝내면 아무것도 안 열린다.
         log("브라우저를 열지 못해 동봉 매뉴얼을 엽니다.");
     }
     await openBundledHelp();
+}
+
+/**
+ * 서버가 말한 주소 → 박힌 기본값 순.
+ *
+ * 핸드셰이크를 아직 안 받았으면 조용히 한 번 받아 본다. **실패는 삼킨다** — 도움말을 열려는데
+ * 핸드셰이크 오류(구버전 경고 등)를 대신 띄우면 정작 도움말을 못 본다.
+ *
+ * ⚠ `http(s)` 만 받는다. 서버가 보낸 값이라도 그대로 `openExternal` 에 넘기지 않는다 — 잘못된 설정
+ * 하나가 `file:`·`vscode:` 를 여는 통로가 되면 안 된다.
+ */
+async function helpUrl(): Promise<string> {
+    if (!handshake) {
+        try {
+            await ensureHandshake();
+        } catch {
+            // 무시 — 기본값으로 간다.
+        }
+    }
+    const fromServer = handshake?.helpUrl;
+    if (typeof fromServer === "string") {
+        try {
+            const parsed = new URL(fromServer);
+            if (parsed.protocol === "https:" || parsed.protocol === "http:") return parsed.toString();
+            log(`서버가 보낸 도움말 주소를 쓰지 않습니다(${parsed.protocol}) — 기본 주소로 엽니다.`);
+        } catch {
+            log(`서버가 보낸 도움말 주소를 읽지 못했습니다 — 기본 주소로 엽니다.`);
+        }
+    }
+    return HELP_URL_FALLBACK;
 }
 
 /** 2초 안에 응답이 오는가. 오래 기다리면 "도움말이 안 열린다"가 된다 — 그게 더 나쁜 고장이다. */
