@@ -9,9 +9,12 @@
 #   레포에 의존성을 안 늘린다. 마크다운 렌더러를 devDependency 로 들이면 확장 빌드와 문서
 #   빌드가 같은 lockfile 을 나눠 쓰게 되고, 문서 때문에 확장이 깨지는 날이 온다.
 #
-# ■ 켜기 (한 번만, 웹 콘솔)
-#   Settings → Pages → Build and deployment → Source: **GitHub Actions**
-#   그 전까지 이 워크플로는 deploy 단계에서 실패한다(빌드까지는 돈다).
+# ■ Pages 켜기
+#   `configure-pages` 가 `enablement: true` 로 **스스로 켠다**(pages: write 권한으로 API 를 부른다).
+#   손으로 Settings 를 만질 일이 없다.
+#
+#   ⚠ 그 전 판(8179dbe)은 이 옵션이 없어 `configure-pages` 에서 죽었다 — 그리고 그 단계는 build 잡에
+#   있으므로 **빌드도 못 갔다.** "deploy 에서만 실패한다"고 적어 뒀던 주석이 틀렸다(실측 31367688893).
 name: docs
 
 on:
@@ -67,6 +70,8 @@ jobs:
           grep -q '새 버전 올리기' site/index.md   # tail 이 본문을 자르지 않았는지
 
       - uses: actions/configure-pages@v5
+        with:
+          enablement: true
       - uses: actions/jekyll-build-pages@v1
         with:
           source: site
