@@ -121,7 +121,13 @@ execFileSync("npx", ["vsce", "package", "--out", out], { cwd: stage, stdio: "inh
 const made = join(out, `${manifest.name}-${manifest.version}.vsix`);
 if (!existsSync(made)) throw new Error(`VSIX 가 안 나왔다: ${made} — 중단`);
 const listed = execFileSync("unzip", ["-Z1", made], { encoding: "utf8" }).split("\n");
-const must = ["extension/dist/extension.cjs", "extension/package.json", "extension/node_modules/npm/bin/npm-cli.js"];
+const must = [
+    "extension/dist/extension.cjs",
+    "extension/package.json",
+    "extension/node_modules/npm/bin/npm-cli.js",
+    // 「도움말」이 여는 실물. 빠져도 포장은 성공하고, 사용자가 누를 때에야 열리지 않는다.
+    "extension/media/help.md",
+];
 const missing = must.filter((m) => !listed.includes(m));
 if (missing.length) throw new Error(`VSIX 에 빠진 것: ${missing.join(", ")}`);
 // 전달용 사본. `shared/` 는 .gitignore(*.vsix)로 커밋되지 않는다 — 손으로 건네는 자리다.
@@ -130,7 +136,7 @@ mkdirSync(shared, { recursive: true });
 for (const old of readdirSync(shared).filter((f) => f.endsWith(".vsix"))) rmSync(join(shared, old));
 cpSync(made, join(shared, `${manifest.name}-${manifest.version}.vsix`));
 
-console.log(`\n✅ ${made}\n   항목 ${listed.length - 1}개 · 필수 3종 확인`);
+console.log(`\n✅ ${made}\n   항목 ${listed.length - 1}개 · 필수 ${must.length}종 확인`);
 console.log(`   사본: shared/${manifest.name}-${manifest.version}.vsix`);
 console.log(`\n   설치: code --install-extension shared/${manifest.name}-${manifest.version}.vsix --force`);
 rmSync(stage, { recursive: true, force: true });

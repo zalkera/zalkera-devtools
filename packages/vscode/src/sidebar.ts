@@ -124,6 +124,8 @@ export class ZalkeraSidebar implements vscode.TreeDataProvider<Node> {
         nodes.push(
             // 「도움」에 남는 것은 **막혔을 때 쓰는 것**뿐이다 — 왜 안 되는지 보는 것과, 안 되면 처음으로.
             group("도움", "question", undefined, [
+                // 맨 위다 — 막힌 사람이 제일 먼저 볼 것은 "어떻게 쓰는가"이지 진단 결과가 아니다.
+                action("도움말", "zalkera.help", "book", "쓰는 방법을 처음부터 봅니다"),
                 action("진단", "zalkera.doctor", "pulse", "무엇이 없어서 안 되는지 확인합니다"),
                 action("초기화", "zalkera.reset", "clear-all", "처음 상태로 되돌립니다(받은 소스는 남깁니다)"),
             ]),

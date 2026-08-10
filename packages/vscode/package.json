@@ -1,6 +1,6 @@
 {
   "name": "zalkera-devtools",
-  "version": "0.1.14",
+  "version": "0.1.15",
   "private": true,
   "license": "MIT",
   "type": "module",
@@ -96,6 +96,11 @@
       {
         "command": "zalkera.reset",
         "title": "잘커라: 초기화"
+      },
+      {
+        "command": "zalkera.help",
+        "title": "잘커라: 도움말",
+        "category": "잘커라"
       }
     ],
     "configuration": {

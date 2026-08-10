@@ -54,12 +54,18 @@ let handshake: Handshake | null = null;
 let sidebar: ZalkeraSidebar;
 /** 동봉 자원(npm)을 찾으려면 확장 설치 경로가 필요하다. */
 let extensionPath: string;
+/** 동봉 매뉴얼(media/help.md)의 위치. */
+let helpUri: vscode.Uri;
 let renewTimer: NodeJS.Timeout | null = null;
 let diagnostics: vscode.DiagnosticCollection;
 /** 보호 경로 경고를 파일마다 한 번만 — 저장할 때마다 같은 말을 반복하면 사람은 그것을 끄고 만다. */
 const warnedPaths = new Set<string>();
 
-const EXTENSION_VERSION = "0.1.0";
+/**
+ * **manifest 에서 읽는다.** 종전에는 `"0.1.0"` 이 소스에 박혀 있어, 0.1.14 를 쓰는 사람도 서버에는
+ * 0.1.0 으로 보였다 — 핸드셰이크의 `minClientVersion` 판정이 그 값을 본다. 두 곳에 적힌 값은 갈린다.
+ */
+let extensionVersion = "0.0.0";
 
 export function activate(context: vscode.ExtensionContext): void {
     output = vscode.window.createOutputChannel("잘커라");
@@ -69,6 +75,8 @@ export function activate(context: vscode.ExtensionContext): void {
     status.show();
     store = new SecretTokenStore(context);
     extensionPath = context.extensionPath;
+    extensionVersion = String(context.extension.packageJSON.version ?? extensionVersion);
+    helpUri = vscode.Uri.joinPath(context.extensionUri, "media", "help.md");
     sidebar = new ZalkeraSidebar();
     void refreshSidebar();
 
@@ -102,6 +110,7 @@ export function activate(context: vscode.ExtensionContext): void {
         register("zalkera.history", showHistory),
         register("zalkera.precheck", precheckCommand),
         register("zalkera.agent.connect", connectAgent),
+        register("zalkera.help", showHelp),
         register("zalkera.doctor", doctor),
     );
 }
@@ -110,6 +119,22 @@ export async function deactivate(): Promise<void> {
     clearRenewal();
     // 프리뷰를 켜 둔 채 창을 닫으면 dev 서버가 고아로 남는다 — 사용자는 그것을 볼 수도 끌 수도 없다.
     await session?.server.stop();
+}
+
+/**
+ * 동봉한 매뉴얼을 **읽기 좋은 모습으로** 연다.
+ *
+ * 웹 문서로 보내지 않는 이유는 둘이다. 확장과 **같은 판**이 열려야 한다 — 문서만 앞서 가면 없는 버튼을
+ * 찾게 된다. 그리고 인터넷이 끊긴 자리에서도 열려야 한다.
+ *
+ * 마크다운 미리보기가 없는 편집기(일부 경량 배포판)에서는 그냥 원문을 연다 — **못 여는 것보다 낫다.**
+ */
+async function showHelp(): Promise<void> {
+    try {
+        await vscode.commands.executeCommand("markdown.showPreview", helpUri);
+    } catch {
+        await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(helpUri), { preview: false });
+    }
 }
 
 /** 모든 명령을 한 자리에서 감싼다 — 오류를 **사람 말로** 보여 주는 곳이 여기 하나여야 한다. */
@@ -705,7 +730,7 @@ async function doctor(): Promise<void> {
     const dir = workspaceDir();
     const checks = await runDoctor({
         apiBase: apiBase(),
-        extensionVersion: EXTENSION_VERSION,
+        extensionVersion,
         ...(dir ? { projectDir: dir } : {}),
     });
     const runtime = embeddedNodeRuntime(extensionPath);
@@ -730,7 +755,7 @@ async function doctor(): Promise<void> {
  */
 async function ensureHandshake(): Promise<Handshake> {
     if (handshake) return handshake;
-    handshake = await fetchHandshake(apiBase(), EXTENSION_VERSION);
+    handshake = await fetchHandshake(apiBase(), extensionVersion);
     if (handshake.verdict === "UPGRADE_RECOMMENDED" && handshake.message) {
         void vscode.window.showInformationMessage(handshake.message);
     }
