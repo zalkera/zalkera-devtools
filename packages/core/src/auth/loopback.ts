@@ -1,4 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { DevtoolsError } from "../errors.ts";
 import type { AddressInfo } from "node:net";
 
 /**
@@ -23,6 +24,11 @@ export interface LoopbackReceiver {
 }
 
 export interface LoopbackOptions {
+    /**
+     * 취소 신호. **사람이 로그인을 그만두는 것은 정상 경로다** — 브라우저를 닫거나 알림의 취소를 누르면
+     * 서버는 아무것도 안 보내므로, 이 신호가 없으면 타임아웃(기본 5분)까지 매달린다.
+     */
+    signal?: AbortSignal;
     /** 기다릴 시간(ms). 사람이 브라우저에서 로그인하는 시간이라 넉넉해야 한다. 기본 5분. */
     timeoutMs?: number;
     /** 로그인 완료 뒤 브라우저 탭에 보일 문구. */
@@ -48,10 +54,24 @@ export async function startLoopbackReceiver(options: LoopbackOptions = {}): Prom
 
     let resolveCode: (result: LoopbackResult) => void;
     let rejectCode: (error: Error) => void;
+    // **정착 여부를 직접 센다.** 아래 close() 가 타이머를 지우므로, 대기 중에 close() 가 불리면
+    // 타임아웃마저 사라져 약속이 **영원히 매달린다**(실측 결함). 그 창을 이 플래그가 막는다.
+    let settled = false;
     const codePromise = new Promise<LoopbackResult>((resolve, reject) => {
-        resolveCode = resolve;
-        rejectCode = reject;
+        resolveCode = (result) => {
+            settled = true;
+            resolve(result);
+        };
+        rejectCode = (error) => {
+            settled = true;
+            reject(error);
+        };
     });
+
+    // **아무도 기다리지 않는 거부를 만들지 않는다.** 취소가 `waitForCode()` 호출보다 먼저 나면
+    // 이 약속은 거부된 채 주인이 없어 Node 가 unhandled rejection 으로 프로세스를 흔든다.
+    // 여기서 한 번 삼켜도 `waitForCode()` 가 돌려주는 약속은 그대로 거부된다(호출자가 받는다).
+    codePromise.catch(() => {});
 
     const server = createServer((request: IncomingMessage, response: ServerResponse) => {
         const url = new URL(request.url ?? "/", "http://127.0.0.1");
@@ -88,7 +108,14 @@ export async function startLoopbackReceiver(options: LoopbackOptions = {}): Prom
     const close = () => {
         clearTimeout(timer);
         server.close();
+        // 아직 안 끝났는데 닫혔다 = 취소다. 매달린 채로 두지 않는다.
+        if (!settled) rejectCode(new DevtoolsError("CANCELLED", "로그인을 취소했습니다."));
     };
+
+    if (options.signal) {
+        if (options.signal.aborted) close();
+        else options.signal.addEventListener("abort", close, { once: true });
+    }
 
     return {
         redirectUri: `http://127.0.0.1:${port}/callback`,

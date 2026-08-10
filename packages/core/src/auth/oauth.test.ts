@@ -1,7 +1,7 @@
 import { ok, rejects, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
 import { DevtoolsError } from "../errors.ts";
-import { getAccessToken, type AuthConfig } from "./oauth.ts";
+import { getAccessToken, login, type AuthConfig } from "./oauth.ts";
 import { createPkce, createState } from "./pkce.ts";
 import { MemoryTokenStore } from "./store.ts";
 
@@ -90,4 +90,46 @@ test("갱신 응답에 refresh 토큰이 없으면 성공으로 치지 않는다
     } finally {
         globalThis.fetch = original;
     }
+});
+
+test("취소하면 타임아웃을 기다리지 않고 CANCELLED 로 끝난다", async () => {
+    // 사람이 브라우저를 닫는 상황. 서버는 아무것도 보내지 않으므로 취소 신호가 없으면 기본 5분을
+    // 매달린다 — 그 매달림이 실제 결함이었다(상태 표시줄의 진행 알림이 안 사라진다).
+    const controller = new AbortController();
+    const store = new MemoryTokenStore();
+    const started = Date.now();
+
+    await rejects(
+        login(config, store, {
+            openBrowser: async () => {
+                controller.abort();
+            },
+            signal: controller.signal,
+        }),
+        (error: unknown) => {
+            ok(error instanceof DevtoolsError);
+            strictEqual(error.code, "CANCELLED");
+            return true;
+        },
+    );
+    ok(Date.now() - started < 5_000, "타임아웃(5분)을 기다리면 안 된다");
+});
+
+test("이미 취소된 신호를 주면 브라우저를 열기도 전에 끝난다", async () => {
+    const store = new MemoryTokenStore();
+    let opened = false;
+    await rejects(
+        login(config, store, {
+            openBrowser: async () => {
+                opened = true;
+            },
+            signal: AbortSignal.abort(),
+        }),
+        (error: unknown) => {
+            ok(error instanceof DevtoolsError);
+            strictEqual(error.code, "CANCELLED");
+            return true;
+        },
+    );
+    ok(!opened, "이미 취소됐으면 브라우저를 열지 않는다");
 });

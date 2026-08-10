@@ -15,6 +15,11 @@ export interface LoginOptions {
     openBrowser(url: string): Promise<void>;
     /** 사람이 로그인하는 시간. 기본 5분. */
     timeoutMs?: number;
+    /**
+     * 취소 신호. 사람이 그만두면 수신기를 닫고 `CANCELLED` 로 끝난다.
+     * 없으면 타임아웃까지 매달리므로 **UI 는 반드시 넘긴다**.
+     */
+    signal?: AbortSignal;
 }
 
 /** access 토큰을 이만큼 남기고 미리 갱신한다 — 서버와의 시계 오차·왕복 지연을 흡수한다. */
@@ -29,9 +34,10 @@ const REFRESH_SKEW_MS = 20_000;
 export async function login(config: AuthConfig, store: TokenStore, options: LoginOptions): Promise<StoredTokens> {
     const pkce = createPkce();
     const state = createState();
-    const receiver = await startLoopbackReceiver(
-        options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs },
-    );
+    const receiver = await startLoopbackReceiver({
+        ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
+        ...(options.signal === undefined ? {} : { signal: options.signal }),
+    });
 
     try {
         const authorizeUrl = new URL(`${trimSlash(config.issuer)}/protocol/openid-connect/auth`);
@@ -43,6 +49,9 @@ export async function login(config: AuthConfig, store: TokenStore, options: Logi
         authorizeUrl.searchParams.set("code_challenge", pkce.challenge);
         authorizeUrl.searchParams.set("code_challenge_method", pkce.method);
 
+        // **열기 직전에 한 번 더 본다.** 수신기는 이미 취소를 알지만, 여는 것은 부수효과라
+        // 취소된 뒤에 창이 튀어나오면 사람이 혼란스럽다(테스트가 잡은 자리).
+        if (options.signal?.aborted) throw new DevtoolsError("CANCELLED", "로그인을 취소했습니다.");
         await options.openBrowser(authorizeUrl.toString());
         const result = await receiver.waitForCode();
         if (result.state !== state) {

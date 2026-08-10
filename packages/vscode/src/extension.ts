@@ -128,17 +128,39 @@ function register(command: string, handler: () => Promise<void>): vscode.Disposa
 
 async function signIn(): Promise<void> {
     const config = await ensureHandshake();
-    await vscode.window.withProgress(
-        { location: vscode.ProgressLocation.Notification, title: "잘커라 로그인 — 브라우저에서 계속하세요" },
-        async () => {
-            await login(config.auth, store, {
-                // 브라우저를 여는 방법만 확장이 안다 — 나머지 흐름은 코어가 갖는다.
-                openBrowser: async (url) => {
-                    await vscode.env.openExternal(vscode.Uri.parse(url));
-                },
-            });
+    // **취소할 수 있어야 한다.** 이 대기는 사람의 브라우저 행동에 달려 있어, 그만두면 아무것도 오지
+    // 않는다. 취소 경로가 없으면 알림이 기본 5분(코어 타임아웃)을 그대로 매달린다 — 실사용 신고.
+    const cancelled = await vscode.window.withProgress(
+        {
+            location: vscode.ProgressLocation.Notification,
+            title: "잘커라 로그인 — 브라우저에서 계속하세요",
+            cancellable: true,
+        },
+        async (_progress, token) => {
+            const controller = new AbortController();
+            const subscription = token.onCancellationRequested(() => controller.abort());
+            try {
+                await login(config.auth, store, {
+                    // 브라우저를 여는 방법만 확장이 안다 — 나머지 흐름은 코어가 갖는다.
+                    openBrowser: async (url) => {
+                        await vscode.env.openExternal(vscode.Uri.parse(url));
+                    },
+                    signal: controller.signal,
+                });
+                return false;
+            } catch (error) {
+                // 사람이 스스로 그만둔 것은 실패가 아니다 — 오류 창을 띄우지 않고 조용히 되돌린다.
+                if (error instanceof DevtoolsError && error.code === "CANCELLED") return true;
+                throw error;
+            } finally {
+                subscription.dispose();
+            }
         },
     );
+    if (cancelled) {
+        log("로그인을 취소했습니다.");
+        return;
+    }
     log("로그인했습니다.");
     await refreshSidebar();
     void vscode.window.showInformationMessage("잘커라에 로그인했습니다.");

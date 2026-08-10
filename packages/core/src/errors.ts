@@ -42,4 +42,9 @@ export type DevtoolsErrorCode =
     /** 개발 서버가 뜨지 못했다. */
     | "DEV_SERVER_FAILED"
     /** 묶기(패킹)에 실패했다. */
-    | "PACK_FAILED";
+    | "PACK_FAILED"
+    /**
+     * 사람이 취소했다. **오류로 보여 주지 않는다** — 사용자가 스스로 한 일을 실패로 고지하면
+     * "내가 뭘 잘못했나"를 만든다. 호출자는 이 코드를 조용히 삼키고 상태만 되돌린다.
+     */
+    | "CANCELLED";
