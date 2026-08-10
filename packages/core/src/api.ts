@@ -59,10 +59,26 @@ export interface RevisionSource {
 
 export interface SiteRevision {
     revisionNo: number;
+    /** `READY` | `BUILDING` | `FAILED` (backend RevisionStatus). 활성 전환은 READY 만 받는다. */
     status: string;
     isActive: boolean;
     createdAt: string;
     note?: string | null;
+    /** FAILED 일 때만, 그리고 TENANT_ADMIN+ 에게만 온다 — 빌드 로그 tail. */
+    failReason?: string | null;
+}
+
+/**
+ * 업로드 확정 결과. **버리지 않는다** — 종전에는 `unknown` 이라 방금 만든 버전의 번호도 상태도 몰랐고,
+ * 그래서 "올렸습니다"에서 이야기가 끊겼다.
+ */
+export interface ArchiveConfirmed {
+    revisionNo: number;
+    /** `STATIC`(빌드 0 · 즉시 READY) | `NEXT_SOURCE`(서버가 빌드 — BUILDING 으로 시작) */
+    siteType: string;
+    status: string;
+    /** 유형별 한계·상태를 서버가 사람 말로 적어 보낸다(memo66 §4 — 숨기지 않는다). */
+    capabilityNote: string;
 }
 
 export interface PresignedUpload {
@@ -164,8 +180,8 @@ export class ZalkeraApi {
     }
 
     /** 업로드 확정 — 서버가 언팩·검사하고 새 버전을 만든다. */
-    confirmArchive(storageKey: string): Promise<unknown> {
-        return this.request("POST", "/api/partner/site-archive/confirm", { body: { storageKey } });
+    confirmArchive(storageKey: string): Promise<ArchiveConfirmed> {
+        return this.request<ArchiveConfirmed>("POST", "/api/partner/site-archive/confirm", { body: { storageKey } });
     }
 
     /**

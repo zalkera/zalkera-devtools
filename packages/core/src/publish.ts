@@ -19,6 +19,13 @@ export interface PublishResult {
     fileCount: number;
     byteSize: number;
     sha256: string;
+    /** 이번 업로드가 만든 버전 번호. 이 뒤의 "빌드 기다리기·전환"이 전부 이 번호로 이어진다. */
+    revisionNo: number;
+    /** `READY` 면 바로 켤 수 있고, `BUILDING` 이면 서버가 빌드 중이다. */
+    status: string;
+    siteType: string;
+    /** 서버가 보낸 한계·상태 안내. 있으면 **그대로 보여 준다**(memo66 §4). */
+    capabilityNote: string;
 }
 
 /** 업로드 상한(서버 `maxArchiveSize`). 넘으면 **올리기 전에** 끊어 준다 — 5분 올리고 거절당하지 않게. */
@@ -65,8 +72,16 @@ export async function publish(options: PublishOptions): Promise<PublishResult> {
     }
 
     report("서버가 확인하는 중…");
-    await options.api.confirmArchive(presigned.storageKey);
-    report("새 버전으로 올렸습니다.");
+    const confirmed = await options.api.confirmArchive(presigned.storageKey);
+    report(`버전 ${confirmed.revisionNo} 로 올렸습니다.`);
 
-    return { fileCount: packed.fileCount, byteSize: packed.buffer.byteLength, sha256: packed.sha256 };
+    return {
+        fileCount: packed.fileCount,
+        byteSize: packed.buffer.byteLength,
+        sha256: packed.sha256,
+        revisionNo: confirmed.revisionNo,
+        status: confirmed.status,
+        siteType: confirmed.siteType,
+        capabilityNote: confirmed.capabilityNote,
+    };
 }

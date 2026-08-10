@@ -19,6 +19,7 @@ import {
     startPreview,
     stripCredentials,
     ZalkeraApi,
+    waitForBuild,
     type DevServer,
     type FetchSourceResult,
     type Handshake,
@@ -106,7 +107,7 @@ export function activate(context: vscode.ExtensionContext): void {
             await startPreviewCommand();
         }),
         register("zalkera.publish", publishCommand),
-        register("zalkera.version.switch", switchVersion),
+        register("zalkera.version.switch", () => switchVersion()),
         register("zalkera.history", showHistory),
         register("zalkera.precheck", precheckCommand),
         register("zalkera.agent.connect", connectAgent),
@@ -420,19 +421,34 @@ async function startFromExample(): Promise<void> {
  *   전환은 **방문자가 보는 화면이 즉시 바뀌는** 동작이다. 잘못 누르면 손님이 다른 화면을 본다.
  *   「새 버전 올리기」가 조용한 대신 여기가 시끄러워야 한다 — 두 단계로 나눈 이유가 그것이다.
  */
-async function switchVersion(): Promise<void> {
+async function switchVersion(preselected?: number): Promise<void> {
     const api = await ensureApi();
     const revisions = await api.listRevisions();
-    const candidates = revisions.filter((r) => !r.isActive);
+    // **켤 수 있는 것만 고르게 한다.** BUILDING·FAILED 를 목록에 넣으면 골랐다가 409 로 거절당한다 —
+    // 고를 수 없는 것을 보여 주고 거절하는 것은 화면이 사람에게 거짓말을 하는 것이다.
+    const candidates = revisions.filter((r) => !r.isActive && r.status === "READY");
     if (candidates.length === 0) {
-        void vscode.window.showInformationMessage("바꿀 다른 버전이 없습니다.");
+        const building = revisions.filter((r) => r.status === "BUILDING").length;
+        void vscode.window.showInformationMessage(
+            building > 0
+                ? `지금 바꿀 수 있는 버전이 없습니다(빌드 중 ${building}개). 끝나면 다시 보십시오.`
+                : "바꿀 다른 버전이 없습니다.",
+        );
         return;
     }
 
     // 목록은 최신순이다. 맨 위가 대개 **방금 올린 것**이라 그렇다고 말해 준다 — 사람이 번호를
     // 외우고 있지는 않다.
     const active = revisions.find((r) => r.isActive);
-    const choice = await vscode.window.showQuickPick(
+
+    // 방금 올려 놓고 "지금 전환"을 누른 경우 — 고르라고 다시 묻지 않는다. 이미 고른 것이다.
+    const direct = preselected === undefined ? undefined : candidates.find((r) => r.revisionNo === preselected);
+    if (preselected !== undefined && !direct) {
+        void vscode.window.showWarningMessage(`버전 ${preselected} 로 바꿀 수 없습니다.`);
+        return;
+    }
+
+    const choice = direct ? { label: `버전 ${direct.revisionNo}` } : await vscode.window.showQuickPick(
         candidates.map((r, index) => ({
             label: `버전 ${r.revisionNo}`,
             description: new Date(r.createdAt).toLocaleString("ko-KR"),
@@ -653,11 +669,81 @@ async function publishCommand(): Promise<void> {
         { location: vscode.ProgressLocation.Notification, title: "올리는 중" },
         () => publish({ projectDir: dir, api, onProgress: log }),
     );
-    log(`새 버전으로 올렸습니다 — 파일 ${result.fileCount}개 · ${Math.round(result.byteSize / 1024)}KB`);
-    // **아직 안 바뀌었다는 말을 여기서 한다.** 사람이 결과를 보는 유일한 자리다.
-    void vscode.window.showInformationMessage(
-        `새 버전으로 올렸습니다(파일 ${result.fileCount}개). 사이트는 아직 바뀌지 않았습니다.`,
+    log(`버전 ${result.revisionNo} 로 올렸습니다 — 파일 ${result.fileCount}개 · ${Math.round(result.byteSize / 1024)}KB`);
+    // 서버가 보낸 한계·상태 안내는 **그대로 보여 준다**(memo66 §4 거짓 성공 차단).
+    if (result.capabilityNote) log(result.capabilityNote);
+
+    // `STATIC` 은 올리는 즉시 READY 지만 `NEXT_SOURCE` 는 서버가 빌드해야 한다. 종전에는 여기서
+    // 이야기가 끝나 **왜 못 켜는지 알 수 없었다.**
+    const ready = result.status === "READY" ? true : await awaitBuild(api, result.revisionNo);
+    if (!ready) return;
+
+    await offerSwitch(result.revisionNo);
+}
+
+/**
+ * 빌드가 끝날 때까지 지켜본다. **켜지는 않는다** — 켜는 것은 사람이 한 번 더 눌러야 한다.
+ *
+ * 취소는 **기다리기를 그만두는 것**이지 빌드를 멈추는 것이 아니다. 서버는 계속 짓는다 —
+ * 그 사실을 말해 주지 않으면 사용자는 자기가 취소해서 안 된 줄 안다.
+ */
+async function awaitBuild(api: ZalkeraApi, revisionNo: number): Promise<boolean> {
+    const outcome = await vscode.window.withProgress(
+        {
+            location: vscode.ProgressLocation.Notification,
+            title: `버전 ${revisionNo} 를 서버가 빌드하는 중`,
+            cancellable: true,
+        },
+        (_progress, token) =>
+            waitForBuild({
+                revisionNo,
+                listRevisions: () => api.listRevisions(),
+                onProgress: log,
+                isCancelled: () => token.isCancellationRequested,
+            }),
     );
+
+    switch (outcome.kind) {
+        case "ready":
+            return true;
+        case "failed": {
+            log(`버전 ${revisionNo} 빌드 실패${outcome.reason ? `\n${outcome.reason}` : ""}`);
+            const choice = await vscode.window.showErrorMessage(
+                `버전 ${revisionNo} 를 서버가 만들지 못했습니다. 사이트는 그대로입니다.`,
+                ...(outcome.reason ? ["자세히 보기"] : []),
+            );
+            if (choice === "자세히 보기") output.show();
+            return false;
+        }
+        case "timeout":
+            void vscode.window.showWarningMessage(
+                `버전 ${revisionNo} 가 아직 빌드 중입니다. 끝나면 「버전 전환」에서 고르실 수 있습니다.`,
+            );
+            return false;
+        case "cancelled":
+            log(`버전 ${revisionNo} 기다리기를 그만뒀습니다 — 빌드는 서버에서 계속됩니다.`);
+            void vscode.window.showInformationMessage(
+                "기다리기만 그만뒀습니다. 빌드는 서버에서 계속되고, 끝나면 「버전 전환」에 나옵니다.",
+            );
+            return false;
+        case "gone":
+            void vscode.window.showWarningMessage(`버전 ${revisionNo} 를 목록에서 찾지 못했습니다.`);
+            return false;
+    }
+}
+
+/**
+ * 켤 수 있게 됐다고 알리고 **한 번 물어본다.**
+ *
+ * 자동으로 켜지 않는 이유가 여기 있다 — 확인 없이 켜면 잘못 고친 것이 바로 손님에게 간다.
+ * 다만 "이제 켤 수 있다"는 사실까지 숨기면 사람이 콘솔을 뒤지게 된다. 알리되, 누르는 것은 사람이다.
+ */
+async function offerSwitch(revisionNo: number): Promise<void> {
+    const choice = await vscode.window.showInformationMessage(
+        `버전 ${revisionNo} 가 준비됐습니다. 사이트는 아직 바뀌지 않았습니다.`,
+        "지금 전환",
+    );
+    if (choice === "지금 전환") await switchVersion(revisionNo);
 }
 
 /**
