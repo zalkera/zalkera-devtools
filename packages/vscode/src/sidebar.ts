@@ -110,9 +110,10 @@ export class ZalkeraSidebar implements vscode.TreeDataProvider<Node> {
             nodes.push(
                 group("만들기", "tools", "고치고 확인합니다", making),
                 // 순서가 이름의 약속과 같아야 한다 — 검사가 먼저, 발행이 나중.
-                group("내보내기", "cloud-upload", "살펴보고 올립니다", [
+                group("내보내기", "package", "살펴보고 올립니다", [
                     action("배포 전 검사", "zalkera.precheck", "checklist", "조언입니다 — 발행을 막지 않습니다"),
-                    action("발행", "zalkera.publish", "rocket", "묶어서 올립니다"),
+                    // 이름이 하는 일과 같아야 한다 — 이 명령은 **올리기까지**다(전환은 따로).
+                    action("새 버전 올리기", "zalkera.publish", "cloud-upload", "올리기만 합니다 — 사이트는 아직 안 바뀝니다"),
                 ]),
                 group("되돌리기", "history", "지난 버전으로 갑니다", [
                     action("버전 이력", "zalkera.history", "list-flat", "읽기 전용 — 아무것도 바뀌지 않습니다"),

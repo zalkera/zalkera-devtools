@@ -579,25 +579,39 @@ async function stopPreview(): Promise<void> {
     log("프리뷰를 멈췄습니다.");
 }
 
-// ── 발행 ────────────────────────────────────────────────────────────────
+// ── 새 버전 올리기 ────────────────────────────────────────────────────────
+
+/**
+ * **「발행」이라 부르지 않는다**(오너 지적 2026-08-10). 이 명령이 하는 일은 `confirmArchive` 까지,
+ * 곧 **버전을 하나 만드는 것**뿐이다. 사이트를 그 버전으로 바꾸는 것은 `activateRevision` 이고
+ * 이 명령은 그것을 부르지 않는다. "발행"은 하지 않은 일을 했다고 말한다.
+ *
+ * 이름이 거짓이면 사람은 사이트가 바뀐 줄 알고 확인하지 않는다 — 그 오해가 제일 비싸다.
+ */
 
 async function publishCommand(): Promise<void> {
     const dir = requireWorkspace();
     const api = await ensureApi();
 
     const confirm = await vscode.window.showWarningMessage(
-        "지금 소스를 잘커라에 올립니다. 올린 뒤 콘솔에서 새 버전으로 전환할 수 있습니다.",
-        { modal: true },
+        "지금 소스를 새 버전으로 올립니다.",
+        {
+            modal: true,
+            detail: "올리기만 합니다 — 방문자가 보는 사이트는 그대로입니다.\n그 버전으로 바꾸려면 올린 뒤 따로 전환하십시오.",
+        },
         "올리기",
     );
     if (confirm !== "올리기") return;
 
     const result = await vscode.window.withProgress<PublishResult>(
-        { location: vscode.ProgressLocation.Notification, title: "발행하는 중" },
+        { location: vscode.ProgressLocation.Notification, title: "올리는 중" },
         () => publish({ projectDir: dir, api, onProgress: log }),
     );
-    log(`발행 접수 — 파일 ${result.fileCount}개 · ${Math.round(result.byteSize / 1024)}KB`);
-    void vscode.window.showInformationMessage(`발행이 접수되었습니다(파일 ${result.fileCount}개).`);
+    log(`새 버전으로 올렸습니다 — 파일 ${result.fileCount}개 · ${Math.round(result.byteSize / 1024)}KB`);
+    // **아직 안 바뀌었다는 말을 여기서 한다.** 사람이 결과를 보는 유일한 자리다.
+    void vscode.window.showInformationMessage(
+        `새 버전으로 올렸습니다(파일 ${result.fileCount}개). 사이트는 아직 바뀌지 않았습니다.`,
+    );
 }
 
 /**
@@ -654,7 +668,7 @@ async function showHistory(): Promise<void> {
         const when = new Date(r.createdAt).toLocaleString("ko-KR");
         log(`${r.isActive ? "▶" : " "} 버전 ${r.revisionNo} · ${r.status} · ${when}${r.note ? ` · ${r.note}` : ""}`);
     }
-    log(`(총 ${revisions.length}개 · 되돌리려면 「이전 버전으로」를 쓰세요)`);
+    log(`(총 ${revisions.length}개 · 바꾸려면 「버전 되돌리기」를 쓰세요)`);
 }
 
 /** F2 — 문서 하나를 보고 진단을 갱신한다. 우리 프로젝트 밖 파일은 보지 않는다. */

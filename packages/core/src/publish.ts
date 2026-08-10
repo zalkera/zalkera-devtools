@@ -66,7 +66,7 @@ export async function publish(options: PublishOptions): Promise<PublishResult> {
 
     report("서버가 확인하는 중…");
     await options.api.confirmArchive(presigned.storageKey);
-    report("발행이 접수되었습니다.");
+    report("새 버전으로 올렸습니다.");
 
     return { fileCount: packed.fileCount, byteSize: packed.buffer.byteLength, sha256: packed.sha256 };
 }

@@ -1,6 +1,6 @@
 {
   "name": "zalkera-devtools",
-  "version": "0.1.15",
+  "version": "0.1.16",
   "private": true,
   "license": "MIT",
   "type": "module",
@@ -56,7 +56,7 @@
       },
       {
         "command": "zalkera.publish",
-        "title": "잘커라: 발행",
+        "title": "잘커라: 새 버전 올리기",
         "category": "잘커라"
       },
       {
