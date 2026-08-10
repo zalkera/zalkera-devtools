@@ -1,0 +1,48 @@
+# 검사 게이트.
+#
+# ■ 왜 이제야 있나 (심의 실측 · 2026-08-10)
+#   `npm run verify` 는 진작 정의돼 있었는데 **아무도 돌리지 않았다.** 워크플로는 `docs.yml` 하나뿐이었고,
+#   `package-vsix.mjs` 도 verify 없이 곧장 구웠다 — 즉 **테스트가 깨진 채로 고객에게 갈 VSIX 를 만들 수
+#   있었다.** 번들은 esbuild 라 타입 검사도 안 한다.
+#
+#   같은 심의가 더 아픈 것을 쟀다: **지워도 초록인 가드가 13건**이었다. Zip Slip 루트 검사를 지운 채로
+#   해제 루트 밖 파일을 실제로 덮어썼는데 테스트 전량이 통과했다. 게이트가 없으면 그 위에 쌓는 수정도
+#   지켜지지 않는다 — 그래서 이 파일이 심의 후속 트랜치의 **첫 칸**이다.
+#
+# ■ 무엇을 막나
+#   typecheck(번들이 건너뛰는 축) · 테스트 · 사이드바 라벨 일치. 셋이 `npm run verify` 하나다.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# 같은 브랜치의 앞선 실행은 접는다 — 뒤엣것이 정답이다.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # `npm ci` 다 — lockfile 그대로 설치한다. `npm install` 은 lockfile 을 고쳐 버려,
+      # "내 기계에선 되는데" 를 CI 안으로 들여온다.
+      - run: npm ci
+
+      - run: npm run verify
+
+      # 포장까지 실제로 해 본다. 포장 스크립트 안에는 코드가 아니라 **배포물**을 지키는 검사가 있다
+      # (SVG 온전성 · VSIX 필수 4종). 그것들이 깨지면 여기서 죽어야지, 손으로 굽는 날 죽으면 늦다.
+      - run: npm run package:ci

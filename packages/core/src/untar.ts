@@ -49,11 +49,22 @@ export interface UntarOptions {
      * 정상 동작이 죽는다. 그래서 호출부가 **서버가 신고한 크기 기준**으로 넘긴다(`payload.ts`).
      */
     maxBytes?: number;
+    /**
+     * 항목 수 상한(기본 [MAX_ENTRIES]). 호출부가 더 좁게 잡을 수 있다 — `maxBytes` 와 같은 성질이다.
+     *
+     * 시험이 이 값을 쓰는 이유가 하나 더 있다: 기본 상한을 **실제로 넘겨** 재려면 20만 파일을 디스크에
+     * 써야 하고, 그 시험은 자기가 디스크 폭탄이 된다(실측 — /tmp 를 채웠다). 가드를 재는 시험이
+     * 가드가 막으려는 바로 그 손해를 내면 안 된다.
+     */
+    maxEntries?: number;
 }
 
 /** 버퍼 해제(사이트 소스용). 반환은 **쓴 파일 수**다(디렉터리·링크는 안 센다). */
 export async function extractTarGz(gzipped: Buffer, targetDir: string, options: UntarOptions = {}): Promise<number> {
-    const tar = await gunzipBuffer(gzipped);
+    // ⚠ `maxBytes` 를 **여기서도 쓴다**(심의 실측 · 2026-08-10). 종전에는 스트리밍 경로만 이 값을 보고
+    // 버퍼 경로는 통짜 상한만 봐서, `maxBytes: 1024` 로 불러도 20,000 파일이 기록됐다. 호출부가 건 상한이
+    // 경로에 따라 있다 없다 하면 그건 상한이 아니다.
+    const tar = await gunzipBuffer(gzipped, options.maxBytes);
     const sink = await createSink(targetDir, options);
     let offset = 0;
 
@@ -220,6 +231,16 @@ async function createSink(targetDir: string, options: UntarOptions) {
      * 절대치는 `npm install` 대비 무해하지만, 공짜로 없앨 수 있는 비용을 남길 이유가 없다(재심의 경고 2).
      */
     const verified = new Set<string>([root]);
+    /**
+     * 항목 수 상한. **zip 에는 있고 tar 에는 없었다**(심의 실측: 141KB gz → 20,000 항목 · 72:1).
+     * 선언 167MB 짜리 페이로드는 260만 항목까지 허가하던 셈이다. 바이트 상한은 큰 파일을 막지만
+     * **작은 파일 수백만 개**는 못 막는다 — inode 고갈과 몇 시간짜리 해제가 그 모습이다.
+     *
+     * 값은 zip 의 65,535 보다 크게 잡는다: 의존성 페이로드가 실측 14,229 파일이고, 그보다 큰 트리도
+     * 정상일 수 있다. 막으려는 것은 "정상보다 두 자릿수 큰 것"이다.
+     */
+    let entries = 0;
+    const entryCap = Math.min(options.maxEntries ?? MAX_ENTRIES, MAX_ENTRIES);
     const materializeLinks = options.symlinks === "materialize";
     const preserveMode = options.preserveMode === true;
     let count = 0;
@@ -231,6 +252,13 @@ async function createSink(targetDir: string, options: UntarOptions) {
     return {
         fileCount: () => count,
         async consume(entry: Entry, data: Buffer): Promise<void> {
+            entries += 1;
+            if (entries > entryCap) {
+                throw new DevtoolsError(
+                    "SERVER_REJECTED",
+                    `받은 파일에 항목이 너무 많습니다(상한 ${entryCap.toLocaleString()}개).`,
+                );
+            }
             // GNU 긴 이름 — 이 항목의 **데이터가 다음 항목의 이름**이다.
             if (entry.type === "L") {
                 pendingName = cstring(data);
@@ -421,11 +449,12 @@ function parseOctal(buffer: Buffer): number {
 }
 
 /** 압축 폭탄 방어 — 무제한 해제는 확장 호스트를 OOM 으로 죽이고, 그러면 다른 확장까지 함께 죽는다. */
-async function gunzipBuffer(input: Buffer): Promise<Buffer> {
+async function gunzipBuffer(input: Buffer, maxBytes?: number): Promise<Buffer> {
     const { gunzip: gunzipCb } = await import("node:zlib");
     const { promisify } = await import("node:util");
+    const cap = Math.min(maxBytes ?? MAX_ARCHIVE_BYTES, MAX_ARCHIVE_BYTES);
     try {
-        return (await promisify(gunzipCb)(input, { maxOutputLength: MAX_ARCHIVE_BYTES })) as Buffer;
+        return (await promisify(gunzipCb)(input, { maxOutputLength: cap })) as Buffer;
     } catch (cause) {
         throw new DevtoolsError(
             "SERVER_REJECTED",
@@ -437,6 +466,8 @@ async function gunzipBuffer(input: Buffer): Promise<Buffer> {
 }
 
 const MAX_ARCHIVE_BYTES = 200 * 1024 * 1024;
+/** 항목 수 상한(zip 의 65,535 와 같은 목적). 실측 의존성 트리가 14,229 파일이라 두 자릿수 여유를 둔다. */
+const MAX_ENTRIES = 200_000;
 
 /**
  * 항목 **하나**의 상한. 트리 전체가 아니라 개별 파일 기준이다 — node_modules 의 개별 파일은 수 MB 를

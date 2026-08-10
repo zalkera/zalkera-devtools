@@ -128,6 +128,13 @@ async function waitForReady(child: ChildProcess, isReady: () => boolean): Promis
     await new Promise<void>((resolve, reject) => {
         const timer = setTimeout(() => {
             clearInterval(poll);
+            // 마지막 poll 틱과 이 타이머 사이(≤100ms)에 "Ready" 가 왔을 수 있다. 그때 죽이면
+            // **다 뜬 서버를 죽이고 실패라고 말하는** 것이 된다 — 고치려던 거짓 실패의 거울상이다.
+            if (isReady()) {
+                clearTimeout(timer);
+                resolve();
+                return;
+            }
             // 던지기 **전에** 죽인다. 뒤에 두면 호출부가 먼저 정리를 시도한다.
             void stopChild(child);
             reject(

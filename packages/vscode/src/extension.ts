@@ -57,6 +57,18 @@ let previewStarting = false;
  * 적혀 있었다 — 문서가 하지 않는 일을 했다고 말하는 자리였다.
  */
 let issuedKeyId: number | null = null;
+/**
+ * `issuedKeyId` 를 창 밖으로 넘긴다. **모듈 메모리만으로는 부족하다**(심의 경고 · 2026-08-10) —
+ * 「중지」 뒤 창을 다시 열면(reload·재시작) 값이 사라져, 로그아웃해도 서버 키가 TTL(최대 12시간)까지
+ * 살아 있었다. 도움말은 그 경로에서도 폐기된다고 무조건으로 약속하고 있었다.
+ */
+const ISSUED_KEY_STATE = "zalkera.issuedKeyId";
+let persistedState: vscode.Memento;
+
+function setIssuedKey(keyId: number | null): void {
+    issuedKeyId = keyId;
+    void persistedState.update(ISSUED_KEY_STATE, keyId);
+}
 let store: SecretTokenStore;
 let handshake: Handshake | null = null;
 let sidebar: ZalkeraSidebar;
@@ -84,6 +96,9 @@ export function activate(context: vscode.ExtensionContext): void {
     store = new SecretTokenStore(context);
     extensionPath = context.extensionPath;
     extensionVersion = String(context.extension.packageJSON.version ?? extensionVersion);
+    persistedState = context.globalState;
+    // 지난 창이 남긴 키가 있으면 이어받는다 — 그래야 로그아웃이 그것까지 지운다.
+    issuedKeyId = context.globalState.get<number>(ISSUED_KEY_STATE) ?? null;
     helpUri = vscode.Uri.joinPath(context.extensionUri, "media", "help.md");
     sidebar = new ZalkeraSidebar();
     void refreshSidebar();
@@ -103,7 +118,9 @@ export function activate(context: vscode.ExtensionContext): void {
         register("zalkera.signIn", signIn),
         register("zalkera.site.choose", chooseSite),
         register("zalkera.reset", resetAll),
-        register("zalkera.signOut", signOut),
+        register("zalkera.signOut", async () => {
+            await signOut();
+        }),
         register("zalkera.site.create", startFromExample),
         register("zalkera.site.open", openSite),
         register("zalkera.site.link", linkFolder),
@@ -276,13 +293,14 @@ async function signIn(): Promise<void> {
     void vscode.window.showInformationMessage("잘커라에 로그인했습니다.");
 }
 
-async function signOut(options: { quiet?: boolean } = {}): Promise<void> {
+/** 로그아웃했으면 `true`, 준비 중이라 거절했으면 `false`. **호출부는 이 값을 봐야 한다.** */
+async function signOut(options: { quiet?: boolean } = {}): Promise<boolean> {
     // 준비 중(수 분짜리 첫 설치)에 로그아웃하면, 이미 발급된 키로 진행 중인 시작이 **로그아웃 뒤에
     // 완주해** 프리뷰가 선다 — 사이드바는 로그아웃 화면인데 상태바는 "프리뷰 N"이 된다(심의 경고).
     // 지금은 준비를 중간에 끊을 수단이 없으므로 **거절하고 말한다.** 조용히 어긋나게 두지 않는다.
     if (previewStarting) {
         void vscode.window.showWarningMessage("프리뷰를 준비하는 중입니다. 끝난 뒤 다시 시도해 주세요.");
-        return;
+        return false;
     }
     // ⚠ **로그아웃이 반쪽이었다**(심의 경고): 도는 프리뷰를 안 끄고 서버 키도 안 지웠다. 이미 뜬 dev 서버는
     // 부팅 때 읽은 키로 **최대 12시간 상용 데이터를 계속 읽는다** — "로그아웃했다"는 화면과 실제가 어긋난다.
@@ -290,8 +308,9 @@ async function signOut(options: { quiet?: boolean } = {}): Promise<void> {
     await stopPreview();
     // `session` 이 아니라 [issuedKeyId] 를 본다 — 「중지」 뒤 로그아웃해도 서버 키가 지워져야 한다.
     if (issuedKeyId) {
-        await revokeKeyQuietly(issuedKeyId);
-        issuedKeyId = null;
+        const doomed = issuedKeyId;
+        setIssuedKey(null);
+        await revokeKeyQuietly(doomed);
     }
 
     await logout(store);
@@ -307,6 +326,7 @@ async function signOut(options: { quiet?: boolean } = {}): Promise<void> {
     await refreshSidebar();
     // 초기화가 부를 때는 자기 문구로 끝낸다 — 알림이 두 번 뜨면 무엇이 끝난 건지 흐려진다.
     if (!options.quiet) void vscode.window.showInformationMessage("로그아웃했습니다.");
+    return true;
 }
 
 /**
@@ -321,10 +341,6 @@ async function signOut(options: { quiet?: boolean } = {}): Promise<void> {
 async function resetAll(): Promise<void> {
     // signOut 과 **같은 이유로** 거절한다. 여기서 막지 않으면 signOut 이 조용히 되돌아온 뒤 설정만
     // 지워져서 — 로그인은 살아 있고 프리뷰는 뒤늦게 뜨는데 사이트 설정만 사라진 — 최악의 중간 상태가 된다.
-    if (previewStarting) {
-        void vscode.window.showWarningMessage("프리뷰를 준비하는 중입니다. 끝난 뒤 다시 시도해 주세요.");
-        return;
-    }
     const dir = workspaceDir();
     const confirmed = await vscode.window.showWarningMessage(
         "잘커라를 처음 상태로 되돌릴까요?",
@@ -340,7 +356,11 @@ async function resetAll(): Promise<void> {
 
     // 로그아웃이 이미 하는 일(프리뷰 중지 → 서버 키 폐기 → 토큰 삭제 → .env.local 키 줄 제거)을
     // 그대로 쓴다. 두 벌로 만들면 한쪽만 고쳐진다.
-    await signOut({ quiet: true });
+    //
+    // ⚠ **거절을 반드시 전달받는다**(심의 경고). 반환값을 안 보면, 확인창을 띄워 둔 사이에 갱신 타이머가
+    // 프리뷰를 다시 세워 signOut 이 거절하고 — 그런데 여기는 그대로 진행해 **설정만 지운다.** 로그인은
+    // 살아 있고 프리뷰는 뒤늦게 뜨는데 사이트 설정만 사라진, 주석이 스스로 최악이라 부른 그 상태다.
+    if (!(await signOut({ quiet: true }))) return;
 
     // 사이트 설정은 **두 범위 모두** 지운다 — 한쪽만 지우면 남은 쪽이 되살아난다.
     const config = vscode.workspace.getConfiguration("zalkera");
@@ -590,8 +610,11 @@ async function startPreviewCommand(): Promise<void> {
         // 시작이 실패했으면 **발급받은 키를 여기서 되돌린다.** 로그아웃까지 미루면 그때까지 서버에
         // 살아 있고, 사용자는 실패했다고 들었으므로 로그아웃할 이유도 못 느낀다.
         if (issuedKeyId !== null && !session) {
-            await revokeKeyQuietly(issuedKeyId);
-            issuedKeyId = null;
+            // **비우는 것이 먼저다.** `await` 뒤에 비우면, 그 사이 시작된 두 번째 시도가 심어 둔 새 키를
+            // 이 줄이 지워 버린다(심의 경고). 지역 변수로 옮겨 놓고 폐기한다.
+            const doomed = issuedKeyId;
+            setIssuedKey(null);
+            await revokeKeyQuietly(doomed);
         }
         throw error;
     } finally {
@@ -621,7 +644,7 @@ async function startPreviewInner(): Promise<void> {
                 label: `${vscode.env.appName} · ${process.platform}`,
                 // 발급 즉시 붙잡는다 — 뒤가 실패해도 로그아웃·초기화가 이 키를 지울 수 있어야 한다.
                 onKeyIssued: (keyId) => {
-                    issuedKeyId = keyId;
+                    setIssuedKey(keyId);
                 },
                 onProgress: log,
                 onLog: log,
@@ -629,7 +652,7 @@ async function startPreviewInner(): Promise<void> {
     ));
 
     session = { server: started.server, projectDir: dir, keyId: started.keyId };
-    issuedKeyId = started.keyId;
+    setIssuedKey(started.keyId);
     sidebar.update({ previewUrl: started.server.url, keyExpiresAt: started.expiresAt });
     started.server.onExit((code) => {
         session = null;
@@ -698,12 +721,20 @@ function scheduleRenewal(expiresAt: string, ttlSeconds: number): void {
     renewTimer.unref?.();
 }
 
-/** 시작이 실패해도 가드를 반드시 푼다 — 안 그러면 "준비 중" 에 영원히 갇힌다. */
+/**
+ * 실패하면 상태바를 되돌린다.
+ *
+ * ⚠ **여기서 가드를 풀지 않는다**(심의 경고 · 2026-08-10). 종전에는 이 catch 가 `previewStarting = false`
+ * 를 했는데, 바깥 catch 가 키를 폐기하는 **수 초 동안 가드가 이미 풀려 있었다.** 그 창에서 다시 「프리뷰
+ * 시작」이 통과하면 새 키가 발급되고, 뒤늦게 끝난 첫 번째 정리가 `issuedKeyId` 를 비워 **두 번째 키를
+ * 아무도 못 지우게** 만든다 — 이 트랜치가 닫으려던 바로 그 누수가 경합으로 되살아난다.
+ *
+ * 가드 해제는 바깥 `finally` 한 곳뿐이다. 푸는 자리가 둘이면 반드시 어긋난다.
+ */
 async function withStartGuard<T>(run: () => Thenable<T>): Promise<T> {
     try {
         return await run();
     } catch (error) {
-        previewStarting = false;
         setStatus("$(zap) 잘커라");
         throw error;
     }

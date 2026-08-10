@@ -61,6 +61,17 @@ if (bumpAt !== -1) {
     console.log(`· 버전 ${before} → ${manifest.version}`);
 }
 
+// ── 0.5 검사 게이트 ────────────────────────────────────────────────────────
+// **굽기 전에 죽는다.** 종전에는 verify 없이 곧장 구워, 테스트가 깨진 채로 고객에게 갈 VSIX 를
+// 만들 수 있었다(심의 실측). 번들은 esbuild 라 타입 검사도 안 하므로 여기가 유일한 그물이다.
+//
+// `--skip-verify` 는 **CI 전용**이다 — CI 는 바로 앞 단계에서 이미 verify 를 돌렸다.
+// 손으로 구울 때는 쓰지 마라. 그러라고 둔 문이 아니다.
+if (!process.argv.includes("--skip-verify")) {
+    console.log("· verify (typecheck · test · labels)");
+    execFileSync("npm", ["run", "verify"], { cwd: root, stdio: "inherit" });
+}
+
 // ── 1. core 빌드 + 번들 (alias 로 산출물을 끌어온다 — 의존성 선언 0) ─────────
 console.log("· core 빌드");
 execFileSync("npm", ["run", "build", "-w", "@zalkera/devtools-core"], { cwd: root, stdio: "inherit" });

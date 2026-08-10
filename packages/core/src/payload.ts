@@ -367,7 +367,7 @@ export async function writePayloadStamp(cacheDir: string, result: PayloadResult,
  * 저장처 좌표는 서버가 주지만(클라이언트에 저장처 지식 0), **스킴까지 아무거나 받을 이유는 없다**
  * (재심의 관찰 2 — 실측 `data:` URL 통과). https 한정은 공짜다.
  */
-function isSafeHttpsUrl(value: string): boolean {
+export function isSafeHttpsUrl(value: string): boolean {
     try {
         return new URL(value).protocol === "https:";
     } catch {
