@@ -32,6 +32,8 @@
 
 ---
 
+설명서: <https://zalkera.github.io/zalkera-devtools/> (확장 안에서는 「도움」 → **도움말**)
+
 ## 명령 한눈에
 
 | 명령 | 하는 일 |

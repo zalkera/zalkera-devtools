@@ -122,14 +122,45 @@ export async function deactivate(): Promise<void> {
 }
 
 /**
- * 동봉한 매뉴얼을 **읽기 좋은 모습으로** 연다.
+ * 매뉴얼을 연다. **정본은 웹**이고(오너 확정 2026-08-10), 동봉본은 폴백이다.
  *
- * 웹 문서로 보내지 않는 이유는 둘이다. 확장과 **같은 판**이 열려야 한다 — 문서만 앞서 가면 없는 버튼을
- * 찾게 된다. 그리고 인터넷이 끊긴 자리에서도 열려야 한다.
+ * ■ 왜 웹이 정본인가
+ *   확장은 고객 기계에 깔려 **강제 업데이트가 안 된다.** 동봉본만 두면 오탈자 하나 고치는 데 새 릴리스가
+ *   필요하고, 안 올린 사람은 영영 옛 글을 본다. 웹은 고치는 즉시 모두에게 닿는다.
+ *   그리고 설치 **전에** 읽을 수 있어야 한다 — 안 깔아 본 사람이 판단할 근거가 그것이다.
  *
- * 마크다운 미리보기가 없는 편집기(일부 경량 배포판)에서는 그냥 원문을 연다 — **못 여는 것보다 낫다.**
+ * ■ 그런데 왜 동봉본을 남기나
+ *   매뉴얼이 제일 필요한 순간은 **뭔가 안 될 때**이고, 그때 안 되는 것이 인터넷일 수 있다.
+ *
+ * ■ 왜 열어 보기 전에 재나
+ *   `openExternal` 은 **브라우저를 띄웠는가**만 알려 준다 — 그 페이지가 떴는지는 모른다. 그래서 그냥
+ *   열면 오프라인 사용자는 브라우저 오류 화면을 보고 끝난다. 짧은 요청 한 번으로 먼저 확인한다.
+ *   실패는 **정상 경로**다(오프라인·사내망 차단) — 조용히 동봉본으로 간다.
  */
+const HELP_URL = "https://zalkera.github.io/zalkera-devtools/";
+
 async function showHelp(): Promise<void> {
+    if (await reachable(HELP_URL)) {
+        const opened = await vscode.env.openExternal(vscode.Uri.parse(HELP_URL));
+        if (opened) return;
+        // 브라우저를 못 띄운 경우(원격·컨테이너 환경) — 여기서 끝내면 아무것도 안 열린다.
+        log("브라우저를 열지 못해 동봉 매뉴얼을 엽니다.");
+    }
+    await openBundledHelp();
+}
+
+/** 2초 안에 응답이 오는가. 오래 기다리면 "도움말이 안 열린다"가 된다 — 그게 더 나쁜 고장이다. */
+async function reachable(url: string): Promise<boolean> {
+    try {
+        const response = await fetch(url, { method: "HEAD", signal: AbortSignal.timeout(2000) });
+        return response.ok;
+    } catch {
+        return false;
+    }
+}
+
+/** 마크다운 미리보기가 없는 편집기(일부 경량 배포판)에서는 원문을 연다 — **못 여는 것보다 낫다.** */
+async function openBundledHelp(): Promise<void> {
     try {
         await vscode.commands.executeCommand("markdown.showPreview", helpUri);
     } catch {
