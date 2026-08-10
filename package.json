@@ -16,12 +16,13 @@
     "build": "npm run build -w @zalkera/devtools-core && npm run build -w zalkera-devtools",
     "test": "npm run test -w @zalkera/devtools-core",
     "typecheck": "npm run build -w @zalkera/devtools-core && npm run typecheck --workspaces --if-present",
-    "verify": "npm run typecheck && npm run test && npm run check:labels",
+    "verify": "npm run typecheck && npm run test && npm run check:labels && npm run check:capture",
     "package": "node scripts/package-vsix.mjs",
     "package:patch": "node scripts/package-vsix.mjs --bump patch",
     "package:minor": "node scripts/package-vsix.mjs --bump minor",
     "check:labels": "node scripts/check-sidebar-labels.mjs",
     "package:ci": "node scripts/package-vsix.mjs --skip-verify",
-    "check:audit": "node scripts/check-audit.mjs"
+    "check:audit": "node scripts/check-audit.mjs",
+    "check:capture": "node scripts/check-capture-tenant.mjs"
   }
 }

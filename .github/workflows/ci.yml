@@ -10,7 +10,8 @@
 #   지켜지지 않는다 — 그래서 이 파일이 심의 후속 트랜치의 **첫 칸**이다.
 #
 # ■ 무엇을 막나
-#   typecheck(번들이 건너뛰는 축) · 테스트 · 사이드바 라벨 일치. 셋이 `npm run verify` 하나다.
+#   typecheck(번들이 건너뛰는 축) · 테스트 · 사이드바 라벨 일치 · captureTenant 호출부 감시.
+#   넷이 `npm run verify` 하나다.
 name: ci
 
 on:

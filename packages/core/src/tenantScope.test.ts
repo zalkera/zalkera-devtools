@@ -54,20 +54,25 @@ test("사이트가 바뀌었으면 원클릭을 내리고 **어디로 가야 하
 test("사용자에게 보이는 문구는 **전부 사이트 이름을 담는다**", () => {
     // 확인창이 침묵하면 두 번 물어도 소용이 없다. 폴더와 사이트는 따로 정해지므로
     // 말하지 않으면 A 의 소스가 B 의 라이브가 된다.
+    // ⚠ **손으로 적은 배열이 아니라 `say` 전체를 훑는다**(재심의 경고). 초판은 리터럴 배열이라
+    // **배열에 안 적은 새 표면은 검사 밖**이었다 — `buildWaitCancelled`·`cannotSwitch` 가 정확히
+    // 그렇게 샜고, 고친 뒤에도 같은 문이 열려 있었다(심의가 사이트 이름 없는 표면을 하나 더 추가해
+    // 초록임을 실측). 이제 함수를 추가하면 **자동으로 검사 대상**이다.
     const t = captureTenant("bix");
-    const surfaces = [
-        say.publishConfirm(t).message,
-        say.switchConfirm(t, 5).message,
-        say.switched(t, 5),
-        say.building(t, 5),
-        say.buildFailed(t, 5),
-        say.buildTimedOut(t, 5),
-        say.buildGone(t, 5),
-        say.buildWaitCancelled(t, 5),
-        say.cannotSwitch(t, 5),
-    ];
-    for (const text of surfaces) {
-        ok(text.includes(`「${t}」`), `사이트 이름이 없다: ${text}`);
+    const surfaces = Object.entries(say);
+    ok(surfaces.length >= 9, `표면이 줄었다 — 지운 것인가 이름을 바꾼 것인가: ${surfaces.length}`);
+
+    for (const [name, fn] of surfaces) {
+        const produced = (fn as (tenant: typeof t, revisionNo: number) => unknown)(t, 5);
+        // 문자열이거나 {message, detail} 이거나 — 어느 쪽이든 사람이 읽는 부분을 전부 모은다.
+        const texts =
+            typeof produced === "string"
+                ? [produced]
+                : Object.values(produced as Record<string, string>).filter((v) => typeof v === "string");
+        ok(
+            texts.some((text) => text.includes(`「${t}」`)),
+            `\`say.${name}\` 에 사이트 이름이 없다: ${JSON.stringify(produced)}`,
+        );
     }
 });
 
