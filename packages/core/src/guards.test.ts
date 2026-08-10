@@ -245,6 +245,60 @@ test("가드 — 비밀로 판단해 뺀 것은 이름을 대고 말한다", asy
     ok(said.some((m) => m.includes("turkey.key")), `이름을 대야 한다 — 실제 출력: ${said.join(" | ")}`);
 });
 
+test("가드 — `.env` 로 **시작**하는 것은 전부 뺀다", async () => {
+    // 클로징 심의(Fable·Opus 공통 차단 · 실측 유출). 주석과 도움말은 처음부터 "시작"이라고 적었는데
+    // 코드만 `.env.` 로 점을 하나 더 요구했다. 그 한 글자 틈으로 나가던 것들이다.
+    const dir = await scratch();
+    await writeFile(join(dir, "package.json"), "{}");
+    for (const name of [
+        ".envrc", // direnv — `export AWS_SECRET_ACCESS_KEY=…` 가 관례
+        ".env~", // 편집기 백업 — **`.env` 의 바이트 사본**이다
+        ".env.local.swp",
+        ".env.production",
+    ]) {
+        await writeFile(join(dir, name), "SECRET_MARKER_env1");
+    }
+
+    const packed = await packProject({ projectDir: dir });
+
+    strictEqual(packed.fileCount, 1);
+    ok(!packed.buffer.includes(Buffer.from("SECRET_MARKER_env1")));
+});
+
+test("가드 — 제외 목록의 **모든** 항목이 실제로 걸린다", async () => {
+    // 심의가 변이로 셌다: 새 시험 5개가 `.mcp.json`·`.vscode`·`.idea` 는 잠갔는데 **같은 커밋에서
+    // 넣은 `.ssh`·`.aws` 는 안 잠갔다** — 목록 안에서 또 일부만 지킨 것이다. 전량을 돈다.
+    for (const name of [
+        ".git", ".claude", ".ssh", ".aws", ".turbo", ".vercel", "dist", "out",
+        ".next", "node_modules", ".ds_store", ".vscode", ".idea", ".mcp.json",
+    ]) {
+        const dir = await scratch();
+        await writeFile(join(dir, "package.json"), "{}");
+        if (name.includes(".json") || name === ".ds_store") {
+            await writeFile(join(dir, name === ".ds_store" ? ".DS_Store" : name), "DROP_ME");
+        } else {
+            await mkdir(join(dir, name), { recursive: true });
+            await writeFile(join(dir, name, "x.txt"), "DROP_ME");
+        }
+        const packed = await packProject({ projectDir: dir });
+        strictEqual(packed.fileCount, 1, `${name} 이 걸려야 한다`);
+    }
+});
+
+test("가드 — SSH 키 이름 네 형제가 모두 걸린다", async () => {
+    // `id_rsa` 만 시험에 있었다(심의 실측). 형제 중 하나만 지키는 가드는 가드가 아니다.
+    const dir = await scratch();
+    await writeFile(join(dir, "package.json"), "{}");
+    for (const name of ["id_rsa", "id_dsa", "id_ecdsa", "id_ed25519"]) {
+        await writeFile(join(dir, name), "SECRET_MARKER_ssh1");
+    }
+
+    const packed = await packProject({ projectDir: dir });
+
+    strictEqual(packed.fileCount, 1);
+    ok(!packed.buffer.includes(Buffer.from("SECRET_MARKER_ssh1")));
+});
+
 test("가드 — 제외가 과하지 않다(평범한 소스는 실린다)", async () => {
     // **"전부 빼면 통과"하는 가짜 가드를 배제한다.** 위 두 시험만 있으면 제외 목록에 모든 것을 넣어도
     // 초록이다 — 그러면 아무것도 못 올리는 도구가 된다.

@@ -56,18 +56,26 @@ let previewStarting = false;
  * 프로세스는 죽었지만 키는 TTL(최대 12시간)까지 살아 있었고, 도움말은 "서버에서도 폐기됩니다"라고
  * 적혀 있었다 — 문서가 하지 않는 일을 했다고 말하는 자리였다.
  */
-let issuedKeyId: number | null = null;
+let issuedKey: { keyId: number; tenant: string } | null = null;
 /**
  * `issuedKeyId` 를 창 밖으로 넘긴다. **모듈 메모리만으로는 부족하다**(심의 경고 · 2026-08-10) —
  * 「중지」 뒤 창을 다시 열면(reload·재시작) 값이 사라져, 로그아웃해도 서버 키가 TTL(최대 12시간)까지
  * 살아 있었다. 도움말은 그 경로에서도 폐기된다고 무조건으로 약속하고 있었다.
  */
-const ISSUED_KEY_STATE = "zalkera.issuedKeyId";
+const ISSUED_KEY_STATE = "zalkera.issuedKey";
 let persistedState: vscode.Memento;
 
-function setIssuedKey(keyId: number | null): void {
-    issuedKeyId = keyId;
-    void persistedState.update(ISSUED_KEY_STATE, keyId);
+/**
+ * ⚠ **테넌트를 함께 들고 다닌다**(클로징 심의 차단 · 2026-08-10). 종전에는 keyId 만 캡처하고 폐기할 때
+ * `tenantCode()` 를 **라이브로** 읽었다. 그런데 `zalkera.tenant` 는 워크스페이스 범위라 창마다 다르고,
+ * 테넌트는 `x-tenant` 헤더로만 간다 — 창 A(테넌트 a)에서 발급한 키를 창 B(테넌트 b)에서 로그아웃하면
+ * 폐기 요청이 b 로 나가 서버가 거절하고, catch 가 그것을 삼킨다. **A 의 키가 최대 12시간 산다.**
+ *
+ * T3 가 「올리기·전환」에 만든 "표기와 동작이 같은 값을 본다"를 이 호출부에 그대로 옮긴 것이다.
+ */
+function setIssuedKey(next: { keyId: number; tenant: string } | null): void {
+    issuedKey = next;
+    void persistedState.update(ISSUED_KEY_STATE, next);
 }
 let store: SecretTokenStore;
 let handshake: Handshake | null = null;
@@ -98,7 +106,7 @@ export function activate(context: vscode.ExtensionContext): void {
     extensionVersion = String(context.extension.packageJSON.version ?? extensionVersion);
     persistedState = context.globalState;
     // 지난 창이 남긴 키가 있으면 이어받는다 — 그래야 로그아웃이 그것까지 지운다.
-    issuedKeyId = context.globalState.get<number>(ISSUED_KEY_STATE) ?? null;
+    issuedKey = context.globalState.get<{ keyId: number; tenant: string }>(ISSUED_KEY_STATE) ?? null;
     helpUri = vscode.Uri.joinPath(context.extensionUri, "media", "help.md");
     sidebar = new ZalkeraSidebar();
     void refreshSidebar();
@@ -305,17 +313,21 @@ async function signOut(options: { quiet?: boolean } = {}): Promise<boolean> {
     // ⚠ **로그아웃이 반쪽이었다**(심의 경고): 도는 프리뷰를 안 끄고 서버 키도 안 지웠다. 이미 뜬 dev 서버는
     // 부팅 때 읽은 키로 **최대 12시간 상용 데이터를 계속 읽는다** — "로그아웃했다"는 화면과 실제가 어긋난다.
     // 순서가 중요하다: 서버를 먼저 멈추고(그 키를 쓰는 프로세스를 없앤 뒤) 키를 지운다.
+    //
+    // 프리뷰가 돌던 폴더를 **멈추기 전에** 잡는다. `stopPreview()` 뒤엔 `session` 이 사라져서,
+    // 아래 `.env.local` 정리가 지금 창의 폴더를 지우게 된다 — 키가 있는 곳은 저쪽인데(클로징 심의).
+    const previewDir = session?.projectDir ?? null;
     await stopPreview();
-    // `session` 이 아니라 [issuedKeyId] 를 본다 — 「중지」 뒤 로그아웃해도 서버 키가 지워져야 한다.
-    if (issuedKeyId) {
-        const doomed = issuedKeyId;
+    // `session` 이 아니라 [issuedKey] 를 본다 — 「중지」 뒤 로그아웃해도 서버 키가 지워져야 한다.
+    if (issuedKey) {
+        const doomed = issuedKey;
         setIssuedKey(null);
-        await revokeKeyQuietly(doomed);
+        await revokeKeyQuietly(doomed.keyId, doomed.tenant);
     }
 
     await logout(store);
     // 로컬 자격증명도 함께 지운다(A4) — **키 줄만** 지우고 고객이 넣은 값은 남긴다.
-    const dir = workspaceDir();
+    const dir = previewDir ?? workspaceDir();
     if (dir) {
         const envPath = join(dir, ".env.local");
         if (existsSync(envPath)) {
@@ -392,13 +404,14 @@ async function resetAll(): Promise<void> {
  * 키 폐기는 **실패해도 로그아웃을 막지 않는다** — 사용자가 원한 것은 로그아웃이고, 서버가 잠깐 안 되는 것이
  * 그것을 되돌릴 이유가 되지 않는다. 대신 남은 키가 있다는 사실은 로그로 남긴다.
  */
-async function revokeKeyQuietly(keyId: number): Promise<void> {
+async function revokeKeyQuietly(keyId: number, tenant: string): Promise<void> {
     try {
         const config = await ensureHandshake();
         const api = new ZalkeraApi({
             apiBase: apiBase(),
             accessToken: () => getAccessToken(config.auth, store),
-            tenantCode: () => tenantCode(),
+            // **키를 발급받은 그 테넌트**로 폐기한다. 지금 고른 사이트가 아니다.
+            tenantCode: () => tenant,
         });
         await api.revokeStorefrontKey(keyId);
         log("프리뷰 자격증명을 서버에서 폐기했습니다.");
@@ -617,12 +630,12 @@ async function startPreviewCommand(): Promise<void> {
     } catch (error) {
         // 시작이 실패했으면 **발급받은 키를 여기서 되돌린다.** 로그아웃까지 미루면 그때까지 서버에
         // 살아 있고, 사용자는 실패했다고 들었으므로 로그아웃할 이유도 못 느낀다.
-        if (issuedKeyId !== null && !session) {
+        if (issuedKey !== null && !session) {
             // **비우는 것이 먼저다.** `await` 뒤에 비우면, 그 사이 시작된 두 번째 시도가 심어 둔 새 키를
             // 이 줄이 지워 버린다(심의 경고). 지역 변수로 옮겨 놓고 폐기한다.
-            const doomed = issuedKeyId;
+            const doomed = issuedKey;
             setIssuedKey(null);
-            await revokeKeyQuietly(doomed);
+            await revokeKeyQuietly(doomed.keyId, doomed.tenant);
         }
         throw error;
     } finally {
@@ -632,7 +645,10 @@ async function startPreviewCommand(): Promise<void> {
 
 async function startPreviewInner(): Promise<void> {
     const dir = requireWorkspace();
-    const api = await ensureApi();
+    // ⚠ **캡처한다**(클로징 심의 W1). 종전에는 API 만 캡처 테넌트에 묶이고 dev 서버에 넘기는 값은
+    // `tenantCode()` 라이브였다. 그 사이에 await 가 여럿(핸드셰이크·progress 준비) 있어서, 그 틈에
+    // 사이트를 바꾸면 **키는 A 로 발급되고 서버 env 는 B** 가 된다.
+    const { api, tenant } = await ensureApiFor();
     const config = await ensureHandshake();
     const runtime = embeddedNodeRuntime(extensionPath);
 
@@ -644,7 +660,7 @@ async function startPreviewInner(): Promise<void> {
                 projectDir: dir,
                 api,
                 apiBase: apiBase(),
-                tenantCode: tenantCode(),
+                tenantCode: tenant,
                 nodePath: runtime.nodePath,
                 extraEnv: runtime.env,
                 // 동봉한 npm 을 넘긴다 — 없으면 코어가 PATH 의 npm 으로 떨어진다(개발자 기계 전용 경로).
@@ -652,7 +668,7 @@ async function startPreviewInner(): Promise<void> {
                 label: `${vscode.env.appName} · ${process.platform}`,
                 // 발급 즉시 붙잡는다 — 뒤가 실패해도 로그아웃·초기화가 이 키를 지울 수 있어야 한다.
                 onKeyIssued: (keyId) => {
-                    setIssuedKey(keyId);
+                    setIssuedKey({ keyId, tenant });
                 },
                 onProgress: log,
                 onLog: log,
@@ -660,7 +676,7 @@ async function startPreviewInner(): Promise<void> {
     ));
 
     session = { server: started.server, projectDir: dir, keyId: started.keyId };
-    setIssuedKey(started.keyId);
+    setIssuedKey({ keyId: started.keyId, tenant });
     sidebar.update({ previewUrl: started.server.url, keyExpiresAt: started.expiresAt });
     started.server.onExit((code) => {
         session = null;

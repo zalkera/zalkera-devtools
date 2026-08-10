@@ -139,7 +139,13 @@ const ALWAYS_EXCLUDED = new Set([
  */
 function isSecretFile(name: string): boolean {
     const lower = name.toLowerCase();
-    if (lower === ".env" || lower.startsWith(".env.")) return true;
+    // ⚠ **접두는 `.env` 다, `.env.` 가 아니다**(클로징 심의 · Fable·Opus 공통 차단 · 실측 유출).
+    // 주석과 도움말은 처음부터 "`.env` 로 **시작**하는 것은 전부"라고 적었는데 코드만 점을 하나 더
+    // 요구했다. 그 한 글자 틈으로 `.envrc`(direnv — `export AWS_SECRET_ACCESS_KEY=…` 가 관례)와
+    // `.env~`(편집기 백업 — **`.env` 의 바이트 사본**)가 나갔다.
+    //
+    // 부수 제외는 `.environment` 같은 **숨은** 이름뿐이다. 점 없는 `environment.ts` 는 그대로 실린다.
+    if (lower.startsWith(".env")) return true;
     if (SECRET_NAMES.has(lower)) return true;
     if (SECRET_SUFFIXES.some((suffix) => lower.endsWith(suffix))) return true;
     // GCP/Firebase 서비스계정 키. **기본 다운로드 이름이 `service-account` 로 시작하지 않는다** —

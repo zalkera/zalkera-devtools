@@ -127,7 +127,7 @@
 | | 무엇 |
 | --- | --- |
 | **부품·산출물** | `node_modules` · `.next` · `dist` · `out` · `.turbo` · `.vercel` — 서버가 다시 만듭니다 |
-| **비밀** | `.env` 로 시작하거나 `.env` 로 끝나는 **모든** 파일 · `.pem` `.key` `.p12` `.pfx` `.p8` · `.netrc` `_netrc` · `.git-credentials` · `.npmrc` · `.yarnrc.yml` · `credentials.json` · `service-account*.json` · `*firebase-adminsdk*.json` · SSH 키(`id_rsa` 등) |
+| **비밀** | `.env` 로 시작하거나 `.env` 로 끝나는 **모든** 파일(`.envrc` · `.env~` 포함) · `.pem` `.key` `.p12` `.pfx` `.p8` · `.netrc` `_netrc` · `.git-credentials` · `.npmrc` · `.yarnrc.yml` · `credentials.json` · `service-account*.json` · `*firebase-adminsdk*.json` · SSH 키(`id_rsa` `id_dsa` `id_ecdsa` `id_ed25519`) |
 | **편집기·도구 설정** | `.vscode` · `.idea` · `.mcp.json` · `.claude` · `.git` |
 | **자격증명 폴더** | `.ssh` · `.aws` — 폴더째 빠집니다 |
 | **OS 부스러기** | `.DS_Store` |
