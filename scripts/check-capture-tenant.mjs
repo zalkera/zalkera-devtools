@@ -24,28 +24,67 @@ import { join, dirname, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-const target = join(root, "packages", "vscode", "src");
+/**
+ * ⚠ **관할을 모든 패키지의 `src` 로 잡는다**(3차 재심의 실측). 초판은 `packages/vscode/src` 만 봤는데,
+ * 심의가 `core` 에 `captureFromLive(read) = captureTenant(read())` 헬퍼를 두니 **라이브 조회를 그대로
+ * 브랜드로 만드는 자리**가 생겼는데도 초록이었다. 그리고 그건 적대적이지 않다 — 헬퍼를 넣을 가장
+ * 자연스러운 자리가 `core` 다.
+ */
+const targets = readdirSync(join(root, "packages"))
+    .map((pkg) => join(root, "packages", pkg, "src"))
+    .filter((dir) => {
+        try {
+            return statSync(dir).isDirectory();
+        } catch {
+            return false;
+        }
+    });
 
-/** 확장 소스에서 브랜드를 만드는 자리. 지금은 `ensureApiFor` 하나다. */
+/**
+ * 브랜드를 만드는 자리. 지금은 `ensureApiFor` 하나다.
+ *
+ * ⚠ `core` 안의 정의 줄(`export function captureTenant`)은 세지 않는다 — **만드는 곳이 아니라
+ * 쓰는 곳**을 센다. `core` 에 래퍼 헬퍼가 생기면 그것도 여기 잡힌다(그게 요점이다).
+ */
 const EXPECTED = 1;
 
 function walk(dir) {
     return readdirSync(dir).flatMap((name) => {
         const full = join(dir, name);
-        return statSync(full).isDirectory() ? walk(full) : full.endsWith(".ts") ? [full] : [];
+        if (statSync(full).isDirectory()) return walk(full);
+        // 시험은 브랜드를 **만들어야** 한다(입력을 지어내는 것이 시험의 일이다) — 세지 않는다.
+        // 프로덕션에서 브랜드가 나는 자리만이 이 검사의 관심사다.
+        if (!full.endsWith(".ts") || full.endsWith(".test.ts")) return [];
+        return [full];
     });
 }
 
 const hits = [];
-for (const file of walk(target)) {
+const aliases = [];
+for (const file of targets.flatMap(walk)) {
     readFileSync(file, "utf8")
         .split("\n")
         .forEach((line, i) => {
             // 주석은 세지 않는다 — 설명에 등장하는 것까지 세면 문서를 못 쓴다.
+            // (오탐 방향이 빨강이라 안전하다: 코드를 주석으로 위장해도 tsc 가 먼저 죽는다.)
             const trimmed = line.trim();
             if (trimmed.startsWith("//") || trimmed.startsWith("*")) return;
-            if (/\bcaptureTenant\s*\(/.test(line)) hits.push(`${relative(root, file)}:${i + 1}`);
+            const where = `${relative(root, file)}:${i + 1}`;
+
+            // **별칭은 즉시 실패다.** `import { captureTenant as brandIt }` 로 이름을 바꾸면
+            // 아래 리터럴 검사가 통째로 눈이 먼다(재심의 실측 — 2곳인데 1곳으로 보고했다).
+            if (/\bcaptureTenant\s+as\s+/.test(line)) aliases.push(where);
+
+            // 정의 줄은 세지 않는다 — 만드는 곳이 아니라 **쓰는 곳**을 센다.
+            if (/export\s+function\s+captureTenant\s*\(/.test(line)) return;
+            if (/\bcaptureTenant\s*\(/.test(line)) hits.push(where);
         });
+}
+
+if (aliases.length > 0) {
+    console.error("✗ `captureTenant` 를 다른 이름으로 가져왔습니다 — 이 검사가 눈이 멉니다.");
+    for (const a of aliases) console.error(`   ${a}`);
+    process.exit(1);
 }
 
 if (hits.length !== EXPECTED) {
