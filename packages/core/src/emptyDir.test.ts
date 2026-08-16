@@ -41,3 +41,26 @@ test(".git 은 무시하지 않는다 — 이력을 가진 작업물이다", asy
     await mkdir(join(dir, ".git"));
     ok(!(await isReceivable(dir)), ".git 이 있으면 이미 어떤 레포다");
 });
+
+
+/**
+ * 무시는 **이름이 아니라 종류**로 정한다. 이름만 보면 `.vscode` 라는 이름의 **링크**가
+ * "빈 폴더"를 통과하고, 그 링크가 해제 대상 경로가 된다 — 편집기는 링크를 만들지 않는다.
+ */
+test("무시 이름이라도 **심링크**면 무시하지 않는다", async () => {
+    const { mkdtemp, symlink, mkdir, writeFile } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const victim = await mkdtemp(join(tmpdir(), "victim-"));
+    for (const name of [".vscode", ".DS_Store", "Thumbs.db", "desktop.ini"]) {
+        const dir = await mkdtemp(join(tmpdir(), "tgt-"));
+        await symlink(victim, join(dir, name));
+        strictEqual(await isReceivable(dir), false, `${name} 심링크가 "빈 폴더"를 통과했다`);
+    }
+    // 통제군 — 진짜 편집기 파일은 여전히 무시한다.
+    const clean = await mkdtemp(join(tmpdir(), "tgt-"));
+    await mkdir(join(clean, ".vscode"));
+    await writeFile(join(clean, ".vscode", "settings.json"), "{}");
+    await writeFile(join(clean, ".DS_Store"), "x");
+    strictEqual(await isReceivable(clean), true, "정상 편집기 파일을 막았다");
+});

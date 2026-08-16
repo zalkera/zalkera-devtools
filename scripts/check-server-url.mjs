@@ -33,7 +33,7 @@ const GUARDED_FIELDS = ["serverName", "authServerMetadataUrl", "sourceUrlTemplat
 const BOUNDARY_FIELDS = [
     { path: "handshake.auth", judge: "apiBaseUrl" },
     { path: "handshake.mcp.authServerMetadataUrl", judge: "apiBaseUrl" },
-    { path: "handshake.mcp.sourceUrlTemplate", judge: "httpUrl" },
+    { path: "handshake.mcp.sourceUrlTemplate", judge: "apiBaseUrl" },
     { path: "handshake.mcp.serverName", judge: "mcpServerName" },
 ];
 /** 그 값을 받아도 되는 판정 함수. */

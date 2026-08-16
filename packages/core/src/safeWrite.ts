@@ -1,5 +1,6 @@
-import { lstat, mkdir } from "node:fs/promises";
-import { join, normalize, relative, resolve, sep } from "node:path";
+import { lstat, mkdir, rename, rm, writeFile } from "node:fs/promises";
+import { randomBytes } from "node:crypto";
+import { basename, join, normalize, relative, resolve, sep } from "node:path";
 import { DevtoolsError } from "./errors.ts";
 
 /**
@@ -84,20 +85,44 @@ export async function assertNotSymlink(path: string, name: string): Promise<void
 }
 
 /**
- * **우리가 소유하는 파일**을 쓰기 전 확인. 해제기가 아니라 `.env.local`·`.mcp.json`·`AGENTS.md`
- * 처럼 우리가 만들어 주는 파일이 대상이다.
+ * **우리가 소유하는 파일을 쓴다.** 같은 폴더에 임시 파일을 새로 만들고 `rename` 으로 갈아 끼운다.
  *
- * 그 자리가 심링크면 내용이 링크 대상으로 간다 — `.env.local` 이면 **방금 발급한 프리뷰 키가
- * 프로젝트 밖으로** 나가고, 도구가 `.env*` 를 zip 에서 빼고 `.gitignore` 에 넣어 세운
- * "자격증명은 안 샌다" 가 그 한 번으로 거짓이 된다.
+ * ■ 왜 `writeFile` 이 아닌가
+ *   그 자리가 링크면 내용이 링크 대상으로 간다 — `.env.local` 이면 **방금 발급한 프리뷰 키가
+ *   프로젝트 밖으로** 나가고, 도구가 `.env*` 를 zip 에서 빼고 `.gitignore` 에 넣어 세운
+ *   "자격증명은 안 샌다" 가 그 한 번으로 거짓이 된다.
+ *
+ * ■ 왜 `lstat` 로 막는 것으로는 부족한가 (셋 다 실측)
+ *   ⑴ `lstat` 는 **심링크만** 본다. 하드링크는 그대로 통과하고 대상에 그대로 쓰인다.
+ *   ⑵ `lstat` 와 `writeFile` 사이에 자리가 바뀔 수 있다(TOCTOU).
+ *   ⑶ **막을 자리를 손으로 열거해야 한다.** 실제로 다섯 자리 중 셋만 열거해 `.gitignore` 쓰기가
+ *      가드 밖에 남아 있었다 — "자리를 빠뜨림"이 이 방식의 고유 결함이다.
+ *
+ *   `rename` 은 **디렉터리 항목만** 바꾼다. 링크를 따라가지 않고, 원자적이고, 열거가 필요 없다.
+ *   그래서 이 함수 하나로 셋이 같이 닫히고 호출부는 "쓴다"만 알면 된다.
+ *
+ * ■ 역할을 나눈다 — **보안은 `rename` 이, 고지는 `lstat` 가**
+ *   `rename` 만 두면 고객이 일부러 건 심링크(공유 설정을 가리키는 `.mcp.json` 등)를 **조용히**
+ *   끊는다. 안전하지만 남의 의도를 말없이 지우는 것이라 옳지 않다. 그래서 심링크는 먼저 보고
+ *   **사람에게 말하고 멈춘다.** 하드링크·교체(TOCTOU)처럼 말해 줄 수 없는 형태는 `rename` 이 막는다.
+ *   ⚠ `lstat` 를 **경계로 읽지 마라** — 그것은 예의이고, 경계는 `rename` 이다.
  */
-export async function assertOwnFileWritable(path: string, label: string): Promise<void> {
+export async function writeOwnFile(path: string, data: string, mode = 0o644): Promise<void> {
     const info = await lstat(path).catch(() => null);
     if (info?.isSymbolicLink()) {
         throw new DevtoolsError(
             "NOT_A_SITE",
-            `${label} 이 링크라 쓰지 않았습니다.`,
+            `${basename(path)} 이 링크라 쓰지 않았습니다.`,
             "이 파일은 확장이 만들어 주는 자리입니다. 링크를 지우고 다시 시도해 주세요.",
         );
+    }
+    const tmp = `${path}.zalkera-${randomBytes(6).toString("hex")}.tmp`;
+    try {
+        // `wx` — 이미 있으면 실패한다. 남의 파일을 우연히 덮지 않는다.
+        await writeFile(tmp, data, {encoding: "utf8", mode, flag: "wx"});
+        await rename(tmp, path);
+    } catch (error) {
+        await rm(tmp, {force: true}).catch(() => undefined);
+        throw error;
     }
 }

@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { DevtoolsError } from "./errors.ts";
+import { writeOwnFile } from "./safeWrite.ts";
 
 /**
  * 프로젝트 판별과 위생. **"잘커라 사이트인가"를 좁게 묻지 않는다** — 고객 소스는 우리 템플릿에서
@@ -73,7 +74,7 @@ export async function ensureEnvIgnored(dir: string): Promise<"already" | "added"
         // 프리뷰가 쓴 `.env.local` 이 `git add -A` 에 그대로 걸려 **프리뷰 키가 커밋된다**(실측).
         // 물어야 할 것은 "git 을 쓰는가"이고, 그 답은 `.git/` 존재다.
         if (!existsSync(join(dir, ".git"))) return "not-git";
-        await writeFile(path, "# 로컬 자격증명 — 절대 커밋하지 않습니다(zalkera).\n.env.local\n", "utf8");
+        await writeOwnFile(path, "# 로컬 자격증명 — 절대 커밋하지 않습니다(zalkera).\n.env.local\n");
         return "created";
     }
 
@@ -85,6 +86,6 @@ export async function ensureEnvIgnored(dir: string): Promise<"already" | "added"
     if (ignored) return "already";
 
     const suffix = content.endsWith("\n") || content.length === 0 ? "" : "\n";
-    await writeFile(path, `${content}${suffix}\n# 로컬 자격증명 — 절대 커밋하지 않습니다(zalkera).\n.env.local\n`, "utf8");
+    await writeOwnFile(path, `${content}${suffix}\n# 로컬 자격증명 — 절대 커밋하지 않습니다(zalkera).\n.env.local\n`);
     return "added";
 }

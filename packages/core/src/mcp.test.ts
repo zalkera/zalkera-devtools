@@ -122,13 +122,17 @@ test("`.mcp.json` 이 심링크면 쓰지 않는다 — 링크 대상이 남의 
     const victim = await mkdtemp(join(tmpdir(), "victim-"));
     const dir = await mkdtemp(join(tmpdir(), "mcp-link-"));
     try {
-        await writeFile(join(victim, "target.json"), "original\n");
+        // ⚠ 링크 대상은 **유효 JSON** 이어야 한다. 깨진 내용으로 두면 `JSON.parse` 가 먼저 던져
+        //   `rejects` 가 그것을 받고 통과한다 — 가드를 지워도 초록인 시험이 된다(실측으로 겪음).
+        const original = '{"mcpServers":{"other":{"type":"http","url":"https://other.example/x"}}}\n';
+        await writeFile(join(victim, "target.json"), original);
         await symlink(join(victim, "target.json"), join(dir, ".mcp.json"));
         await rejects(
             () => registerMcpServer(dir, { serverName: "zalkera", url: "https://mcp.zalkera.com/x", clientId: "a", authServerMetadataUrl: "https://auth.example/x" }),
-            (error: unknown) => error instanceof DevtoolsError,
+            (error: unknown) => error instanceof DevtoolsError && /링크라 쓰지 않았습니다/.test(error.message),
+            "심링크를 따라 링크 대상에 썼다",
         );
-        strictEqual(await readFile(join(victim, "target.json"), "utf8"), "original\n", "링크 대상이 바뀌었다");
+        strictEqual(await readFile(join(victim, "target.json"), "utf8"), original, "링크 대상이 바뀌었다");
     } finally {
         await rm(victim, { recursive: true, force: true });
         await rm(dir, { recursive: true, force: true });

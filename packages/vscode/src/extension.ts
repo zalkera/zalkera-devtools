@@ -25,6 +25,7 @@ import {
     decideReadyPrompt,
     decideSwitch,
     resolveHelpUrl,
+    writeOwnFile,
     httpUrl,
     apiBaseUrl,
     mcpServerName,
@@ -334,7 +335,7 @@ async function signOut(options: { quiet?: boolean } = {}): Promise<boolean> {
     if (dir) {
         const envPath = join(dir, ".env.local");
         if (existsSync(envPath)) {
-            await writeFile(envPath, stripCredentials(await readFile(envPath, "utf8")), "utf8");
+            await writeOwnFile(envPath, stripCredentials(await readFile(envPath, "utf8")), 0o600);
             log(".env.local 의 프리뷰 키를 지웠습니다(다른 설정은 그대로).");
         }
     }

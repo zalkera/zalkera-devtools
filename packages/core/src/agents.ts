@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { assertOwnFileWritable } from "./safeWrite.ts";
+import { writeOwnFile } from "./safeWrite.ts";
 
 /**
  * E1「규약 파일 점검」(memo146 §5 E1 · §7).
@@ -43,15 +43,13 @@ export async function ensureAgentDocs(projectDir: string): Promise<AgentDocsResu
 
     let agents: AgentDocsResult["agents"] = "kept";
     if (!existsSync(agentsPath)) {
-        await assertOwnFileWritable(agentsPath, "AGENTS.md");
-        await writeFile(agentsPath, AGENTS_STUB, "utf8");
+        await writeOwnFile(agentsPath, AGENTS_STUB);
         agents = "created";
     }
 
     let claude: AgentDocsResult["claude"] = "kept";
     if (!existsSync(claudePath)) {
-        await assertOwnFileWritable(claudePath, "CLAUDE.md");
-        await writeFile(claudePath, CLAUDE_POINTER, "utf8");
+        await writeOwnFile(claudePath, CLAUDE_POINTER);
         claude = "created";
     }
 

@@ -188,3 +188,19 @@ test("핸드셰이크 — 정상 MCP 좌표는 살린다(과잉차단 아님을 
     const h = await fetchHandshake("https://api.zalkera.com", "0.1.0", stubHandshake({ ...BASE, mcp }));
     ok(h.mcp, "정상 좌표인데 MCP 를 내렸다");
 });
+
+test("핸드셰이크 — `auth` 가 **없어도** 성립하지 않는다", async () => {
+    // 있고 나쁠 때만 막으면 계약이 반만 참이고, 하류에서 `config.issuer` 를 읽다 raw TypeError 가
+    // 사용자에게 그대로 간다. 부재도 같은 자리에서 막는다.
+    const { fetchHandshake } = await import("./handshake.ts");
+    const {auth: _drop, ...noAuth} = BASE;
+    for (const data of [noAuth, {...BASE, auth: null}, {...BASE, auth: {}}, {...BASE, auth: "x"}]) {
+        let threw = false;
+        try {
+            await fetchHandshake("https://api.zalkera.com", "0.1.0", stubHandshake(data as Record<string, unknown>));
+        } catch {
+            threw = true;
+        }
+        ok(threw, `auth=${JSON.stringify((data as {auth?: unknown}).auth)} 를 받아들였다`);
+    }
+});

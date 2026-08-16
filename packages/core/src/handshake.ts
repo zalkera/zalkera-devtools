@@ -122,7 +122,7 @@ export async function fetchHandshake(
     if (
         handshake.mcp &&
         (!apiBaseUrl(handshake.mcp.authServerMetadataUrl) ||
-            !httpUrl(handshake.mcp.sourceUrlTemplate?.replace("{tenantCode}", "probe")) ||
+            !apiBaseUrl(handshake.mcp.sourceUrlTemplate?.replace("{tenantCode}", "probe")) ||
             !mcpServerName(handshake.mcp.serverName))
     ) {
         // 에이전트 연결만 못 쓰게 한다 — 로그인·발행까지 막을 이유는 없다.

@@ -64,7 +64,9 @@ export function mcpServerName(value: unknown): McpServerName | null {
  * 검사를 지난 서버 이름. **[mcpServerName] 만이 만든다** — 생 `string` 은 `registerMcpServer` 에
  * 컴파일이 안 된다.
  *
- * 텍스트 검사기(`check-server-url.mjs`)는 구조분해 한 번에 뚫린다(`const {serverName} = config.mcp`).
- * 그 축은 규율의 가시화이지 봉인이 아니므로, 봉인은 타입이 진다 — `CapturedTenant` 가 세운 선례다.
+ * ⚠ **봉인은 경계(`fetchHandshake`)가 진다.** 타입과 텍스트 검사기는 소비처 규율이고, 둘 다 뚫린다 —
+ * 브랜드는 `const m = config.mcp;` 한 줄 뒤 캐스트로, 검사기는 그 캐스트를 잡지만 구조분해는 못 잡는다
+ * (심의 실측: 둘을 조합하면 세 게이트가 전부 초록). 상보 관계라 둘 다 두되, **경계를 지나지 않은
+ * 값은 애초에 소비처에 도달하지 않는다**는 것이 실제 방어다.
  */
 export type McpServerName = string & { readonly __mcpServerName: unique symbol };

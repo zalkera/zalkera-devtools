@@ -56,6 +56,7 @@ export {
     resolveHelpUrl,
 } from "./tenantScope.ts";
 export { httpUrl, isLoopback, apiBaseUrl, mcpServerName, type McpServerName } from "./serverUrl.ts";
+export { writeOwnFile } from "./safeWrite.ts";
 export {
     say,
     type CapturedTenant,
