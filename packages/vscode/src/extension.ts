@@ -25,6 +25,9 @@ import {
     decideReadyPrompt,
     decideSwitch,
     resolveHelpUrl,
+    httpUrl,
+    apiBaseUrl,
+    mcpServerName,
     say,
     type DevServer,
     type FetchSourceResult,
@@ -914,11 +917,25 @@ async function connectAgent(): Promise<void> {
     await ensureApi(); // 테넌트를 고르게 한다(아직 안 골랐다면).
     const tenant = tenantCode();
 
+    // 서버가 준 값이라도 그대로 고객 파일에 적지 않는다 — 이름은 **키**가 되어 동명 항목을 덮고,
+    // 두 주소는 고객의 에이전트가 접속·로그인하러 가는 곳이다. 판정이 안 서면 **아무것도 안 적는다**
+    // (매뉴얼과 달리 기본값으로 물러설 자리가 없다).
+    const serverName = mcpServerName(config.mcp.serverName);
+    const mcpUrl = httpUrl(config.mcp.sourceUrlTemplate.replace("{tenantCode}", encodeURIComponent(tenant)));
+    const metadataUrl = httpUrl(config.mcp.authServerMetadataUrl);
+    if (!serverName || !mcpUrl || !metadataUrl) {
+        throw new DevtoolsError(
+            "SERVER_REJECTED",
+            "서버가 보낸 에이전트 연결 정보를 쓸 수 없습니다.",
+            "설정을 바꾸지 않았습니다. 잘커라에 문의해 주세요.",
+        );
+    }
+
     const result = await registerMcpServer(dir, {
-        serverName: config.mcp.serverName,
-        url: config.mcp.sourceUrlTemplate.replace("{tenantCode}", encodeURIComponent(tenant)),
+        serverName,
+        url: mcpUrl.toString(),
         clientId: config.mcp.clientId,
-        authServerMetadataUrl: config.mcp.authServerMetadataUrl,
+        authServerMetadataUrl: metadataUrl.toString(),
     });
     const docs = await ensureAgentDocs(dir);
 
@@ -1182,8 +1199,24 @@ async function ensureApiFor(): Promise<{ api: ZalkeraApi; tenant: CapturedTenant
     };
 }
 
+const API_BASE_DEFAULT = "https://api.zalkera.com";
+
+/**
+ * 서버 주소. **https 이거나 루프백**이어야 한다 — 이 주소가 준 값들이 로그인·에이전트 연결을
+ * 지시하므로, 뿌리가 평문이면 중간에 앉은 쪽이 나머지를 전부 바꿔 쓴다.
+ *
+ * 설정 스키마의 `pattern` 만으로는 부족하다 — **이미 저장된 값**은 스키마를 다시 안 지난다.
+ */
 function apiBase(): string {
-    return vscode.workspace.getConfiguration("zalkera").get<string>("apiBase") ?? "https://api.zalkera.com";
+    const configured = vscode.workspace.getConfiguration("zalkera").get<string>("apiBase");
+    if (configured === undefined || configured.trim() === "") return API_BASE_DEFAULT;
+    const url = apiBaseUrl(configured);
+    if (url) return url.toString();
+    throw new DevtoolsError(
+        "SERVER_REJECTED",
+        `설정한 서버 주소를 쓸 수 없습니다(${configured}).`,
+        "https 주소이거나 로컬(127.0.0.1)이어야 합니다. 설정 zalkera.apiBase 를 고쳐 주세요.",
+    );
 }
 
 /**

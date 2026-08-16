@@ -136,6 +136,8 @@ export const say = {
     },
 };
 
+import { httpUrl } from "./serverUrl.ts";
+
 /**
  * 서버가 준 매뉴얼 주소를 쓸지 정한다.
  *
@@ -144,17 +146,9 @@ export const say = {
  */
 export function resolveHelpUrl(fromServer: unknown, fallback: string): { url: string; note?: string } {
     if (typeof fromServer !== "string" || fromServer.trim() === "") return { url: fallback };
-    let parsed: URL;
-    try {
-        parsed = new URL(fromServer);
-    } catch {
-        return { url: fallback, note: "서버가 보낸 도움말 주소를 읽지 못했습니다 — 기본 주소로 엽니다." };
-    }
-    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
-        return {
-            url: fallback,
-            note: `서버가 보낸 도움말 주소를 쓰지 않습니다(${parsed.protocol}) — 기본 주소로 엽니다.`,
-        };
+    const parsed = httpUrl(fromServer);
+    if (!parsed) {
+        return { url: fallback, note: "서버가 보낸 도움말 주소를 쓰지 않습니다 — 기본 주소로 엽니다." };
     }
     return { url: parsed.toString() };
 }

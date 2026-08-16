@@ -1,6 +1,6 @@
 {
   "name": "zalkera-devtools",
-  "version": "0.1.36",
+  "version": "0.1.37",
   "private": true,
   "license": "MIT",
   "type": "module",
@@ -11,7 +11,14 @@
     "vscode": "^1.90.0"
   },
   "preview": true,
-  "keywords": ["zalkera", "잘커라", "storefront", "headless-cms", "korean", "ecommerce"],
+  "keywords": [
+    "zalkera",
+    "잘커라",
+    "storefront",
+    "headless-cms",
+    "korean",
+    "ecommerce"
+  ],
   "categories": [
     "Other"
   ],
@@ -112,7 +119,9 @@
           "type": "string",
           "default": "https://api.zalkera.com",
           "description": "잘커라 서버 주소. **머신 범위**입니다 — 남의 소스 폴더(.vscode/settings.json)가 이 값을 바꿔 토큰을 가로채지 못하게 합니다.",
-          "scope": "machine"
+          "scope": "machine",
+          "pattern": "^(https://[^\\s/]+|http://(127\\.0\\.0\\.1|localhost|\\[::1\\])(:\\d+)?)(/.*)?$",
+          "patternErrorMessage": "https 주소이거나 로컬(http://127.0.0.1)이어야 합니다."
         },
         "zalkera.tenant": {
           "type": "string",

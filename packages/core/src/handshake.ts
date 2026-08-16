@@ -1,4 +1,5 @@
 import { DevtoolsError } from "./errors.ts";
+import { httpUrl } from "./serverUrl.ts";
 
 /**
  * 서버 핸드셰이크(backend memo146 §6.1 B-5). **로그인보다 먼저** 부른다 — 이유 둘.
@@ -100,6 +101,21 @@ export async function fetchHandshake(
             "주소가 잘커라 서버가 맞는지 확인해 주세요.",
         );
     }
+    // **경계에서 한 번 막는다.** 이 값들은 브라우저를 열고(`issuer`), 인가 코드와 PKCE verifier 를
+    // POST 하고(같은 `issuer`), 고객 에이전트의 접속처가 된다(`mcp`). 소비처마다 검사하면 새로
+    // 늘어나는 소비처가 매번 맨몸으로 들어오므로, **여기를 못 지나면 핸드셰이크가 성립하지 않는다.**
+    if (handshake.auth && !httpUrl(handshake.auth.issuer)) {
+        throw new DevtoolsError(
+            "SERVER_REJECTED",
+            "서버가 보낸 로그인 주소를 쓸 수 없습니다.",
+            "잘커라에 문의해 주세요.",
+        );
+    }
+    if (handshake.mcp && !httpUrl(handshake.mcp.authServerMetadataUrl)) {
+        // 에이전트 연결만 못 쓰게 한다 — 로그인·발행까지 막을 이유는 없다.
+        handshake.mcp = null;
+    }
+
     if (handshake.verdict === "UPGRADE_REQUIRED") {
         throw new DevtoolsError(
             "EXTENSION_OUTDATED",

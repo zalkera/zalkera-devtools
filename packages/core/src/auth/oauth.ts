@@ -1,3 +1,4 @@
+import { httpUrl } from "../serverUrl.ts";
 import { DevtoolsError } from "../errors.ts";
 import { startLoopbackReceiver } from "./loopback.ts";
 import { createPkce, createState } from "./pkce.ts";
@@ -46,7 +47,18 @@ export async function login(config: AuthConfig, store: TokenStore, options: Logi
     });
 
     try {
-        const authorizeUrl = new URL(`${trimSlash(config.issuer)}/protocol/openid-connect/auth`);
+        // ⚠ **`issuer` 는 서버가 준 값이다.** `new URL` 은 `javascript:`·`vscode:`·`file:` 도 순순히
+        //   파고, 그 결과가 곧 브라우저(또는 URI 핸들러)로 열린다. 판정이 안 서면 **연다는 선택 자체를
+        //   하지 않는다** — 매뉴얼 주소와 달리 물러설 기본값이 없다.
+        const issuer = httpUrl(trimSlash(config.issuer));
+        if (!issuer) {
+            throw new DevtoolsError(
+                "SERVER_REJECTED",
+                "서버가 보낸 로그인 주소를 쓸 수 없습니다.",
+                "브라우저를 열지 않았습니다. 잘커라에 문의해 주세요.",
+            );
+        }
+        const authorizeUrl = new URL(`${trimSlash(issuer.toString())}/protocol/openid-connect/auth`);
         authorizeUrl.searchParams.set("client_id", config.clientId);
         authorizeUrl.searchParams.set("response_type", "code");
         authorizeUrl.searchParams.set("redirect_uri", receiver.redirectUri);
