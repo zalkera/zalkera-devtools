@@ -651,6 +651,12 @@ async function startPreviewInner(): Promise<void> {
     const { api, tenant } = await ensureApiFor();
     const config = await ensureHandshake();
     const runtime = embeddedNodeRuntime(extensionPath);
+    // ⚠ **조용히 떨어지지 않는다.** 동봉본을 못 찾으면 코어가 PATH 의 npm 으로 내려가는데, 그 경로는
+    //   개발자 기계에서만 선다. 비개발자 기계에서는 ENOENT 로 죽고 사용자는 엉뚱한 안내를 본다.
+    //   진단 명령에만 적어 두면 사고가 난 뒤에야 보이므로 **정상 흐름에서 남긴다.**
+    if (!runtime.npmCommand) {
+        log("⚠️ 동봉 npm 을 찾지 못했습니다 — 이 기계의 npm 으로 시도합니다(없으면 의존성 준비가 실패합니다).");
+    }
 
     setStatus("$(sync~spin) 프리뷰 준비 중");
     const started = await withStartGuard(() => vscode.window.withProgress<PreviewSession>(

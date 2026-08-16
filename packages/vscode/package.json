@@ -10,6 +10,8 @@
   "engines": {
     "vscode": "^1.90.0"
   },
+  "preview": true,
+  "keywords": ["zalkera", "잘커라", "storefront", "headless-cms", "korean", "ecommerce"],
   "categories": [
     "Other"
   ],

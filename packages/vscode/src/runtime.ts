@@ -11,8 +11,15 @@ import { execPath } from "node:process";
  * 실측(T0-1): VS Code 동봉 Node v24 로 Next dev 완주(HTTP 200). 단 **npm 은 동봉되지 않는다** — 그래서
  * 개발 서버는 npm 스크립트가 아니라 next 바이너리를 직접 부른다(core `dev.ts`).
  *
- * ⚠ 미검증 잔여: T0 측정은 Remote-SSH 서버판 Node 였다. 데스크톱 VS Code 의 `ELECTRON_RUN_AS_NODE` 경로는
- * 아직 한 번도 재현하지 않았다 — T3 를 실제 데스크톱에서 처음 켜는 날 이 줄을 지운다.
+ * ⚠ **미검증 잔여 — 배포 전 반드시 볼 것.** 지금까지 잰 것은 Remote-SSH 서버판 Node 다. 데스크톱
+ * VS Code 의 `ELECTRON_RUN_AS_NODE` 경로는 한 번도 재현하지 않았다. **비개발자는 전부 데스크톱이고,
+ * 이 설계가 존재하는 이유가 그 경로다.**
+ *
+ * ⚠ 그리고 **node·npm 이 깔린 기계에서 켜 보는 것으로는 검증이 안 된다** — 아래 폴백이 PATH 의 npm
+ * 으로 성공해 버려서 동봉 경로가 실제로 돌았는지 구분되지 않는다. 검증하려면 **PATH 에서 node·npm 을
+ * 가린 채** 켜야 한다. 그것이 비개발자 기계의 실제 형상이다.
+ *
+ * 재현: `env -i HOME=$HOME PATH=/usr/bin:/bin <VS Code 실행>` 뒤 프리뷰를 켠다.
  */
 export interface NodeRuntime {
     nodePath: string;
