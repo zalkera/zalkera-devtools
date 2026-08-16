@@ -97,7 +97,9 @@ console.log("· 스테이징");
 rmSync(stage, { recursive: true, force: true });
 mkdirSync(stage, { recursive: true });
 
-for (const entry of ["dist", "media", "README.md", "LICENSE", ".vscodeignore"]) {
+// ⚠ 화이트리스트다 — **여기 없는 것은 조용히 빠진다.** 확장에 파일을 새로 넣었는데 마켓에서
+//   안 보이면 먼저 이 목록을 보라. 빠진 것을 포장이 알아채게 하려면 아래 `must` 에도 넣어야 한다.
+for (const entry of ["dist", "media", "README.md", "CHANGELOG.md", "LICENSE", ".vscodeignore"]) {
     const src = join(ext, entry);
     if (existsSync(src)) cpSync(src, join(stage, entry), { recursive: true });
 }
@@ -138,6 +140,11 @@ const must = [
     "extension/node_modules/npm/bin/npm-cli.js",
     // 「도움말」이 여는 실물. 빠져도 포장은 성공하고, 사용자가 누를 때에야 열리지 않는다.
     "extension/media/help.md",
+    // 마켓 페이지의 개요·변경 내역 탭. **vsce 가 이름을 소문자로 바꿔 담는다**(`README.md` →
+    // `readme.md`). 그래서 원본 이름으로 찾으면 못 찾는다 — 담긴 이름으로 적는다.
+    // 재현: `unzip -Z1 dist/*.vsix | grep -E '^extension/[^/]+$'`
+    "extension/readme.md",
+    "extension/changelog.md",
 ];
 const missing = must.filter((m) => !listed.includes(m));
 if (missing.length) throw new Error(`VSIX 에 빠진 것: ${missing.join(", ")}`);
