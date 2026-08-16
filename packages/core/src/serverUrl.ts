@@ -50,9 +50,21 @@ export function apiBaseUrl(value: unknown): URL | null {
 /**
  * `.mcp.json` 의 **키**로 쓸 수 있는 이름인가.
  *
- * 이 값은 고객 파일의 키가 되고, 같은 이름이 이미 있으면 **그 항목을 덮는다**. 서버가 실수로든
- * 아니든 `github`·`filesystem` 같은 흔한 이름을 보내면 고객이 쓰던 서버가 우리 것으로 바뀐다.
+ * 이 값은 고객 파일의 **키**가 된다. 여기서 막는 것은 **형태**다 — 대소문자·점·슬래시·공백,
+ * 그리고 `__proto__`(항목을 안 적으면서 성공을 보고하는 형태).
+ *
+ * ⚠ **이 검사는 "흔한 이름"을 막지 못한다.** `github` 는 형태가 옳아서 통과한다. 이름이 겹쳐
+ * 남의 항목을 덮는 것은 `mcp.ts` 가 **형상으로** 막는다(우리 것이 아니면 손대지 않는다).
  */
-export function mcpServerName(value: unknown): string | null {
-    return typeof value === "string" && /^[a-z0-9][a-z0-9-]{0,62}$/.test(value) ? value : null;
+export function mcpServerName(value: unknown): McpServerName | null {
+    return typeof value === "string" && /^[a-z0-9][a-z0-9-]{0,62}$/.test(value) ? (value as McpServerName) : null;
 }
+
+/**
+ * 검사를 지난 서버 이름. **[mcpServerName] 만이 만든다** — 생 `string` 은 `registerMcpServer` 에
+ * 컴파일이 안 된다.
+ *
+ * 텍스트 검사기(`check-server-url.mjs`)는 구조분해 한 번에 뚫린다(`const {serverName} = config.mcp`).
+ * 그 축은 규율의 가시화이지 봉인이 아니므로, 봉인은 타입이 진다 — `CapturedTenant` 가 세운 선례다.
+ */
+export type McpServerName = string & { readonly __mcpServerName: unique symbol };

@@ -15,6 +15,10 @@ import { readdir } from "node:fs/promises";
  *
  *   ⚠ **`.git` 은 무시하지 않는다.** 그 폴더가 이미 어떤 레포라는 뜻이고, 그 위에 남의 소스를 푸는 것은
  *   이력을 가진 작업물을 덮는 일이다. 무시 목록에 넣고 싶은 유혹이 있지만 그건 다른 종류의 손실이다.
+ *
+ *   ⚠ **무시는 이름이 아니라 종류로 정한다 — 심링크는 절대 무시하지 않는다.** 이름만 보면 `.vscode`
+ *   라는 이름의 **링크**가 "빈 폴더"를 통과하고, 그 링크가 해제 대상 경로가 된다. 무시의 근거는
+ *   *"편집기가 만든 파일"* 이지 *"그 이름"* 이 아니다 — 편집기는 링크를 만들지 않는다.
  */
 const IGNORED = new Set([
     ".vscode", // 편집기·확장이 만든다(우리가 만드는 쪽이다)
@@ -25,7 +29,8 @@ const IGNORED = new Set([
 
 /** 무시 대상을 뺀 실제 항목. 비어 있으면 받아도 안전하다. */
 export async function meaningfulEntries(dir: string): Promise<string[]> {
-    return (await readdir(dir)).filter((name) => !IGNORED.has(name));
+    const entries = await readdir(dir, { withFileTypes: true });
+    return entries.filter((e) => !(IGNORED.has(e.name) && !e.isSymbolicLink())).map((e) => e.name);
 }
 
 export async function isReceivable(dir: string): Promise<boolean> {

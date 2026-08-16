@@ -1,8 +1,9 @@
-import { mkdir, writeFile } from "node:fs/promises";
-import { dirname, normalize, resolve, sep } from "node:path";
+import { writeFile } from "node:fs/promises";
+import { join, resolve } from "node:path";
 import { inflateRaw } from "node:zlib";
 import { promisify } from "node:util";
 import { DevtoolsError } from "./errors.ts";
+import { assertNotSymlink, descend, safeSegments } from "./safeWrite.ts";
 
 const inflate = promisify(inflateRaw);
 
@@ -30,7 +31,15 @@ export async function extractZip(zip: Buffer, targetDir: string): Promise<UnzipR
     const root = resolve(targetDir);
     let fileCount = 0;
 
+    // 부모 조각을 하나씩 확인한 결과를 재사용한다 — 항목마다 뿌리부터 다시 `lstat` 하지 않는다.
+    const verified = new Set<string>();
+
     for (let i = 0; i < entryCount; i += 1) {
+        // ⚠ **읽기 전에** 범위를 본다. 종전에는 이 줄이 경계 검사보다 앞서서, 중앙 디렉터리 오프셋이
+        //   깨진 zip 이 raw `RangeError` 를 사용자에게 그대로 보냈다(심의 실측).
+        if (offset < 0 || offset + 46 > zip.length) {
+            throw new DevtoolsError("SERVER_REJECTED", "받은 압축 파일이 손상되었습니다(목록 오류).");
+        }
         if (zip.readUInt32LE(offset) !== 0x02014b50) {
             throw new DevtoolsError("SERVER_REJECTED", "받은 압축 파일이 손상되었습니다.");
         }
@@ -39,15 +48,12 @@ export async function extractZip(zip: Buffer, targetDir: string): Promise<UnzipR
         const nameLength = zip.readUInt16LE(offset + 28);
         const extraLength = zip.readUInt16LE(offset + 30);
         const commentLength = zip.readUInt16LE(offset + 32);
-        if (offset + 46 > zip.length) {
-            throw new DevtoolsError("SERVER_REJECTED", "받은 압축 파일이 손상되었습니다(목록 오류).");
-        }
         const localOffset = zip.readUInt32LE(offset + 42);
         const name = zip.subarray(offset + 46, offset + 46 + nameLength).toString("utf8");
         offset += 46 + nameLength + extraLength + commentLength;
 
         if (name.endsWith("/")) {
-            await mkdir(safeJoin(root, name), { recursive: true });
+            await descend(root, safeSegments(root, name), verified);
             continue;
         }
 
@@ -66,8 +72,12 @@ export async function extractZip(zip: Buffer, targetDir: string): Promise<UnzipR
         const raw = zip.subarray(dataStart, dataStart + compressedSize);
 
         const data = method === 0 ? raw : await inflateGuarded(raw);
-        const path = safeJoin(root, name);
-        await mkdir(dirname(path), { recursive: true });
+        // ⚠ **문자열 판정만으로는 부족하다.** `resolve` 가 뿌리 안이라 해도 부모 조각이 심링크면
+        //   `writeFile` 은 그 링크를 따라간다 — 판정은 파일시스템에 물어야 한다(`safeWrite.ts`).
+        const segments = safeSegments(root, name);
+        const parent = await descend(root, segments.slice(0, -1), verified);
+        const path = join(parent, segments[segments.length - 1] ?? "");
+        await assertNotSymlink(path, name);
         await writeFile(path, data);
         fileCount += 1;
     }
@@ -97,15 +107,3 @@ function findEocd(zip: Buffer): number {
     throw new DevtoolsError("SERVER_REJECTED", "받은 파일이 zip 형식이 아닙니다.");
 }
 
-/** 대상 폴더 밖을 가리키는 항목은 거절한다(Zip Slip). tar 해제기와 **같은 판정**이어야 한다. */
-function safeJoin(root: string, name: string): string {
-    const cleaned = name.replace(/^(\.\/)+/, "");
-    if (cleaned.startsWith("/") || /^[A-Za-z]:/.test(cleaned) || cleaned.includes("\0")) {
-        throw new DevtoolsError("SERVER_REJECTED", `받은 파일에 이상한 경로가 있습니다: ${name}`);
-    }
-    const path = resolve(root, normalize(cleaned));
-    if (path !== root && !path.startsWith(root + sep)) {
-        throw new DevtoolsError("SERVER_REJECTED", `받은 파일이 폴더 밖을 가리킵니다: ${name}`);
-    }
-    return path;
-}

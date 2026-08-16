@@ -1,5 +1,5 @@
 import { ok, rejects, strictEqual } from "node:assert/strict";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -77,4 +77,60 @@ test("AGENTS.md 스텁에 규약을 복사하지 않는다(정본 포인터만)"
     const stub = await readFile(join(dir, "AGENTS.md"), "utf8");
     ok(stub.includes("llms.txt"), "정본을 가리킨다");
     ok(stub.length < 600, `사본이 아니라 포인터여야 한다(길이 ${stub.length})`);
+});
+
+/**
+ * ─── 남의 항목 보호 ───────────────────────────────────────────────────────────
+ *
+ * 이름 형태 검사는 `github` 같은 **흔한 이름**을 막지 못한다(형태가 옳다). 그 자리에 고객이 쓰던
+ * stdio 서버가 있으면 토큰이 든 `env` 째로 사라지고 우리는 "갱신"이라 보고한다 — 유출이 아니라
+ * **파괴**다. 그래서 이름이 아니라 **형상**으로 소유를 판정한다.
+ */
+test("이름이 겹쳐도 남의 항목은 덮지 않는다", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "mcp-foreign-"));
+    try {
+        const before = JSON.stringify(
+            { mcpServers: { github: { command: "npx", env: { GITHUB_TOKEN: "ghp_REAL" } } } },
+            null,
+            2,
+        );
+        await writeFile(join(dir, ".mcp.json"), `${before}\n`);
+        await rejects(
+            () => registerMcpServer(dir, { serverName: "github", url: "https://mcp.zalkera.com/x", clientId: "a", authServerMetadataUrl: "https://auth.example/x" }),
+            (error: unknown) => error instanceof DevtoolsError,
+            "남의 항목을 덮었다",
+        );
+        strictEqual(await readFile(join(dir, ".mcp.json"), "utf8"), `${before}\n`, "파일이 바뀌었다");
+    } finally {
+        await rm(dir, { recursive: true, force: true });
+    }
+});
+
+test("통제군 — 우리가 적은 항목은 갱신한다", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "mcp-ours-"));
+    try {
+        const reg = { serverName: "zalkera", url: "https://mcp.zalkera.com/a", clientId: "a", authServerMetadataUrl: "https://auth.example/x" };
+        strictEqual((await registerMcpServer(dir, reg)).action, "created");
+        strictEqual((await registerMcpServer(dir, reg)).action, "unchanged");
+        strictEqual((await registerMcpServer(dir, { ...reg, url: "https://mcp.zalkera.com/b" })).action, "updated");
+    } finally {
+        await rm(dir, { recursive: true, force: true });
+    }
+});
+
+test("`.mcp.json` 이 심링크면 쓰지 않는다 — 링크 대상이 남의 파일이다", async () => {
+    const victim = await mkdtemp(join(tmpdir(), "victim-"));
+    const dir = await mkdtemp(join(tmpdir(), "mcp-link-"));
+    try {
+        await writeFile(join(victim, "target.json"), "original\n");
+        await symlink(join(victim, "target.json"), join(dir, ".mcp.json"));
+        await rejects(
+            () => registerMcpServer(dir, { serverName: "zalkera", url: "https://mcp.zalkera.com/x", clientId: "a", authServerMetadataUrl: "https://auth.example/x" }),
+            (error: unknown) => error instanceof DevtoolsError,
+        );
+        strictEqual(await readFile(join(victim, "target.json"), "utf8"), "original\n", "링크 대상이 바뀌었다");
+    } finally {
+        await rm(victim, { recursive: true, force: true });
+        await rm(dir, { recursive: true, force: true });
+    }
 });

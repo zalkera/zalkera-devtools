@@ -153,3 +153,96 @@ test("브라우저를 못 열면(호스트 확인창 거절) 기다리지 않고
     );
     ok(Date.now() - started < 5_000, "타임아웃(5분)을 기다리면 안 된다");
 });
+
+/**
+ * ─── 로그인 성공 경로와 state 대조 ─────────────────────────────────────────────
+ *
+ * 위 시험 아홉은 전부 **토큰 갱신·취소**다. 로그인 자체는 재지 않았고, `oauth.ts` 가 스스로
+ * *"state 대조를 빼먹으면 남이 시작시킨 로그인의 코드를 내 것으로 착각해 삼킬 수 있다(CSRF)"*
+ * 라고 적어 둔 축이 **시험 없이** 있었다 — 지워도 전 시험이 초록이었다.
+ *
+ * `login` 은 `fetch` 를 주입받지 않으므로 **이 기계의 루프백에 진짜 토큰 엔드포인트를 띄운다.**
+ * 밖으로 나가는 요청은 없다.
+ */
+
+/** 127.0.0.1 에 토큰 엔드포인트 하나를 띄운다. 호출 수를 밖에서 본다. */
+async function tokenServer(): Promise<{ issuer: string; calls: () => number; close: () => Promise<void> }> {
+    const { createServer } = await import("node:http");
+    let calls = 0;
+    const server = createServer((req, res) => {
+        if ((req.url ?? "").includes("/token")) {
+            calls += 1;
+            res.writeHead(200, { "content-type": "application/json" });
+            res.end(JSON.stringify({ access_token: "AT", refresh_token: "RT", expires_in: 300 }));
+            return;
+        }
+        res.writeHead(404).end();
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const port = (server.address() as { port: number }).port;
+    return {
+        issuer: `http://127.0.0.1:${port}`,
+        calls: () => calls,
+        close: () => new Promise<void>((resolve) => server.close(() => resolve())),
+    };
+}
+
+/** 수신기에 콜백을 던지는 가짜 브라우저. `state` 를 우리가 정한다. */
+function browserThatReturns(state: (ours: string) => string, code = "CODE") {
+    return async (url: string) => {
+        const parsed = new URL(url);
+        const ours = parsed.searchParams.get("state") ?? "";
+        const redirect = new URL(parsed.searchParams.get("redirect_uri") ?? "");
+        redirect.searchParams.set("code", code);
+        redirect.searchParams.set("state", state(ours));
+        await fetch(redirect);
+    };
+}
+
+test("로그인 — 우리가 시작한 응답이면 토큰을 받아 보관한다(양성 통제)", async () => {
+    const store = new MemoryTokenStore();
+    const server = await tokenServer();
+    try {
+        const tokens = await login({ ...config, issuer: server.issuer }, store, {
+            openBrowser: browserThatReturns((ours) => ours),
+            timeoutMs: 10_000,
+        });
+        strictEqual(tokens.accessToken, "AT");
+        strictEqual(server.calls(), 1, "토큰 교환을 안 했다");
+        strictEqual((await store.read())?.accessToken, "AT");
+    } finally {
+        await server.close();
+    }
+});
+
+test("로그인 — **남이 시작시킨 응답은 삼키지 않는다**(state 대조)", async () => {
+    const store = new MemoryTokenStore();
+    const server = await tokenServer();
+    try {
+        await rejects(
+            () =>
+                login({ ...config, issuer: server.issuer }, store, {
+                    openBrowser: browserThatReturns(() => "NOT-OURS", "ATTACKER_CODE"),
+                    timeoutMs: 10_000,
+                }),
+            (error: unknown) => error instanceof DevtoolsError,
+            "남의 state 를 받아들였다 — 공격자가 시작시킨 로그인의 코드를 삼킨다",
+        );
+        strictEqual(server.calls(), 0, "state 가 다른데 토큰 교환을 했다");
+        strictEqual(await store.read(), null, "state 가 다른데 토큰을 보관했다");
+    } finally {
+        await server.close();
+    }
+});
+
+test("수신기는 **127.0.0.1 에만** 바인딩한다 — 같은 망의 다른 기계가 인가 코드를 던질 수 없다", async () => {
+    const { startLoopbackReceiver } = await import("./loopback.ts");
+    const receiver = await startLoopbackReceiver({ timeoutMs: 2_000 });
+    try {
+        const url = new URL(receiver.redirectUri);
+        strictEqual(url.hostname, "127.0.0.1", `수신기가 ${url.hostname} 에 떴다`);
+    } finally {
+        receiver.close();
+        await receiver.waitForCode().catch(() => undefined);
+    }
+});

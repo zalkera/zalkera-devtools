@@ -1,5 +1,5 @@
 import { DevtoolsError } from "./errors.ts";
-import { httpUrl } from "./serverUrl.ts";
+import { apiBaseUrl, httpUrl, mcpServerName } from "./serverUrl.ts";
 
 /**
  * 서버 핸드셰이크(backend memo146 §6.1 B-5). **로그인보다 먼저** 부른다 — 이유 둘.
@@ -102,16 +102,29 @@ export async function fetchHandshake(
         );
     }
     // **경계에서 한 번 막는다.** 이 값들은 브라우저를 열고(`issuer`), 인가 코드와 PKCE verifier 를
-    // POST 하고(같은 `issuer`), 고객 에이전트의 접속처가 된다(`mcp`). 소비처마다 검사하면 새로
-    // 늘어나는 소비처가 매번 맨몸으로 들어오므로, **여기를 못 지나면 핸드셰이크가 성립하지 않는다.**
-    if (handshake.auth && !httpUrl(handshake.auth.issuer)) {
+    // POST 하고(같은 `issuer`), 고객 에이전트의 접속처와 고객 파일의 **키**가 된다(`mcp`).
+    // 소비처마다 검사하면 새로 늘어나는 소비처가 매번 맨몸으로 들어오므로, **여기를 못 지나면
+    // 핸드셰이크가 성립하지 않는다.**
+    //
+    // ⚠ 자격증명을 나르는 주소에는 `httpUrl` 이 아니라 `apiBaseUrl`(https 또는 루프백)을 건다.
+    //   평문을 허용하면 이 모듈이 `apiBase` 에 https 를 요구한 근거("중간에 앉은 쪽이 바꿔 쓴다")가
+    //   정작 인가 코드·토큰이 오가는 자리에서 무너진다. 로컬 Keycloak 개발은 루프백 예외로 덮인다.
+    //
+    // ⚠ `auth` 가 **없는** 경우도 거절한다. 있고 나쁠 때만 막으면 계약이 반만 참이고, 하류에서
+    //   `config.issuer` 를 읽다 raw TypeError 가 사용자에게 그대로 간다.
+    if (!handshake.auth || !apiBaseUrl(handshake.auth.issuer)) {
         throw new DevtoolsError(
             "SERVER_REJECTED",
             "서버가 보낸 로그인 주소를 쓸 수 없습니다.",
             "잘커라에 문의해 주세요.",
         );
     }
-    if (handshake.mcp && !httpUrl(handshake.mcp.authServerMetadataUrl)) {
+    if (
+        handshake.mcp &&
+        (!apiBaseUrl(handshake.mcp.authServerMetadataUrl) ||
+            !httpUrl(handshake.mcp.sourceUrlTemplate?.replace("{tenantCode}", "probe")) ||
+            !mcpServerName(handshake.mcp.serverName))
+    ) {
         // 에이전트 연결만 못 쓰게 한다 — 로그인·발행까지 막을 이유는 없다.
         handshake.mcp = null;
     }

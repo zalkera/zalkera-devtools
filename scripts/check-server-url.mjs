@@ -29,6 +29,13 @@ const SOURCE_EXT = [".ts", ".mts", ".cts", ".tsx"];
 
 /** 판정을 반드시 거쳐야 하는 핸드셰이크 필드. 필드가 늘면 여기도 늘린다. */
 const GUARDED_FIELDS = ["serverName", "authServerMetadataUrl", "sourceUrlTemplate"];
+/** 핸드셰이크 경계가 반드시 걸러야 하는 필드 — 여기 없으면 새 소비처가 맨몸으로 들어온다. */
+const BOUNDARY_FIELDS = [
+    { path: "handshake.auth", judge: "apiBaseUrl" },
+    { path: "handshake.mcp.authServerMetadataUrl", judge: "apiBaseUrl" },
+    { path: "handshake.mcp.sourceUrlTemplate", judge: "httpUrl" },
+    { path: "handshake.mcp.serverName", judge: "mcpServerName" },
+];
 /** 그 값을 받아도 되는 판정 함수. */
 const JUDGES = ["httpUrl", "apiBaseUrl", "mcpServerName"];
 
@@ -66,8 +73,22 @@ for (const file of walk(join(root, "packages"))) {
         }
     }
 
-    for (const _ of flat.matchAll(/getConfiguration\s*\(\s*["']zalkera["']\s*\)\s*\.\s*get<[^>]*>\s*\(\s*["']apiBase["']/g)) {
+    for (const _ of flat.matchAll(/getConfiguration\s*\(\s*["']zalkera["']\s*\)[^;]{0,120}?["']apiBase["']/g)) {
         apiBaseReads += 1;
+    }
+    // ⚠ **읽기 개수만 세면 안 된다.** 그 한 곳이 판정을 태우는지까지 봐야 한다 — 종전 판은
+    //   `apiBaseUrl(configured)` 를 `new URL(configured)` 로 바꿔도 초록이었다(읽기는 여전히 1곳).
+    if (/getConfiguration\s*\(\s*["']zalkera["']\s*\)[^;]{0,120}?["']apiBase["']/.test(flat) && !/\bapiBaseUrl\s*\(/.test(flat)) {
+        bad.push(`${rel}  ← apiBase 를 읽는데 \`apiBaseUrl\` 판정을 안 태웁니다`);
+    }
+}
+
+// 경계(`handshake.ts`)가 네 값을 전부 거르는가 — 소비처 검사만으로는 core 를 직접 쓰는 새 소비처를 못 막는다.
+{
+    const boundary = stripComments(readFileSync(join(root, "packages/core/src/handshake.ts"), "utf8")).replace(/\s+/g, " ");
+    for (const {path, judge} of BOUNDARY_FIELDS) {
+        const re = new RegExp(`${judge}\\s*\\(\\s*${path.replace(/\./g, "\\.")}`);
+        if (!re.test(boundary)) bad.push(`handshake.ts  ← \`${path}\` 를 \`${judge}\` 로 안 거릅니다`);
     }
 }
 
@@ -82,4 +103,6 @@ if (bad.length) {
     process.exit(1);
 }
 
-console.log(`✅ 서버가 준 값 — 판정 통과 (mcp 필드 ${GUARDED_FIELDS.length}종 · apiBase 읽기 ${apiBaseReads}곳)`);
+console.log(
+    `✅ 서버가 준 값 — 판정 통과 (경계 ${BOUNDARY_FIELDS.length}종 · 소비처 mcp ${GUARDED_FIELDS.length}종 · apiBase 읽기 ${apiBaseReads}곳)`,
+);

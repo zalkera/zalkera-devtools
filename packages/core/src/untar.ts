@@ -5,6 +5,7 @@ import { Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { createGunzip } from "node:zlib";
 import { DevtoolsError } from "./errors.ts";
+import { assertNotSymlink, descend, safeSegments } from "./safeWrite.ts";
 
 /**
  * tar 해제기 — **의존성 0**(내장 zlib). 두 경로가 이 한 파서를 공유한다.
@@ -324,47 +325,7 @@ async function createSink(targetDir: string, options: UntarOptions) {
     };
 }
 
-/**
- * 뿌리에서부터 조각 단위로 내려간다. **심볼릭 링크는 절대 따라가지 않는다.**
- *
- * `mkdir(..., { recursive: true })` 를 쓰면 안 되는 이유가 여기 있다 — 그 호출은 기존 심링크를 따라가고,
- * 따라간 자리에 **뿌리 밖 디렉터리를 실제로 만들어 버린다**(검사에서 나중에 거절해도 부작용은 이미 남는다).
- */
-async function descend(root: string, segments: string[], verified: Set<string>): Promise<string> {
-    let current = root;
-    for (const part of segments) {
-        const next = join(current, part);
-        if (verified.has(next)) {
-            current = next;
-            continue;
-        }
-        const info = await lstat(next).catch(() => null);
-        if (info?.isSymbolicLink()) {
-            throw new DevtoolsError(
-                "SERVER_REJECTED",
-                `받은 꾸러미가 링크를 거쳐 폴더 밖에 쓰려고 합니다: ${part}`,
-                "잘못 받은 상태로 진행하지 않았습니다. 잘커라에 문의해 주세요.",
-            );
-        }
-        if (!info) {
-            await mkdir(next).catch((error: unknown) => {
-                if ((error as NodeJS.ErrnoException | undefined)?.code !== "EEXIST") throw error;
-            });
-        } else if (!info.isDirectory()) {
-            throw new DevtoolsError("SERVER_REJECTED", `받은 꾸러미의 경로가 파일과 겹칩니다: ${part}`);
-        }
-        verified.add(next);
-        current = next;
-    }
-    return current;
-}
 
-async function assertNotSymlink(path: string, name: string): Promise<void> {
-    const info = await lstat(path).catch(() => null);
-    if (info?.isSymbolicLink()) {
-        throw new DevtoolsError("SERVER_REJECTED", `받은 꾸러미가 기존 링크를 덮어쓰려고 합니다: ${name}`);
-    }
-}
 
 /**
  * 심볼릭 링크를 만든다. **뿌리 안을 가리키는 상대 링크만.**
@@ -413,23 +374,6 @@ async function writeSymlink(
     });
 }
 
-/**
- * 아카이브 안 경로를 **조각 배열**로 바꾼다. 뿌리 밖을 가리키면 거절한다(Zip Slip 동형).
- *
- * 조각으로 돌려주는 이유: 최종 경로 문자열만 넘기면 호출부가 다시 `mkdir -p` 를 하게 되고, 그 호출이
- * **심링크를 따라간다.** 판정과 생성이 같은 조각 목록을 쓰게 묶어 둔다([descend]).
- */
-function safeSegments(root: string, name: string): string[] {
-    const cleaned = name.replace(/^(\.\/)+/, "");
-    if (cleaned.startsWith("/") || /^[A-Za-z]:/.test(cleaned)) {
-        throw new DevtoolsError("SERVER_REJECTED", `받은 파일에 이상한 경로가 있습니다: ${name}`);
-    }
-    const path = resolve(root, normalize(cleaned));
-    if (path !== root && !path.startsWith(root + sep)) {
-        throw new DevtoolsError("SERVER_REJECTED", `받은 파일이 폴더 밖을 가리킵니다: ${name}`);
-    }
-    return relative(root, path).split(sep).filter((part) => part.length > 0);
-}
 
 function cstring(buffer: Buffer): string {
     const end = buffer.indexOf(0);

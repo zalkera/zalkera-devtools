@@ -1,6 +1,7 @@
 import { chmod, readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { assertOwnFileWritable } from "./safeWrite.ts";
 
 /**
  * `.env.local` 조립(backend memo146 §3.3·§10-2).
@@ -75,6 +76,9 @@ export async function writePreviewEnv(projectDir: string, values: PreviewEnv): P
     const path = join(projectDir, ".env.local");
     const existing = existsSync(path) ? await readFile(path, "utf8") : "";
     const merged = mergeEnv(existing, values);
+    // ⚠ 이 파일에는 방금 발급한 프리뷰 키가 들어간다. 자리가 심링크면 **프로젝트 밖으로** 나가고,
+    //   `.env*` 를 zip 에서 빼고 `.gitignore` 에 넣어 세운 "자격증명은 안 샌다" 가 그 한 번으로 거짓이 된다.
+    await assertOwnFileWritable(path, ".env.local");
     await writeFile(path, merged, { encoding: "utf8", mode: 0o600 });
     // `mode` 는 **생성 시에만** 적용된다 — 이미 644 로 있던 파일은 그대로였다(심의 실측).
     // 공용 기계의 다른 로컬 사용자가 프리뷰 키를 읽는 자리라 매번 조인다. 윈도우에서는 무의미하나 무해하다.

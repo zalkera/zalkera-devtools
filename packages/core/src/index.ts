@@ -55,7 +55,7 @@ export {
     decideSwitch,
     resolveHelpUrl,
 } from "./tenantScope.ts";
-export { httpUrl, isLoopback, apiBaseUrl, mcpServerName } from "./serverUrl.ts";
+export { httpUrl, isLoopback, apiBaseUrl, mcpServerName, type McpServerName } from "./serverUrl.ts";
 export {
     say,
     type CapturedTenant,

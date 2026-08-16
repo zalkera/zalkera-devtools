@@ -4,6 +4,11 @@ tsconfig.json
 dist/**/*.map
 dist/**/*.d.ts
 
+# tsc 가 `typecheck`/`build` 때 남기는 ESM 산출물. 진입점은 `dist/extension.cjs` 하나이고,
+# 이것들은 VSIX 에 없는 `@zalkera/devtools-core` 를 import 하는 **죽은 코드**다(심의 실측).
+dist/*.js
+!dist/extension.cjs
+
 # core 는 번들에 들어갔다. 워크스페이스 링크는 확장 폴더 **밖**을 가리켜 VSIX 경로 규칙을 깬다.
 node_modules/@zalkera/**
 node_modules/.bin/**
