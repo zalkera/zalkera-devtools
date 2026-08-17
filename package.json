@@ -16,7 +16,7 @@
         "build": "npm run build -w @zalkera/devtools-core && npm run build -w zalkera-devtools",
         "test": "npm run test -w @zalkera/devtools-core",
         "typecheck": "npm run build -w @zalkera/devtools-core && npm run typecheck --workspaces --if-present",
-        "verify": "npm run typecheck && npm run test && npm run check:labels && npm run check:capture && npm run check:server-url",
+        "verify": "npm run typecheck && npm run test && npm run check:dist && npm run check:labels && npm run check:capture && npm run check:server-url && npm run check:npm && npm run check:upgrade",
         "package": "node scripts/package-vsix.mjs",
         "package:patch": "node scripts/package-vsix.mjs --bump patch",
         "package:minor": "node scripts/package-vsix.mjs --bump minor",
@@ -24,6 +24,9 @@
         "package:ci": "node scripts/package-vsix.mjs --skip-verify",
         "check:audit": "node scripts/check-audit.mjs",
         "check:capture": "node scripts/check-capture-tenant.mjs",
-        "check:server-url": "node scripts/check-server-url.mjs"
+        "check:server-url": "node scripts/check-server-url.mjs",
+        "check:npm": "node scripts/check-npm-choice.mjs",
+        "check:upgrade": "node scripts/check-upgrade-notice.mjs",
+        "check:dist": "node scripts/check-dist-purity.mjs"
     }
 }
