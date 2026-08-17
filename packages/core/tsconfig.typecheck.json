@@ -1,0 +1,14 @@
+{
+    // **시험까지 타입을 본다.** 빌드용(`tsconfig.json`)과 나눈 이유는 하나다 — 그쪽은 `dist` 로 굽고,
+    // 시험을 포함시키면 `dist/*.test.js` 가 **발행 꾸러미와 확장 번들에 섞여 나간다.**
+    //
+    // ⚠ 종전에는 시험이 타입 검사 **밖**이었다. 그래서 시험 파일의 깨진 import 와 잘못된 인자가
+    //   `npm run typecheck` 를 그냥 통과했고, 시험을 돌려야만 드러났다 — 돌려도 안 드러나는 것(느슨한
+    //   인자 타입)은 아무도 못 봤다.
+    "extends": "./tsconfig.json",
+    "compilerOptions": {
+        "noEmit": true
+    },
+    "include": ["src/**/*.ts"],
+    "exclude": []
+}

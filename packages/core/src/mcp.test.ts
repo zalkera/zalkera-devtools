@@ -6,9 +6,22 @@ import { test } from "node:test";
 import { ensureAgentDocs } from "./agents.ts";
 import { DevtoolsError } from "./errors.ts";
 import { registerMcpServer, type McpRegistration } from "./mcp.ts";
+import { mcpServerName } from "./serverUrl.ts";
+
+/**
+ * 서버 이름을 **정문으로** 만든다.
+ *
+ * ⚠ 캐스팅(`as McpServerName`)으로 때우면 시험이 제품의 판정을 건너뛴다 — 제품이 거절할 이름으로
+ *   초록이 나고, 그 이름이 실제로 어떻게 되는지는 아무도 안 잰다.
+ */
+function serverName(value: string) {
+    const name = mcpServerName(value);
+    if (!name) throw new Error(`제품이 거절하는 서버 이름을 시험이 쓰려 한다: ${value}`);
+    return name;
+}
 
 const registration: McpRegistration = {
-    serverName: "zalkera-site",
+    serverName: serverName("zalkera-site"),
     url: "https://api.zalkera.com/mcp/source/acme",
     clientId: "zalkera-mcp",
     authServerMetadataUrl: "https://sso.zalkera.com/realms/zalkera/.well-known/openid-configuration",
@@ -96,7 +109,7 @@ test("이름이 겹쳐도 남의 항목은 덮지 않는다", async () => {
         );
         await writeFile(join(dir, ".mcp.json"), `${before}\n`);
         await rejects(
-            () => registerMcpServer(dir, { serverName: "github", url: "https://mcp.zalkera.com/x", clientId: "a", authServerMetadataUrl: "https://auth.example/x" }),
+            () => registerMcpServer(dir, { serverName: serverName("github"), url: "https://mcp.zalkera.com/x", clientId: "a", authServerMetadataUrl: "https://auth.example/x" }),
             (error: unknown) => error instanceof DevtoolsError,
             "남의 항목을 덮었다",
         );
@@ -109,7 +122,7 @@ test("이름이 겹쳐도 남의 항목은 덮지 않는다", async () => {
 test("통제군 — 우리가 적은 항목은 갱신한다", async () => {
     const dir = await mkdtemp(join(tmpdir(), "mcp-ours-"));
     try {
-        const reg = { serverName: "zalkera", url: "https://mcp.zalkera.com/a", clientId: "a", authServerMetadataUrl: "https://auth.example/x" };
+        const reg = { serverName: serverName("zalkera"), url: "https://mcp.zalkera.com/a", clientId: "a", authServerMetadataUrl: "https://auth.example/x" };
         strictEqual((await registerMcpServer(dir, reg)).action, "created");
         strictEqual((await registerMcpServer(dir, reg)).action, "unchanged");
         strictEqual((await registerMcpServer(dir, { ...reg, url: "https://mcp.zalkera.com/b" })).action, "updated");
@@ -128,7 +141,7 @@ test("`.mcp.json` 이 심링크면 쓰지 않는다 — 링크 대상이 남의 
         await writeFile(join(victim, "target.json"), original);
         await symlink(join(victim, "target.json"), join(dir, ".mcp.json"));
         await rejects(
-            () => registerMcpServer(dir, { serverName: "zalkera", url: "https://mcp.zalkera.com/x", clientId: "a", authServerMetadataUrl: "https://auth.example/x" }),
+            () => registerMcpServer(dir, { serverName: serverName("zalkera"), url: "https://mcp.zalkera.com/x", clientId: "a", authServerMetadataUrl: "https://auth.example/x" }),
             (error: unknown) => error instanceof DevtoolsError && /링크라 쓰지 않았습니다/.test(error.message),
             "심링크를 따라 링크 대상에 썼다",
         );

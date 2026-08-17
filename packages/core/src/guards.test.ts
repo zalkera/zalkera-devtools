@@ -214,7 +214,7 @@ test("가드 — 심의가 실측으로 찾아낸 새던 이름 넷", async () =
         "AuthKey_ABC123.p8", // 애플 푸시 키
         "myproj-firebase-adminsdk-x1y2.json", // GCP 콘솔이 주는 **기본** 파일명
         "_netrc", // 윈도 변형
-        ".VSCode/settings.json".split("/")[0], // 대소문자 — 디렉터리 판정이 타면 안 된다
+        ".VSCode", // 대소문자 — 디렉터리 판정이 타면 안 된다
     ]) {
         if (name === ".VSCode") continue;
         await writeFile(join(dir, name), "SECRET_MARKER_7c3e");

@@ -8,7 +8,7 @@ function api(handler: (url: string, init: RequestInit) => Response): ZalkeraApi 
         apiBase: "https://api.zalkera.com",
         accessToken: async () => "token-abc",
         tenantCode: () => "acme",
-        fetchImpl: (async (input: URL | RequestInfo, init?: RequestInit) =>
+        fetchImpl: (async (input: Parameters<typeof fetch>[0], init?: RequestInit) =>
             handler(String(input), init ?? {})) as unknown as typeof fetch,
     });
 }
@@ -83,7 +83,7 @@ test("경로가 있는 베이스 주소도 잘리지 않는다", async () => {
         apiBase: "https://gateway.example.com/zalkera",
         accessToken: async () => "t",
         tenantCode: () => "acme",
-        fetchImpl: (async (input: URL | RequestInfo) => {
+        fetchImpl: (async (input: Parameters<typeof fetch>[0]) => {
             seenUrl = String(input);
             return Response.json({ status: 200, data: [] });
         }) as unknown as typeof fetch,

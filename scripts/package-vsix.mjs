@@ -148,6 +148,7 @@ const must = [
 ];
 const missing = must.filter((m) => !listed.includes(m));
 if (missing.length) throw new Error(`VSIX 에 빠진 것: ${missing.join(", ")}`);
+
 // 전달용 사본. `shared/` 는 .gitignore(*.vsix)로 커밋되지 않는다 — 손으로 건네는 자리다.
 const shared = join(root, "shared");
 mkdirSync(shared, { recursive: true });

@@ -19,7 +19,14 @@ function harness(pages: SiteRevision[][]) {
             slept.push(ms);
             clock += ms;
         },
-        listRevisions: async () => pages[Math.min(page++, pages.length - 1)],
+        listRevisions: async () => {
+            // ⚠ **비면 던진다.** 종전에는 `undefined` 가 나갔다 — 시험이 준비한 것보다 더 많이 부르면
+            //   그 사실이 조용히 «빈 목록»으로 둔갑해, 무엇을 재는지 모르는 채 초록이 된다.
+            const at = Math.min(page++, pages.length - 1);
+            const found = pages[at];
+            if (!found) throw new Error(`시험이 준비한 응답이 없다(${at}번째 · 준비 ${pages.length}개)`);
+            return found;
+        },
     };
 }
 
