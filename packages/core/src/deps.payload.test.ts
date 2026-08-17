@@ -1,12 +1,12 @@
-import { ok, strictEqual } from "node:assert/strict";
+import { ok, rejects, strictEqual } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { lstat, mkdir, mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { ensureDependencies } from "./deps.ts";
+import { computeCacheKey, ensureDependencies } from "./deps.ts";
 
 /**
  * 페이로드 → 캐시 → 프로젝트 **합류점**(memo146 §13.10.6 · 심의 W5).
@@ -76,7 +76,9 @@ test("페이로드가 있으면 npm 없이 연결까지 끝난다", async () => 
     ok(result.action === "linked" || result.action === "copied", `연결됐어야 한다: ${result.action}`);
     ok(existsSync(join(projectDir, "node_modules", "next", "package.json")));
     // 완결 표식이 없으면 다음 실행이 "반쯤 만들어진 트리"로 보고 지운 뒤 다시 받는다.
-    ok(existsSync(join(projectDir, "node_modules", ".zalkera-deps-complete")));
+    // ⚠ 표식은 **캐시 뿌리 아래**에 남는다 — 프로젝트 안에 두면 받은 zip 이 담아 올 수 있다.
+    ok(existsSync(join(cacheRoot, ".complete")), "완결 표식이 캐시 뿌리에 남아야 한다");
+    ok(!existsSync(join(projectDir, "node_modules", ".zalkera-deps-complete")), "프로젝트 안에는 남기지 않는다");
     // `.bin` 링크가 살아야 dev 서버가 실행 파일을 찾는다.
     ok((await lstat(join(projectDir, "node_modules", ".bin", "next"))).isSymbolicLink());
     ok(said.some((m) => m.includes("받는 중")), said.join(" / "));
@@ -165,4 +167,34 @@ test("캐시가 3세대를 넘으면 정리된다", async () => {
     const left = await readdir(cacheRoot);
     strictEqual(left.length, 3, `3세대만 남아야 한다: ${left.join(",")}`);
     ok(existsSync(join(projectDir, "node_modules", "next", "package.json")), "방금 쓴 캐시가 지워지면 안 된다");
+});
+
+test("받은 폴더가 완결 표식을 담아 와도 준비를 건너뛰지 않는다", async () => {
+    // ⚠ 이것이 F6 이다. 종전에는 `node_modules/.zalkera-deps-complete` 하나로 준비가 통째로 건너뛰어졌고,
+    //   그러면 **zip 이 담아 온 `node_modules` 가 그대로 실행**된다 — 어느 npm 을 쓸지 고르는 장치가
+    //   한 번도 안 돈다.
+    const projectDir = await fakeSite();
+    const cacheRoot = await mkdtemp(join(tmpdir(), "zalkera-croot-"));
+    await mkdir(join(projectDir, "node_modules"), { recursive: true });
+    await writeFile(join(projectDir, "node_modules", ".zalkera-deps-complete"), "받은 zip 이 담아 온 것\n");
+    await writeFile(join(projectDir, "node_modules", "PWNED.txt"), "여기 있으면 안 된다\n");
+
+    await rejects(
+        () => ensureDependencies({ projectDir, cacheRoot, npmCommand: ["/nonexistent-npm-should-run-and-fail"] }),
+        (error: unknown) => error instanceof Error,
+        "준비를 건너뛰고 reused 로 돌아왔다 — 담아 온 트리를 그대로 쓴다",
+    );
+    ok(!existsSync(join(projectDir, "node_modules", "PWNED.txt")), "담아 온 트리를 지우지 않았다");
+});
+
+test("`.npmrc` 가 다르면 캐시 키가 갈린다 — 같은 lockfile 이라도", async () => {
+    // ⚠ 이것이 F5 다. `.npmrc` 의 `registry=` 한 줄이면 같은 lockfile 에서 **다른 꾸러미**가 온다.
+    //   키가 그것을 안 세면 조작된 트리가 정상 lockfile 의 키로 적재되고, 남의 사이트가 이어받는다.
+    const dir = await fakeSite();
+    const clean = await computeCacheKey(dir);
+    await writeFile(join(dir, ".npmrc"), "registry=http://127.0.0.1:9/\n");
+    const tainted = await computeCacheKey(dir);
+    ok(clean !== tainted, `같은 키가 나왔다: ${clean}`);
+    await rm(join(dir, ".npmrc"));
+    strictEqual(await computeCacheKey(dir), clean, "지우면 원래 키로 돌아와야 한다");
 });

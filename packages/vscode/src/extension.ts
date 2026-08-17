@@ -25,6 +25,9 @@ import {
     decideReadyPrompt,
     decideSwitch,
     resolveHelpUrl,
+    type NpmPreference,
+    shouldShowUpgradeNotice,
+    type UpgradeNoticeState,
     writeOwnFile,
     httpUrl,
     apiBaseUrl,
@@ -42,7 +45,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { SecretTokenStore } from "./secretStore.ts";
-import { embeddedNodeRuntime } from "./runtime.ts";
+import { describeNpm, embeddedNodeRuntime, npmArgvOf, resolveNpm } from "./runtime.ts";
 import { ZalkeraSidebar } from "./sidebar.ts";
 
 /**
@@ -105,6 +108,9 @@ const warnedPaths = new Set<string>();
  */
 let extensionVersion = "0.0.0";
 
+/** 확장 뷰로 데려다 줄 때 쓰는 식별자. manifest 에서 읽는다 — 소스에 박으면 갈린다. */
+let extensionId = "zalkera.zalkera-devtools";
+
 export function activate(context: vscode.ExtensionContext): void {
     output = vscode.window.createOutputChannel("잘커라");
     status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
@@ -114,6 +120,7 @@ export function activate(context: vscode.ExtensionContext): void {
     store = new SecretTokenStore(context);
     extensionPath = context.extensionPath;
     extensionVersion = String(context.extension.packageJSON.version ?? extensionVersion);
+    extensionId = context.extension.id || extensionId;
     persistedState = context.globalState;
     // 지난 창이 남긴 키가 있으면 이어받는다 — 그래야 로그아웃이 그것까지 지운다.
     issuedKey = context.globalState.get<{ keyId: number; tenant: string }>(ISSUED_KEY_STATE) ?? null;
@@ -655,11 +662,19 @@ async function startPreviewInner(): Promise<void> {
     const { api, tenant } = await ensureApiFor();
     const config = await ensureHandshake();
     const runtime = embeddedNodeRuntime(extensionPath);
-    // ⚠ **조용히 떨어지지 않는다.** 동봉본을 못 찾으면 코어가 PATH 의 npm 으로 내려가는데, 그 경로는
-    //   개발자 기계에서만 선다. 비개발자 기계에서는 ENOENT 로 죽고 사용자는 엉뚱한 안내를 본다.
-    //   진단 명령에만 적어 두면 사고가 난 뒤에야 보이므로 **정상 흐름에서 남긴다.**
-    if (!runtime.npmCommand) {
-        log("⚠️ 동봉 npm 을 찾지 못했습니다 — 이 기계의 npm 으로 시도합니다(없으면 의존성 준비가 실패합니다).");
+    // ⚠ **조용히 떨어지지 않는다.** 어느 npm 이 돌았는지 모르는 채 결과만 남으면, 실사용 신고가
+    //   왔을 때 물어볼 것이 없다. 고른 이유까지 **정상 흐름에서** 남긴다.
+    const npm = resolveNpm(extensionPath, npmPreference(), npmBlindSpots(dir));
+    log(`npm: ${describeNpm(npm)} — ${npm.why}`);
+    const npmArgv = npmArgvOf(npm, process.execPath);
+    if (!npmArgv) {
+        // ⚠ **여기서 멈춘다.** `null` 은 "PATH 의 npm 으로 해 보라"가 아니다 — 그 경로는 개발자 기계에서만
+        //   서고, 비개발자 기계에서는 `spawn` 이 ENOENT 로 죽어 "인터넷을 확인하세요"라는 틀린 안내가 된다.
+        throw new DevtoolsError(
+            "DEPENDENCIES_FAILED",
+            `의존성을 설치할 npm 이 없습니다 — ${npm.kind === "unavailable" ? npm.why : ""}`,
+            npm.kind === "unavailable" ? npm.hint : "잘커라에 문의해 주세요.",
+        );
     }
 
     setStatus("$(sync~spin) 프리뷰 준비 중");
@@ -673,8 +688,9 @@ async function startPreviewInner(): Promise<void> {
                 tenantCode: tenant,
                 nodePath: runtime.nodePath,
                 extraEnv: runtime.env,
-                // 동봉한 npm 을 넘긴다 — 없으면 코어가 PATH 의 npm 으로 떨어진다(개발자 기계 전용 경로).
-                ...(runtime.npmCommand ? { npmCommand: runtime.npmCommand, npmEnv: runtime.env } : {}),
+                // 고른 npm 의 **경로**를 넘긴다. 코어에 기본값이 없으므로 이 값이 곧 실행될 것이다.
+                npmCommand: npmArgv,
+                npmEnv: runtime.env,
                 label: `${vscode.env.appName} · ${process.platform}`,
                 // 발급 즉시 붙잡는다 — 뒤가 실패해도 로그아웃·초기화가 이 키를 지울 수 있어야 한다.
                 onKeyIssued: (keyId) => {
@@ -1049,11 +1065,15 @@ async function doctor(): Promise<void> {
     const runtime = embeddedNodeRuntime(extensionPath);
     output.show();
     log("── 진단 ──");
-    log(
-        runtime.npmCommand
-            ? "✅ 동봉 npm: 있음(의존성 설치에 이것을 씁니다)"
-            : "❌ 동봉 npm: 없음 — 이 기계에 npm 이 따로 없으면 의존성 준비가 실패합니다(확장 재설치 필요)",
-    );
+    {
+        // ⚠ **경로까지 찍는다.** "동봉 npm 있음" 만으로는 신고를 받았을 때 어느 바이너리가 돌았는지
+        //   물어볼 수 없다. 설정값·고른 결과·사유를 한 자리에 남긴다.
+        const pref = npmPreference();
+        const npm = resolveNpm(extensionPath, pref, npmBlindSpots(session?.projectDir));
+        log(`${npm.kind === "unavailable" ? "❌" : "✅"} npm(설정 ${pref}): ${describeNpm(npm)}`);
+        log(`   → ${npm.why}`);
+        if (npm.kind === "unavailable") log(`   → ${npm.hint}`);
+    }
     for (const check of checks) {
         log(`${check.ok ? "✅" : "❌"} ${check.name}: ${check.detail}`);
         if (check.hint) log(`   → ${check.hint}`);
@@ -1070,7 +1090,27 @@ async function ensureHandshake(): Promise<Handshake> {
     if (handshake) return handshake;
     handshake = await fetchHandshake(apiBase(), extensionVersion);
     if (handshake.verdict === "UPGRADE_RECOMMENDED" && handshake.message) {
-        void vscode.window.showInformationMessage(handshake.message);
+        // ⚠ **하루 한 번.** `ensureHandshake` 는 명령마다 불린다 — 억제가 없으면 창을 열 때마다,
+        //   버튼을 누를 때마다 같은 알림이 뜬다. 새 권고 버전은 즉시 말한다.
+        const key = "zalkera.upgradeNotice";
+        const last = persistedState.get<UpgradeNoticeState>(key) ?? null;
+        const target = handshake.recommendedExtensionVersion;
+        // ⚠ `target` 을 **문장에 넣는다.** `shouldShowUpgradeNotice` 가 판 표기 형태를 강제하므로
+        //   여기 도달한 값은 우리가 아는 모양이다 — 그 확인 없이 넣으면 서버가 문장을 쓰게 된다.
+        if (shouldShowUpgradeNotice(target, last, Date.now())) {
+            void persistedState.update(key, {version: target, shownAt: Date.now()});
+            // Marketplace 를 우리가 조회하지 않는다(중복 UI · 새 실패 모드). 확장 뷰의 그 항목으로
+            // 데려다 주기만 한다 — 설치·서명 판단은 VS Code 의 일이다.
+            // **문장은 우리가 쓴다.** 서버 글자를 알림 본문에 얹으면, 그 글자를 정하는 쪽이 우리 이름으로
+            // 뜨는 화면을 쓰게 된다(경계에서 소독은 하지만, 안 쓰는 편이 낫다). 서버 문장은 출력 채널에 남긴다.
+            log(`서버 안내: ${handshake.message}`);
+            const notice = `새 판이 있습니다(권고 ${target}). 지금 판은 ${extensionVersion} 입니다.`;
+            void vscode.window.showInformationMessage(notice, "업데이트").then((picked) => {
+                if (picked === "업데이트") {
+                    void vscode.commands.executeCommand("workbench.extensions.search", `@id:${extensionId}`);
+                }
+            });
+        }
     }
     return handshake;
 }
@@ -1208,6 +1248,27 @@ const API_BASE_DEFAULT = "https://api.zalkera.com";
  *
  * 설정 스키마의 `pattern` 만으로는 부족하다 — **이미 저장된 값**은 스키마를 다시 안 지난다.
  */
+/**
+ * 어느 npm 으로 설치할지의 사용자 선택. **머신 범위**라 남의 소스 폴더가 못 바꾼다 —
+ * `apiBase` 와 같은 이유이고, 여기서는 **우리가 실행할 바이너리**가 걸려 있어 더 직접적이다.
+ */
+/**
+ * npm 을 찾을 때 **보지 말아야 할 자리.** 열어 둔 폴더와 지금 다루는 소스 폴더가 온다.
+ *
+ * 이 도구의 기본 동작이 「남이 준 zip 을 풀어 그 폴더에서 명령을 돌리는 것」이라, 그 폴더는 언제나
+ * 적대적일 수 있다고 본다. PATH 에 그 폴더 안쪽 항목이 들어와 있으면(직접 열린 터미널·direnv 등)
+ * npm 찾기가 **그 폴더 안의 파일**을 집을 수 있다.
+ */
+function npmBlindSpots(projectDir?: string): string[] {
+    const folders = (vscode.workspace.workspaceFolders ?? []).map((f) => f.uri.fsPath);
+    return [...folders, ...(projectDir ? [projectDir] : [])].filter((d) => d.length > 0);
+}
+
+function npmPreference(): NpmPreference {
+    const raw = vscode.workspace.getConfiguration("zalkera").get<string>("npm");
+    return raw === "system" || raw === "auto" ? raw : "bundled";
+}
+
 function apiBase(): string {
     const configured = vscode.workspace.getConfiguration("zalkera").get<string>("apiBase");
     if (configured === undefined || configured.trim() === "") return API_BASE_DEFAULT;

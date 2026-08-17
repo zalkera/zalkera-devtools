@@ -1,4 +1,5 @@
 import { DevtoolsError } from "./errors.ts";
+import { plainNotice } from "./notice.ts";
 import { apiBaseUrl, httpUrl, mcpServerName } from "./serverUrl.ts";
 
 /**
@@ -128,6 +129,10 @@ export async function fetchHandshake(
         // 에이전트 연결만 못 쓰게 한다 — 로그인·발행까지 막을 이유는 없다.
         handshake.mcp = null;
     }
+
+    // **서버가 준 문장도 경계에서 소독한다.** 알림 본문은 평문이 아니라 `[글자](스킴:...)` 를 링크로
+    // 렌더하고, 그 링크는 명령을 실행할 수 있다. 소비처마다 소독하면 새 소비처가 맨몸으로 들어온다.
+    handshake.message = handshake.message == null ? null : plainNotice(handshake.message);
 
     if (handshake.verdict === "UPGRADE_REQUIRED") {
         throw new DevtoolsError(

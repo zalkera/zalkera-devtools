@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { cp, link, mkdir, readFile, readdir, readlink, rm, stat, symlink, utimes, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { DevtoolsError } from "./errors.ts";
 import { computePayloadKey, currentPlatform, evictOldCaches, tryFetchPayload, writePayloadStamp } from "./payload.ts";
 
@@ -29,12 +29,14 @@ export interface DepsOptions {
     /** 진행 상황을 사람 말로 흘린다. */
     onProgress?: (message: string) => void;
     /**
-     * `npm` 실행 방법. **기본값(`npm`)은 npm 이 PATH 에 있는 기계에서만 선다** — VS Code 는 Node 는 싣고
-     * npm 은 안 싣기 때문에(T0 실측), 확장은 **반드시** 동봉한 npm 을 여기로 주입해야 한다.
-     * 주입하지 않으면 비개발자 기계에서 `spawn` 이 ENOENT 로 죽고, 사용자는 "인터넷을 확인하세요"라는
-     * 틀린 안내를 받는다(memo146 §3.2 ⚠ · §13 T-D2a).
+     * `npm` 실행 방법. **필수다** — 기본값 `["npm","install"]` 은 npm 이 PATH 에 있는 기계에서만 서는데
+     * VS Code 는 Node 는 싣고 npm 은 안 싣는다(실측). 비개발자 기계에서 `spawn` 이 ENOENT 로 죽고
+     * 사용자는 "인터넷을 확인하세요"라는 틀린 안내를 받는다.
+     *
+     * ⚠ 종전에는 선택 항목이고 *"확장은 **반드시** 주입해야 한다"* 는 **주석만** 있었다. 주석은 안 물고,
+     * 호출부는 늘어난다. 지금은 타입이 문다 — [npmArgvOf] 로 만들어 넘긴다.
      */
-    npmCommand?: string[];
+    npmCommand: string[];
     /** npm 실행 환경 추가분. VS Code 동봉 Node 로 부르려면 `ELECTRON_RUN_AS_NODE=1` 이 필요하다. */
     npmEnv?: Record<string, string>;
     /**
@@ -68,7 +70,12 @@ export async function ensureDependencies(options: DepsOptions): Promise<DepsResu
     // 연결이 중간에 실패해 **반쯤 만들어진 트리**가 남으면 다음 실행이 그것을 "준비됨"으로 통과시켰다.
     // 그 뒤 dev 서버는 `Cannot find module` 로 죽고, 우리가 안내하는 복구책("의존성 준비를 다시 하세요")은
     // 같은 판정에 걸려 **아무 일도 하지 않는다** — 비개발자가 스스로 빠져나올 수 없는 자리였다.
-    if (existsSync(join(target, COMPLETE_MARKER))) {
+    // ⚠ **표식을 프로젝트 안에 두지 않는다.** 종전에는 `node_modules/.zalkera-deps-complete` 를 봤는데,
+    //   그 자리는 **받은 zip 이 담을 수 있다.** 담아 오면 우리가 준비를 통째로 건너뛰고 zip 이 가져온
+    //   `node_modules` 를 그대로 실행한다 — 어느 npm 을 쓸지 고르는 장치가 한 번도 안 돈다.
+    //   지금은 **우리만 쓰는 자리**에 두고, 트리가 실제로 있는지와 **함께** 본다.
+    const doneAt = completionPath(cacheRoot, projectDir, cacheKey);
+    if (existsSync(doneAt) && existsSync(target)) {
         report("의존성이 이미 준비돼 있습니다.");
         return { action: "reused", cacheKey };
     }
@@ -83,7 +90,7 @@ export async function ensureDependencies(options: DepsOptions): Promise<DepsResu
         // 사용자의 **활발한 세대가 먼저 지워진다**(그리고 재설치를 다시 겪는다).
         await utimes(cacheDir, new Date(), new Date()).catch(() => {});
         const linked = await linkOrCopy(join(cacheDir, "node_modules"), target);
-        await markComplete(target);
+        await markComplete(doneAt);
         return { action: linked, cacheKey };
     }
 
@@ -105,7 +112,7 @@ export async function ensureDependencies(options: DepsOptions): Promise<DepsResu
                 await writePayloadStamp(cacheDir, payload, payloadKey);
                 report(`준비된 의존성 ${payload.fileCount}개를 연결합니다…`);
                 const linked = await linkOrCopy(join(cacheDir, "node_modules"), target);
-                await markComplete(target);
+                await markComplete(doneAt);
                 await evictOldCaches(cacheRoot, KEEP_CACHES, report, cacheDir);
                 return { action: linked, cacheKey };
             }
@@ -119,10 +126,19 @@ export async function ensureDependencies(options: DepsOptions): Promise<DepsResu
         }
     }
 
+    // **말없이 다르게 설치하지 않는다.** 설치 스크립트는 안 돌린다(받은 폴더에서 도는 설치라
+    // 그 스크립트가 곧 임의 코드다). 그 결정이 이 프로젝트에 영향을 준다면 이름을 대고 말한다.
+    const needsScripts = await installScriptPackages(projectDir);
+    if (needsScripts.length) {
+        report(
+            `설치 스크립트가 필요한 꾸러미가 ${needsScripts.length}개 있습니다(${needsScripts.slice(0, 3).join(", ")}` +
+                `${needsScripts.length > 3 ? " 외" : ""}). 안전을 위해 실행하지 않았습니다 — 이 꾸러미가 제대로 안 설 수 있습니다.`,
+        );
+    }
     report("의존성을 처음 한 번 내려받습니다. 몇 분 걸릴 수 있습니다…");
-    await runNpmInstall(projectDir, options.npmCommand ?? ["npm", "install"], options.npmEnv ?? {}, report);
+    await runNpmInstall(projectDir, options.npmCommand, options.npmEnv ?? {}, report);
     await seedCache(target, cacheDir, cacheKey, report);
-    await markComplete(target);
+    await markComplete(doneAt);
     await evictOldCaches(cacheRoot, KEEP_CACHES, report, cacheDir);
     return { action: "installed", cacheKey };
 }
@@ -168,6 +184,12 @@ export async function computeCacheKey(projectDir: string): Promise<string> {
         // lockfile 이 없으면 재현 가능한 키를 만들 수 없다 — package.json 으로 대신하되 그 사실을 키에 남긴다.
         hash.update("no-lock").update(await readFile(join(projectDir, "package.json")));
     }
+    // **`.npmrc` 도 트리를 정한다.** `registry=` 한 줄이면 같은 lockfile 에서 **다른 꾸러미**가 온다.
+    // 종전에는 키가 그것을 안 세서, 조작된 `.npmrc` 로 만든 트리가 **정상 lockfile 의 키**로 캐시에
+    // 적재됐다 — 시작 팩이 공통이라 lockfile 이 겹치는 것이 이 제품의 정상 형상이므로 남의 사이트가
+    // 그 트리를 이어받는다. 없다는 사실도 키에 남긴다(있다가 없어진 것과 처음부터 없던 것은 다르다).
+    const npmrc = join(projectDir, ".npmrc");
+    hash.update(existsSync(npmrc) ? Buffer.concat([Buffer.from("npmrc:"), await readFile(npmrc)]) : Buffer.from("no-npmrc"));
     hash.update(`${process.platform}-${process.arch}-node${process.versions.node.split(".")[0]}`);
     return hash.digest("hex").slice(0, 32);
 }
@@ -234,12 +256,45 @@ async function hardlinkTree(source: string, target: string): Promise<void> {
     }
 }
 
-/** 완결 표식. 이것이 있어야 "준비됨"이다(존재만으로는 반쪽 트리와 구별되지 않는다). */
-async function markComplete(target: string): Promise<void> {
-    await writeFile(join(target, COMPLETE_MARKER), `${new Date().toISOString()}\n`, "utf8").catch(() => {});
+/**
+ * 락파일이 **설치 스크립트를 쓴다고 적은** 꾸러미들. 없으면 빈 배열.
+ *
+ * 락파일을 읽는 이유는 설치 **전에** 알아야 하기 때문이다 — 설치 뒤에 말하면 이미 늦다.
+ * 락파일이 없거나 못 읽으면 빈 배열이다. 여기서 던지면 설치가 그 이유로 막힌다.
+ */
+export async function installScriptPackages(projectDir: string): Promise<string[]> {
+    const lock = join(projectDir, "package-lock.json");
+    if (!existsSync(lock)) return [];
+    try {
+        const parsed = JSON.parse(await readFile(lock, "utf8")) as {
+            packages?: Record<string, {hasInstallScript?: boolean}>;
+        };
+        return Object.entries(parsed.packages ?? {})
+            .filter(([, meta]) => meta?.hasInstallScript === true)
+            .map(([name]) => name.replace(/^node_modules\//, ""))
+            .sort();
+    } catch {
+        return [];
+    }
 }
 
-const COMPLETE_MARKER = ".zalkera-deps-complete";
+/**
+ * 완결 표식이 놓이는 자리. **캐시 뿌리 아래**, 프로젝트 경로와 캐시 키로 갈라 둔다.
+ *
+ * 키를 함께 넣는 이유가 둘이다. 하나는 **lockfile 이 바뀌면 표식도 안 맞아야** 한다는 것 — 종전처럼
+ * 트리 안에 두면 lockfile 을 고쳐도 "준비됨"으로 통과했다. 다른 하나는 프로젝트를 오가며 세대를
+ * 바꿔도 각 세대의 완결 사실이 따로 남는다는 것이다.
+ */
+function completionPath(cacheRoot: string, projectDir: string, cacheKey: string): string {
+    const where = createHash("sha256").update(resolve(projectDir)).digest("hex").slice(0, 16);
+    return join(cacheRoot, ".complete", `${where}-${cacheKey}`);
+}
+
+/** 완결 표식. 이것이 있어야 "준비됨"이다(존재만으로는 반쪽 트리와 구별되지 않는다). */
+async function markComplete(doneAt: string): Promise<void> {
+    await mkdir(dirname(doneAt), { recursive: true }).catch(() => {});
+    await writeFile(doneAt, `${new Date().toISOString()}\n`, "utf8").catch(() => {});
+}
 
 function isNotFound(error: unknown): boolean {
     return (error as NodeJS.ErrnoException | undefined)?.code === "ENOENT";

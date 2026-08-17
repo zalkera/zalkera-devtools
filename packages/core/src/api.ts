@@ -1,4 +1,5 @@
 import { DevtoolsError } from "./errors.ts";
+import { plainNotice } from "./notice.ts";
 
 /**
  * 잘커라 파트너 API 클라이언트. **새 계약을 만들지 않는다** — 콘솔이 쓰는 그 엔드포인트를 그대로 부른다.
@@ -238,8 +239,9 @@ async function toError(response: Response): Promise<DevtoolsError> {
     let errorCode = "";
     try {
         const body = (await response.json()) as { message?: string; errorCode?: string };
-        // 서버 메시지를 그대로 알림창에 넘기면 35KB 문자열이 그대로 뜬다(심의 실측 · 백엔드 차단의 대칭).
-        serverMessage = (body.message ?? "").slice(0, MAX_SERVER_MESSAGE);
+        // 서버 메시지를 그대로 알림창에 넘기면 35KB 문자열이 그대로 뜬다(실측 · 백엔드 차단의 대칭).
+        // 길이만으로는 부족하다 — 알림 본문은 링크를 렌더하고 그 링크는 명령을 실행할 수 있다.
+        serverMessage = plainNotice(body.message, MAX_SERVER_MESSAGE);
         errorCode = (body.errorCode ?? "").slice(0, MAX_ERROR_CODE);
     } catch {
         /* 본문이 JSON 이 아닐 수 있다 — 상태코드로만 판단한다. */

@@ -58,6 +58,27 @@ export {
 export { httpUrl, isLoopback, apiBaseUrl, mcpServerName, type McpServerName } from "./serverUrl.ts";
 export { writeOwnFile } from "./safeWrite.ts";
 export {
+    chooseNpm,
+    describeNpm,
+    npmArgvOf,
+    acceptsResolvedNpmCli,
+    systemNpmSearchSteps,
+    type NpmSearchStep,
+    type PathOps,
+    majorOf,
+    MIN_SYSTEM_NPM_MAJOR,
+    type NpmChoice,
+    type NpmPreference,
+    type NpmProbe,
+} from "./npmChoice.ts";
+export {
+    isUsableVersion,
+    shouldShowUpgradeNotice,
+    UPGRADE_NOTICE_INTERVAL_MS,
+    type UpgradeNoticeState,
+} from "./upgradeNotice.ts";
+export { plainNotice } from "./notice.ts";
+export {
     say,
     type CapturedTenant,
     type ReadyPrompt,
