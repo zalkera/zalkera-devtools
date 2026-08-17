@@ -8,6 +8,9 @@
         "node": ">=20"
     },
     "license": "MIT",
+    "zalkera": {
+        "previewExit": "첫 실사용 고객이 zip 내려받기 → 편집 → 업로드 → 사이트 반영까지 한 번 성공하면 뗀다."
+    },
     "devDependencies": {
         "@types/node": "^22.10.2",
         "typescript": "^5.7.2"
@@ -16,7 +19,7 @@
         "build": "npm run build -w @zalkera/devtools-core && npm run build -w zalkera-devtools",
         "test": "npm run test -w @zalkera/devtools-core",
         "typecheck": "npm run build -w @zalkera/devtools-core && npm run typecheck --workspaces --if-present",
-        "verify": "npm run typecheck && npm run test && npm run check:dist && npm run check:labels && npm run check:capture && npm run check:server-url && npm run check:npm && npm run check:upgrade",
+        "verify": "npm run typecheck && npm run test && npm run check:dist && npm run check:labels && npm run check:capture && npm run check:server-url && npm run check:npm && npm run check:upgrade && npm run check:preview",
         "package": "node scripts/package-vsix.mjs",
         "package:patch": "node scripts/package-vsix.mjs --bump patch",
         "package:minor": "node scripts/package-vsix.mjs --bump minor",
@@ -27,6 +30,7 @@
         "check:server-url": "node scripts/check-server-url.mjs",
         "check:npm": "node scripts/check-npm-choice.mjs",
         "check:upgrade": "node scripts/check-upgrade-notice.mjs",
-        "check:dist": "node scripts/check-dist-purity.mjs"
+        "check:dist": "node scripts/check-dist-purity.mjs",
+        "check:preview": "node scripts/check-preview.mjs"
     }
 }
