@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { mkdir, rm } from "node:fs/promises";
-import { meaningfulEntries } from "./emptyDir.ts";
+import { meaningfulEntries, removeAdded, snapshotEntries } from "./emptyDir.ts";
 import type { ZalkeraApi } from "./api.ts";
 import { DevtoolsError } from "./errors.ts";
 import { downloadBounded } from "./download.ts";
@@ -87,12 +87,14 @@ export async function startFromPreset(options: StartFromPresetOptions): Promise<
     //    `fetchSource` 만 고쳐 여기서는 여전히 거짓이었다(재심의 실증).
     //
     //    위에서 빈 폴더임을 확인한 뒤이므로 우리가 쓴 것만 지운다.
+    // ⚠ **우리가 쓴 것만 되감는다** — 형제 `fetchSource.ts` 와 같은 규율이다. 폴더를 통째로 지우면
+    //    「빈 폴더」 판정이 일부러 통과시킨 고객 파일(`.vscode`)이 사라진다.
+    const before = await snapshotEntries(options.targetDir);
     let fileCount: number;
     try {
         ({ fileCount } = await extractZip(zip, options.targetDir));
     } catch (cause) {
-        await rm(options.targetDir, { recursive: true, force: true }).catch(() => {});
-        await mkdir(options.targetDir, { recursive: true }).catch(() => {});
+        await removeAdded(options.targetDir, before);
         throw cause;
     }
     report(`${source.version} · 파일 ${fileCount}개를 풀었습니다.`);

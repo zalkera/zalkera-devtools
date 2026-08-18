@@ -30,85 +30,87 @@
         "commands": [
             {
                 "command": "zalkera.signIn",
-                "title": "잘커라: 로그인",
+                "title": "로그인",
                 "category": "잘커라"
             },
             {
                 "command": "zalkera.signOut",
-                "title": "잘커라: 로그아웃",
+                "title": "로그아웃",
                 "category": "잘커라"
             },
             {
                 "command": "zalkera.site.open",
-                "title": "잘커라: 사이트 소스 받기",
+                "title": "사이트 소스 받기",
                 "category": "잘커라"
             },
             {
                 "command": "zalkera.site.link",
-                "title": "잘커라: 폴더 연결",
+                "title": "폴더 연결",
                 "category": "잘커라"
             },
             {
                 "command": "zalkera.preview.start",
-                "title": "잘커라: 프리뷰 시작",
+                "title": "프리뷰 시작",
                 "category": "잘커라"
             },
             {
                 "command": "zalkera.preview.stop",
-                "title": "잘커라: 프리뷰 중지",
+                "title": "프리뷰 중지",
                 "category": "잘커라"
             },
             {
                 "command": "zalkera.preview.restart",
-                "title": "잘커라: 프리뷰 다시 시작",
+                "title": "프리뷰 다시 시작",
                 "category": "잘커라"
             },
             {
                 "command": "zalkera.publish",
-                "title": "잘커라: 새 버전 올리기",
+                "title": "새 버전 올리기",
                 "category": "잘커라"
             },
             {
                 "command": "zalkera.doctor",
-                "title": "잘커라: 진단",
+                "title": "진단",
                 "category": "잘커라"
             },
             {
                 "command": "zalkera.site.choose",
-                "title": "잘커라: 사이트 선택"
+                "title": "사이트 선택",
+                "category": "잘커라"
             },
             {
                 "command": "zalkera.site.create",
-                "title": "잘커라: 예제로 시작",
+                "title": "예제로 시작",
                 "category": "잘커라"
             },
             {
                 "command": "zalkera.version.switch",
-                "title": "잘커라: 버전 전환",
+                "title": "버전 전환",
                 "category": "잘커라"
             },
             {
                 "command": "zalkera.precheck",
-                "title": "잘커라: 배포 전 검사",
+                "title": "배포 전 검사",
                 "category": "잘커라"
             },
             {
                 "command": "zalkera.agent.connect",
-                "title": "잘커라: 에이전트 연결(MCP)",
+                "title": "에이전트 연결(MCP)",
                 "category": "잘커라"
             },
             {
                 "command": "zalkera.history",
-                "title": "잘커라: 버전 이력",
+                "title": "버전 이력",
                 "category": "잘커라"
             },
             {
                 "command": "zalkera.reset",
-                "title": "잘커라: 초기화"
+                "title": "초기화",
+                "category": "잘커라"
             },
             {
                 "command": "zalkera.help",
-                "title": "잘커라: 도움말",
+                "title": "도움말",
                 "category": "잘커라"
             }
         ],

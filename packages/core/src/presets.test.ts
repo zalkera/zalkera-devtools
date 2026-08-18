@@ -1,6 +1,6 @@
 import { ok, rejects, strictEqual } from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtemp, readdir, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -58,4 +58,37 @@ test("양성 통제군 — 정상 zip 은 그대로 풀린다", async () => {
     });
     ok(result.fileCount >= 1);
     ok((await readdir(target)).includes("package.json"));
+});
+
+test("고객이 손으로 만든 것은 롤백이 지우지 않는다 — `.vscode` 는 「빈 폴더」가 초대한 것이다", async () => {
+    // ⚠ 이 시험이 없어서 손해가 났다. 기존 롤백 시험은 **빈 임시 폴더**만 써서, 판정이 일부러
+    //   통과시키는 `.vscode` 가 애초에 없었다 — 그래서 폴더를 통째로 지우는 롤백이 초록으로 살았다.
+    //   배송 문서는 `.vscode` 를 "있어도 괜찮습니다"라고 초대하고 "폴더는 그대로입니다"라고 보증한다.
+    const target = await mkdtemp(join(tmpdir(), "zalkera-keep-"));
+    await mkdir(join(target, ".vscode"), { recursive: true });
+    await writeFile(join(target, ".vscode", "launch.json"), '{"고객이 만든 것":true}');
+    await writeFile(join(target, ".DS_Store"), "x");
+
+    const zip = await escapingZip();
+    await rejects(
+        () =>
+            startFromPreset({
+                api: api(zip),
+                presetCode: "skeleton",
+                targetDir: target,
+                fetchImpl: (async () => new Response(zip, { status: 200 })) as never,
+            }),
+        /폴더 밖/,
+    );
+
+    const left = await readdir(target);
+    ok(left.includes(".vscode"), `고객의 .vscode 가 사라졌다: ${left.join(", ")}`);
+    ok(left.includes(".DS_Store"), ".DS_Store 가 사라졌다");
+    strictEqual(
+        await readFile(join(target, ".vscode", "launch.json"), "utf8"),
+        '{"고객이 만든 것":true}',
+        "고객 파일 내용이 바뀌었다",
+    );
+    // 그리고 **우리가 쓴 것**은 남지 않아야 한다 — 반쪽 해제 보증은 그대로다.
+    ok(!left.includes("good.txt"), `반쪽 해제가 남았다: ${left.join(", ")}`);
 });

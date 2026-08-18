@@ -5,9 +5,13 @@
  * 특히 **취소**는 오류가 아니다 — `register()` 가 `CANCELLED` 를 보고 조용히 삼킨다. 코드가
  * 바뀌면 취소를 누른 사람에게 빨간 오류창이 뜬다(실제로 그랬다).
  */
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { existsSync } from "node:fs";
 import { test } from "node:test";
 import { ok, strictEqual } from "node:assert/strict";
-import { spawnFailure } from "./deps.ts";
+import { ensureDependencies, spawnFailure } from "./deps.ts";
 
 /** `AbortController.abort()` 로 끊었을 때 Node 가 주는 것과 같은 모양. */
 function abortError(): Error {
@@ -45,4 +49,33 @@ test("AbortError 는 이름으로 판정한다 — 메시지 문면이 아니라
     // 메시지에 'abort' 가 들어간 **진짜 실패**를 취소로 삼키면 사용자는 아무 안내도 못 받는다.
     const error = spawnFailure(new Error("npm ERR! aborted by registry"));
     strictEqual(error.code, "DEPENDENCIES_FAILED");
+});
+
+// ── 고객이 손수 설치한 트리 ────────────────────────────────────────────────
+// 완결 표식은 **우리가 처음 돌 때만** 생긴다. 그것이 없다고 고객 트리를 지우면, 배송 문서가
+// 안내하는 「폴더 연결」 흐름을 탄 고객은 **첫 실행에서 무조건** 자기 `node_modules` 를 잃는다.
+
+test("고객이 손수 설치한 node_modules 를 준비가 지우지 않는다", async () => {
+    const project = await mkdtemp(join(tmpdir(), "zalkera-deps-keep-"));
+    const cacheRoot = await mkdtemp(join(tmpdir(), "zalkera-deps-cache-"));
+    await writeFile(join(project, "package.json"), '{"name":"고객소스","dependencies":{"next":"14.0.0"}}');
+    await writeFile(join(project, "package-lock.json"), '{"lockfileVersion":3,"packages":{}}');
+    await mkdir(join(project, "node_modules", "next", "dist"), {recursive: true});
+    const patched = join(project, "node_modules", "next", "dist", "patched.js");
+    await writeFile(patched, "// patch-package 산출물");
+
+    const said: string[] = [];
+    // `/bin/true` 로 설치를 대신한다 — 이 시험이 보는 것은 **지우는가**이지 설치 결과가 아니다.
+    await ensureDependencies({
+        projectDir: project,
+        cacheRoot,
+        npmCommand: ["/bin/true"],
+        onProgress: (m) => said.push(m),
+    }).catch(() => {});
+
+    ok(existsSync(patched), `고객이 고친 파일이 사라졌다. 안내: ${said.join(" / ")}`);
+    ok(
+        !said.some((m) => /지우고 다시/.test(m)),
+        `지운다고 말했다: ${said.join(" / ")}`,
+    );
 });

@@ -113,10 +113,20 @@ export async function ensureDependencies(options: DepsOptions): Promise<DepsResu
         report("의존성이 이미 준비돼 있습니다.");
         return { action: "reused", cacheKey };
     }
-    if (existsSync(target)) {
-        report("이전에 준비하다 만 의존성이 있어 지우고 다시 받습니다…");
-        await rm(target, { recursive: true, force: true });
-    }
+    // ⚠ **여기서 `node_modules` 를 지우지 않는다.**
+    //
+    //   종전에는 완결 표식이 없으면 트리를 통째로 지우고 "이전에 준비하다 만 의존성이 있어
+    //   지우고 다시 받습니다" 라고 말했다. 표식은 **우리가 처음 돌 때만** 생기므로, 고객이 이미
+    //   `npm install` 해 둔 폴더를 「폴더 연결」(배송 문서가 안내하는 흐름)로 붙이면 **첫 실행에서
+    //   무조건** 그 분기를 탄다 — 고객 트리는 멀쩡했는데 우리 표식이 없었을 뿐이다. 그리고 그
+    //   문장은 거짓이다.
+    //
+    //   피해가 문면에 그치지 않는다: 우리는 `--ignore-scripts` 로 설치하므로 postinstall 이 필요한
+    //   꾸러미(esbuild·sharp 류)는 **원래보다 나쁜 상태**로 돌아오고, 사내망에서 재설치가 실패하면
+    //   옛 트리도 새 트리도 없다.
+    //
+    //   지울 이유도 없다 — 우리가 부르는 것은 `npm ci` 가 아니라 **`npm install`** 이고, 그것은
+    //   락파일 기준으로 기존 트리를 **조정**한다. 반쪽 설치도 그 자리에서 메워진다.
 
     if (isCacheComplete(cacheDir)) {
         report("준비해 둔 의존성을 연결합니다…");

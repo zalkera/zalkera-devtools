@@ -10,7 +10,7 @@
  */
 import { ok, rejects, strictEqual } from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtemp, readdir } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, writeFile } from "node:fs/promises";
 import { gzipSync } from "node:zlib";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -85,4 +85,26 @@ test("양성 통제군 — 정상 tar.gz 는 그대로 풀린다", async () => {
     strictEqual(result.revisionNo, 7);
     ok(result.fileCount >= 1);
     ok((await readdir(target)).includes("package.json"), "정상 소스가 안 풀렸다면 롤백이 과하다");
+});
+
+test("고객이 손으로 만든 것은 롤백이 지우지 않는다 — zip 쪽과 같은 규율", async () => {
+    // 「빈 폴더」 판정이 `.vscode` 를 일부러 통과시키고 배송 문서가 그것을 초대한다.
+    // 폴더를 통째로 지우는 롤백은 그 초대에 응한 고객의 파일을 지운다.
+    const target = await mkdtemp(join(tmpdir(), "zalkera-src-keep-"));
+    await mkdir(join(target, ".vscode"), { recursive: true });
+    await writeFile(join(target, ".vscode", "launch.json"), '{"고객이 만든 것":true}');
+
+    const payload = tarGz([
+        { name: "good.txt", body: "먼저 쓰이는 파일" },
+        { name: "../evil.txt", body: "탈출" },
+    ]);
+    await rejects(
+        () => fetchSiteSource({ api: api(payload), targetDir: target, fetchImpl: serve(payload) }),
+        /폴더 밖|이상한 경로/,
+    );
+
+    const left = await readdir(target);
+    ok(left.includes(".vscode"), `고객의 .vscode 가 사라졌다: ${left.join(", ")}`);
+    strictEqual(await readFile(join(target, ".vscode", "launch.json"), "utf8"), '{"고객이 만든 것":true}');
+    ok(!left.includes("good.txt"), `반쪽 해제가 남았다: ${left.join(", ")}`);
 });

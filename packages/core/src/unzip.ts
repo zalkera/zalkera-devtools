@@ -3,7 +3,7 @@ import { join, resolve } from "node:path";
 import { inflateRaw } from "node:zlib";
 import { promisify } from "node:util";
 import { DevtoolsError } from "./errors.ts";
-import { assertNotSymlink, descend, safeSegments } from "./safeWrite.ts";
+import { assertNotSymlink, assertNotVendored, descend, safeSegments } from "./safeWrite.ts";
 
 const inflate = promisify(inflateRaw);
 
@@ -76,7 +76,9 @@ export async function extractZip(zip: Buffer, targetDir: string): Promise<UnzipR
         offset += 46 + nameLength + extraLength + commentLength;
 
         if (name.endsWith("/")) {
-            await descend(root, safeSegments(root, name), verified);
+            const dirSegments = safeSegments(root, name);
+            assertNotVendored(dirSegments, name);
+            await descend(root, dirSegments, verified);
             continue;
         }
 
@@ -107,6 +109,7 @@ export async function extractZip(zip: Buffer, targetDir: string): Promise<UnzipR
         // ⚠ **문자열 판정만으로는 부족하다.** `resolve` 가 뿌리 안이라 해도 부모 조각이 심링크면
         //   `writeFile` 은 그 링크를 따라간다 — 판정은 파일시스템에 물어야 한다(`safeWrite.ts`).
         const segments = safeSegments(root, name);
+        assertNotVendored(segments, name);
         const parent = await descend(root, segments.slice(0, -1), verified);
         const path = join(parent, segments[segments.length - 1] ?? "");
         await assertNotSymlink(path, name);

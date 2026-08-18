@@ -65,12 +65,16 @@ test("차단2 — 반쯤 남은 node_modules 는 '준비됨'이 아니다", asyn
     await writeFile(join(dir, "package.json"), "{}");
     await mkdir(join(dir, "node_modules", "pkg-a"), { recursive: true });
 
-    // 완결 표식이 없으므로 재사용으로 통과하면 안 된다 — 지우고 다시 받으려다 install 이 없어 실패한다.
+    // 지키는 성질은 **«재사용으로 통과하지 않는다»** 하나다. 완결 표식이 없으므로 설치를 돌리고,
+    // 그 설치가 없어서 실패한다.
     await rejects(
         () => ensureDependencies({ projectDir: dir, cacheRoot: join(dir, "cache"), npmCommand: ["false"] }),
         (e: unknown) => e instanceof DevtoolsError && e.code === "DEPENDENCIES_FAILED",
     );
-    strictEqual(existsSync(join(dir, "node_modules")), false, "반쪽 트리는 치워져야 한다");
+    // ⚠ 종전에는 여기서 «트리가 치워졌는가»를 함께 요구했다. 그 요구가 **고객이 손수 설치한 트리를
+    //   지우는 근거**가 됐다(실측). 지금은 받은 꾸러미가 `node_modules` 를 **담을 수 없으므로**
+    //   (`safeSegments`) 치울 이유가 없다 — 남은 트리는 언제나 고객 것이다.
+    ok(existsSync(join(dir, "node_modules")), "고객 트리를 지웠다");
 });
 
 test("차단3 — git 레포에 .gitignore 가 없으면 만들어 자격증명을 막는다", async () => {

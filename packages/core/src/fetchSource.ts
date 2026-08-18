@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { createWriteStream } from "node:fs";
 import { mkdir, readdir, rm } from "node:fs/promises";
-import { meaningfulEntries } from "./emptyDir.ts";
+import { meaningfulEntries, removeAdded, snapshotEntries } from "./emptyDir.ts";
 import { join } from "node:path";
 import { createGunzip } from "node:zlib";
 import { pipeline } from "node:stream/promises";
@@ -114,12 +114,15 @@ export async function fetchSiteSource(options: FetchSourceOptions): Promise<Fetc
     //    **되돌아갈 길이 없다.** 형제 `deps.ts` 는 같은 형상을 이미 `rm(target)` 으로 푼다.
     //
     //    이 자리는 위에서 **빈 폴더임을 확인한 뒤**이므로, 우리가 쓴 것만 지운다.
+    // ⚠ **우리가 쓴 것만 되감는다.** 폴더를 통째로 지우면 「빈 폴더」 판정이 일부러 통과시킨
+    //    고객 파일(`.vscode` — 배송 문서가 "있어도 괜찮습니다"라고 초대한 그것)이 사라진다.
+    const before = await snapshotEntries(options.targetDir);
     let fileCount: number;
     try {
-        fileCount = await extractTarGz(buffer, options.targetDir);
+        // 소스 꾸러미는 `node_modules` 를 담을 수 없다 — 페이로드 경로와 갈리는 지점이다.
+        fileCount = await extractTarGz(buffer, options.targetDir, { rejectVendored: true });
     } catch (cause) {
-        await rm(options.targetDir, { recursive: true, force: true }).catch(() => {});
-        await mkdir(options.targetDir, { recursive: true }).catch(() => {});
+        await removeAdded(options.targetDir, before);
         throw cause;
     }
     report(`${fileCount}개 파일을 받았습니다.`);

@@ -184,7 +184,10 @@ test("받은 폴더가 완결 표식을 담아 와도 준비를 건너뛰지 않
         (error: unknown) => error instanceof Error,
         "준비를 건너뛰고 reused 로 돌아왔다 — 담아 온 트리를 그대로 쓴다",
     );
-    ok(!existsSync(join(projectDir, "node_modules", "PWNED.txt")), "담아 온 트리를 지우지 않았다");
+    // ⚠ 종전에는 여기서 «담아 온 트리가 지워졌는가»를 요구했다. 그 요구가 고객이 손수 설치한
+    //   트리까지 지우는 근거가 됐다(실측). 방어를 **경계로 옮겼다** — 받은 꾸러미는 `node_modules`
+    //   를 애초에 담을 수 없다(`safeWrite.ts` 의 `safeSegments`). 아래 시험이 그것을 고정한다.
+    //   여기서 지키는 성질은 **«완결 표식을 담아 와도 준비를 건너뛰지 않는다»** 하나다.
 });
 
 test("`.npmrc` 가 다르면 캐시 키가 갈린다 — 같은 lockfile 이라도", async () => {

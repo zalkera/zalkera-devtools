@@ -5,7 +5,7 @@ import { Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { createGunzip } from "node:zlib";
 import { DevtoolsError } from "./errors.ts";
-import { assertNotSymlink, descend, safeSegments } from "./safeWrite.ts";
+import {assertNotSymlink, descend, safeSegments, assertNotVendored} from "./safeWrite.ts";
 
 /**
  * tar 해제기 — **의존성 0**(내장 zlib). 두 경로가 이 한 파서를 공유한다.
@@ -50,6 +50,11 @@ export interface UntarOptions {
      * 정상 동작이 죽는다. 그래서 호출부가 **서버가 신고한 크기 기준**으로 넘긴다(`payload.ts`).
      */
     maxBytes?: number;
+    /**
+     * `node_modules` 를 담은 항목을 거부하는가. **소스 꾸러미는 true**, 의존성 페이로드는 false 다
+     * (페이로드는 정당하게 `node_modules` 트리다). 자세한 이유는 [assertNotVendored].
+     */
+    rejectVendored?: boolean;
     /**
      * 항목 수 상한(기본 [MAX_ENTRIES]). 호출부가 더 좁게 잡을 수 있다 — `maxBytes` 와 같은 성질이다.
      *
@@ -283,6 +288,7 @@ async function createSink(targetDir: string, options: UntarOptions) {
             pendingLink = null;
 
             const segments = safeSegments(root, name);
+            if (options.rejectVendored === true) assertNotVendored(segments, name);
 
             if (entry.type === "5") {
                 await descend(root, segments, verified);

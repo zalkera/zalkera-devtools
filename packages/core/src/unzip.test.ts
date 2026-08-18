@@ -241,3 +241,43 @@ test("양성 통제군 — 상한 아래 다중 항목도 그대로 풀린다", 
         await rm(dir, { recursive: true, force: true });
     }
 });
+
+/**
+ * ─── 받은 소스는 `node_modules` 를 담을 수 없다 ──────────────────────────────
+ *
+ * 담아 오면 우리가 고른 npm 이 한 번도 안 돌고 **그 트리가 그대로 실행된다**(`next dev`).
+ * 종전 방어는 준비 단계에서 `node_modules` 를 통째로 지우는 것이었는데, 그 방어가 「폴더 연결」로
+ * 붙인 **고객 자신의 트리**까지 지웠다(실측). 방어를 **경계로 옮겼다**.
+ *
+ * ⚠ 의존성 **페이로드**는 정당하게 `node_modules` 트리다 — 그 경로에는 이 판정을 안 건다.
+ */
+test("소스 zip 이 node_modules 를 담으면 거부한다", async () => {
+    for (const path of ["node_modules/evil/index.js", "a/node_modules/evil.js"]) {
+        const zip = await createZip([{ path, data: Buffer.from("PWNED") }]);
+        const target = await mkdtemp(join(tmpdir(), "zalkera-nm-"));
+        try {
+            await rejects(
+                () => extractZip(zip, target),
+                (error: unknown) => error instanceof DevtoolsError && /node_modules/.test(error.message),
+                path,
+            );
+            strictEqual((await readdir(target)).length, 0, `${path}: 반쪽이 남았다`);
+        } finally {
+            await rm(target, { recursive: true, force: true });
+        }
+    }
+});
+
+test("양성 통제군 — 이름에 걸치기만 한 것은 막지 않는다", async () => {
+    const zip = await createZip([
+        { path: "src/node_modules_helper.ts", data: Buffer.from("export const a = 1;") },
+        { path: "docs/about-node_modules.md", data: Buffer.from("# 설명") },
+    ]);
+    const target = await mkdtemp(join(tmpdir(), "zalkera-nm-ok-"));
+    try {
+        const result = await extractZip(zip, target);
+        strictEqual(result.fileCount, 2);
+    } finally {
+        await rm(target, { recursive: true, force: true });
+    }
+});

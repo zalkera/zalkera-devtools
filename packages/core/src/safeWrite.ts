@@ -36,9 +36,11 @@ export function safeSegments(root: string, name: string): string[] {
     if (path !== root && !path.startsWith(root + sep)) {
         throw new DevtoolsError("SERVER_REJECTED", `받은 파일이 폴더 밖을 가리킵니다: ${name}`);
     }
-    return relative(root, path)
+    const segments = relative(root, path)
         .split(sep)
         .filter((part) => part.length > 0);
+
+    return segments;
 }
 
 /**
@@ -125,4 +127,24 @@ export async function writeOwnFile(path: string, data: string, mode = 0o644): Pr
         await rm(tmp, {force: true}).catch(() => undefined);
         throw error;
     }
+}
+
+/**
+ * **받은 소스 꾸러미는 `node_modules` 를 담을 수 없다.**
+ *
+ * 담아 오면 우리가 고른 npm 이 한 번도 안 돌고 **그 트리가 그대로 실행된다**(`next dev`).
+ * 종전 방어는 준비 단계에서 `node_modules` 를 통째로 지우는 것이었는데, 그 방어가 「폴더 연결」로
+ * 붙인 **고객 자신의 트리**까지 지웠다(실측: patch-package 산출물 소멸). 방어를 **경계로 옮긴다** —
+ * 심을 수 없으면 지울 이유도 없다.
+ *
+ * ⚠ 의존성 **페이로드**는 정당하게 `node_modules` 트리다. 그래서 이 판정은 소스 해제기 둘
+ * (`extractZip`·`extractTarGz`)에만 걸고 페이로드 경로(`extractTarGzFile`)에는 안 건다.
+ */
+export function assertNotVendored(segments: string[], name: string): void {
+    if (!segments.includes("node_modules")) return;
+    throw new DevtoolsError(
+        "SERVER_REJECTED",
+        `받은 파일에 node_modules 가 들어 있습니다: ${name}`,
+        "받은 꾸러미가 정상이 아닙니다. 잘커라에 문의해 주세요.",
+    );
 }

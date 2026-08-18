@@ -467,6 +467,9 @@ async function openSite(): Promise<void> {
 
     const root = await findProjectRoot(target);
     log(`버전 ${count(result.revisionNo)} · 파일 ${count(result.fileCount)}개를 받았습니다.`);
+    // ⚠ 받은 폴더가 **지금 열린 폴더**일 수 있다. 그때 갱신하지 않으면 사이드바가 계속 「소스」에
+    //    머물러 프리뷰·발행으로 가는 길이 화면에서 끊긴다.
+    await refreshSidebar();
     const open = await vscode.window.showInformationMessage(
         `사이트 소스를 받았습니다(버전 ${count(result.revisionNo)}).`,
         "이 폴더 열기",
@@ -514,6 +517,8 @@ async function startFromExample(): Promise<void> {
     );
     log(`시작 소스 ${result.presetCode}@${result.version} · 파일 ${count(result.fileCount)}개.`);
 
+    // 받은 폴더가 지금 열린 폴더일 수 있다 — `openSite` 와 같은 이유로 갱신한다.
+    await refreshSidebar();
     const open = await vscode.window.showInformationMessage(
         // ⚠ `preset.name` 은 서버 응답(`/api/partner/site-preset/presets`)이다. 소독 없이 넣으면
         // 비-모달 알림이 `[글](command:…)` 를 클릭 링크로 렌더한다(심의 실증).
@@ -624,6 +629,10 @@ async function precheckCommand(): Promise<void> {
 
 /** B3 — 이미 가진 폴더를 이 테넌트에 붙인다. 지금은 테넌트 코드를 설정에 적는 것이 전부다. */
 async function linkFolder(): Promise<void> {
+    // 폴더가 없으면 연결할 대상이 없다 — 종전에는 전역에 적어 놓고 "이 작업 공간을" 이라고 말했다.
+    if (workspaceDir() === undefined) {
+        throw new DevtoolsError("NOT_A_SITE", "열린 폴더가 없습니다.", "소스 폴더를 먼저 여신 뒤 다시 눌러 주세요.");
+    }
     const api = await ensureApi();
     const tenants = await api.listMyTenants();
     const choice = await vscode.window.showQuickPick(
@@ -632,7 +641,13 @@ async function linkFolder(): Promise<void> {
     );
     if (!choice?.description) return;
     await saveTenant(choice.description);
-    log(`이 작업 공간을 ${choice.label}(${choice.description}) 에 연결했습니다.`);
+    log(`이 폴더를 ${plainNotice(choice.label, 64)}(${plainNotice(choice.description, 64)}) 에 연결했습니다.`);
+    // ⚠ **적었으면 화면도 바꾼다.** 종전에는 설정만 바꾸고 사이드바가 옛 사이트를 계속 보여 줬다 —
+    //    배송 문서가 "고른 사이트는 그룹 이름 옆에 늘 보입니다"라고 그 표시를 근거로 삼는다.
+    await refreshSidebar();
+    void vscode.window.showInformationMessage(
+        `이 폴더를 ${plainNotice(choice.label, 64)} 사이트에 연결했습니다.`,
+    );
 }
 
 // ── 프리뷰 ──────────────────────────────────────────────────────────────

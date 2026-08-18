@@ -1,4 +1,5 @@
-import { readdir } from "node:fs/promises";
+import { readdir, rm } from "node:fs/promises";
+import { join } from "node:path";
 
 /**
  * 소스를 받을 폴더가 **비어 있는가**를 판정한다.
@@ -35,4 +36,39 @@ export async function meaningfulEntries(dir: string): Promise<string[]> {
 
 export async function isReceivable(dir: string): Promise<boolean> {
     return (await meaningfulEntries(dir)).length === 0;
+}
+
+/**
+ * 해제 **전** 폴더에 있던 이름들. 실패했을 때 «우리가 쓴 것» 만 되감기 위한 기준선이다.
+ *
+ * ⚠ [meaningfulEntries] 가 **일부러 통과시키는 것**([IGNORED])이 있다는 사실이 여기서 결정적이다.
+ *   `.vscode` 는 「빈 폴더」 판정을 통과하고 배송 문서도 "있어도 괜찮습니다"라고 초대한다. 그런데
+ *   롤백이 폴더를 통째로 지우면 **그 초대에 응한 고객의 파일이 사라진다**(실측: 손으로 만든
+ *   `.vscode/launch.json` 이 지워졌다). 이 도구가 낼 수 있는 가장 큰 손해가 그것이다.
+ */
+export async function snapshotEntries(dir: string): Promise<Set<string>> {
+    try {
+        return new Set(await readdir(dir));
+    } catch {
+        return new Set(); // 아직 없는 폴더 — 우리가 만들 것이므로 기준선은 비어 있다
+    }
+}
+
+/**
+ * 기준선 이후에 **생긴 것만** 지운다. 폴더 자체는 남긴다 — 고객이 고른 자리다.
+ *
+ * 지우다 실패해도 던지지 않는다. 이 함수는 이미 실패한 경로에서 불리고, 여기서 또 던지면
+ * **원래 오류가 가려진다** — 사용자는 무엇이 잘못됐는지 못 듣게 된다.
+ */
+export async function removeAdded(dir: string, before: Set<string>): Promise<void> {
+    let now: string[];
+    try {
+        now = await readdir(dir);
+    } catch {
+        return;
+    }
+    for (const name of now) {
+        if (before.has(name)) continue;
+        await rm(join(dir, name), { recursive: true, force: true }).catch(() => {});
+    }
 }
