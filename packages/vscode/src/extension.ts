@@ -22,6 +22,7 @@ import {
     waitForBuild,
     captureTenant,
     type CapturedTenant,
+    ours,
     plainNotice,
     decideReadyPrompt,
     decideSwitch,
@@ -255,9 +256,19 @@ function register(command: string, handler: () => Promise<void>): vscode.Disposa
         try {
             await handler();
         } catch (error) {
+            // ⚠ **취소는 오류가 아니다.** 사용자가 스스로 그만둔 것을 빨간 창으로 알리면, 자기가
+            //    뭘 잘못했나 싶게 만든다. 출력 채널에는 남긴다 — 무슨 일이 있었는지는 보여야 한다.
+            //    (`signIn`·사이트 선택은 각자 삼키고 있었는데, 프리뷰 취소가 이 자리까지 올라와
+            //    "인터넷을 확인하세요"로 떴다 — 재심의 지적. 한 자리에서 가른다.)
+            if (error instanceof DevtoolsError && error.code === "CANCELLED") {
+                log(`취소: ${error.humanMessage}`);
+                return;
+            }
             const message = error instanceof DevtoolsError ? error.humanMessage : String(error);
             log(`오류: ${message}`);
-            const choice = await vscode.window.showErrorMessage(message, "자세히 보기");
+            // `humanMessage` 는 우리 문장 + 경계에서 소독된 서버 조각(`api.ts` 의 `plainNotice`)이다.
+            // `String(error)` 갈래는 우리 런타임 오류다. 둘 다 서버가 문장을 정하지 못한다.
+            const choice = await vscode.window.showErrorMessage(ours(message), "자세히 보기");
             if (choice === "자세히 보기") output.show();
         }
     });
@@ -452,9 +463,9 @@ async function openSite(): Promise<void> {
     );
 
     const root = await findProjectRoot(target);
-    log(`버전 ${result.revisionNo} · 파일 ${result.fileCount}개를 받았습니다.`);
+    log(`버전 ${ours(result.revisionNo)} · 파일 ${ours(result.fileCount)}개를 받았습니다.`);
     const open = await vscode.window.showInformationMessage(
-        `사이트 소스를 받았습니다(버전 ${result.revisionNo}).`,
+        `사이트 소스를 받았습니다(버전 ${ours(result.revisionNo)}).`,
         "이 폴더 열기",
     );
     if (open === "이 폴더 열기") {
@@ -498,12 +509,12 @@ async function startFromExample(): Promise<void> {
         { location: vscode.ProgressLocation.Notification, title: `${plainNotice(preset.name, 64)} 를 받는 중` },
         () => startFromPreset({ api, presetCode: preset.code, targetDir: target, onProgress: log }),
     );
-    log(`시작 소스 ${result.presetCode}@${result.version} · 파일 ${result.fileCount}개.`);
+    log(`시작 소스 ${result.presetCode}@${result.version} · 파일 ${ours(result.fileCount)}개.`);
 
     const open = await vscode.window.showInformationMessage(
         // ⚠ `preset.name` 은 서버 응답(`/api/partner/site-preset/presets`)이다. 소독 없이 넣으면
         // 비-모달 알림이 `[글](command:…)` 를 클릭 링크로 렌더한다(심의 실증).
-        `${plainNotice(preset.name, 64)} 를 받았습니다(${result.fileCount}개 파일).`,
+        `${plainNotice(preset.name, 64)} 를 받았습니다(${ours(result.fileCount)}개 파일).`,
         "이 폴더 열기",
     );
     if (open === "이 폴더 열기") {
@@ -542,7 +553,7 @@ async function switchVersion(preselected?: number, expectedTenant?: CapturedTena
         const building = revisions.filter((r) => r.status === "BUILDING").length;
         void vscode.window.showInformationMessage(
             building > 0
-                ? `지금 바꿀 수 있는 버전이 없습니다(빌드 중 ${building}개). 끝나면 다시 보십시오.`
+                ? `지금 바꿀 수 있는 버전이 없습니다(빌드 중 ${ours(building)}개). 끝나면 다시 보십시오.`
                 : "바꿀 다른 버전이 없습니다.",
         );
         return;
@@ -582,7 +593,7 @@ async function switchVersion(preselected?: number, expectedTenant?: CapturedTena
     if (confirm !== ask.action) return;
 
     await vscode.window.withProgress(
-        { location: vscode.ProgressLocation.Notification, title: `버전 ${target.revisionNo} 로 바꾸는 중` },
+        { location: vscode.ProgressLocation.Notification, title: `버전 ${ours(target.revisionNo)} 로 바꾸는 중` },
         () => api.activateRevision(target.revisionNo),
     );
     log(`사이트를 버전 ${target.revisionNo} 로 바꿨습니다.`);
@@ -734,7 +745,7 @@ async function startPreviewInner(): Promise<void> {
     if (started.revokedPrevious > 0) {
         // 말 없이 끊기면 다른 기계의 사용자는 그것을 고장으로 읽는다.
         void vscode.window.showWarningMessage(
-            `다른 기계에서 켜 둔 프리뷰 ${started.revokedPrevious}개가 해제되었습니다(프리뷰 자격증명은 한 번에 하나입니다).`,
+            `다른 기계에서 켜 둔 프리뷰 ${ours(started.revokedPrevious)}개가 해제되었습니다(프리뷰 자격증명은 한 번에 하나입니다).`,
         );
     }
     if (started.expiresAt) {
@@ -848,7 +859,7 @@ async function publishCommand(): Promise<void> {
         { location: vscode.ProgressLocation.Notification, title: "올리는 중" },
         () => publish({ projectDir: dir, api, onProgress: log }),
     );
-    log(`버전 ${result.revisionNo} 로 올렸습니다 — 파일 ${result.fileCount}개 · ${Math.round(result.byteSize / 1024)}KB`);
+    log(`버전 ${ours(result.revisionNo)} 로 올렸습니다 — 파일 ${ours(result.fileCount)}개 · ${Math.round(result.byteSize / 1024)}KB`);
     // 서버가 보낸 한계·상태 안내는 **그대로 보여 준다**(memo66 §4 거짓 성공 차단).
     if (result.capabilityNote) log(result.capabilityNote);
 
@@ -1062,7 +1073,7 @@ function warnProtectedPath(doc: vscode.TextDocument): void {
     const warning = protectedPathWarning(relative);
     if (!warning || warnedPaths.has(doc.uri.fsPath)) return;
     warnedPaths.add(doc.uri.fsPath);
-    void vscode.window.showWarningMessage(`${relative} — ${warning}`);
+    void vscode.window.showWarningMessage(`${ours(relative)} — ${ours(warning)}`);
 }
 
 // ── 진단 ────────────────────────────────────────────────────────────────
@@ -1117,7 +1128,8 @@ async function ensureHandshake(): Promise<Handshake> {
             // 뜨는 화면을 쓰게 된다(경계에서 소독은 하지만, 안 쓰는 편이 낫다). 서버 문장은 출력 채널에 남긴다.
             log(`서버 안내: ${handshake.message}`);
             const notice = `새 판이 있습니다(권고 ${target}). 지금 판은 ${extensionVersion} 입니다.`;
-            void vscode.window.showInformationMessage(notice, "업데이트").then((picked) => {
+            // 바로 위에서 **우리가 조립한** 문장이다 — 서버 글자는 출력 채널에만 남긴다.
+            void vscode.window.showInformationMessage(ours(notice), "업데이트").then((picked) => {
                 if (picked === "업데이트") {
                     void vscode.commands.executeCommand("workbench.extensions.search", `@id:${extensionId}`);
                 }
@@ -1216,7 +1228,9 @@ async function chooseSite(): Promise<void> {
         const code = await chooseTenant(true);
         log(`작업 사이트를 ${code} 로 바꿨습니다.`);
         await refreshSidebar();
-        void vscode.window.showInformationMessage(`사이트: ${code}`);
+        // `code` 는 서버 응답(`/api/me` 의 `tenants[].code`)이다 — 소독 없이 알림에 넣으면
+        // 비-모달이 명령 링크로 렌더한다(재심의 실증).
+        void vscode.window.showInformationMessage(`사이트: ${plainNotice(code, 64)}`);
     } catch (error) {
         if (error instanceof DevtoolsError && error.code === "CANCELLED") return;
         throw error;

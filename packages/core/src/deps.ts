@@ -354,6 +354,13 @@ async function runNpmInstall(
         child.stderr?.on("data", (chunk: Buffer) => report(chunk.toString().trimEnd()));
         child.on("error", (cause) =>
             reject(
+                // ⚠ **사용자가 취소한 것을 오류로 말하지 않는다.** `signal` 로 끊으면 여기에
+                //    `AbortError` 가 온다. 종전에는 그것도 "인터넷 연결이나 사내망 프록시 설정을
+                //    확인해 주세요"로 안내해, 취소를 누른 사람에게 **빨간 오류창**이 떴다(재심의 지적).
+                //    형제 `signIn` 은 `CANCELLED` 를 조용히 삼키는데 이 경로만 그 구분이 없었다.
+                cause instanceof Error && cause.name === "AbortError"
+                    ? new DevtoolsError("CANCELLED", "준비를 취소했습니다.")
+                    :
                 // ⚠ 실행 자체가 안 된 것(ENOENT)과 받다가 실패한 것을 **구분한다**. 종전에는 둘 다
                 // "인터넷을 확인하세요"로 안내해, npm 이 없는 기계의 사용자를 엉뚱한 곳으로 보냈다.
                 new DevtoolsError(

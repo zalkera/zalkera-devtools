@@ -117,3 +117,56 @@ test("읽을 수 없는 값도 기본값으로 — 다만 말한다", () => {
     strictEqual(resolved.url, FALLBACK);
     ok(resolved.note);
 });
+
+/**
+ * **알림 링크 소독 — 판정 함수도 문구 정본과 같은 규율을 받는다.**
+ *
+ * VS Code 비-모달 알림은 `[글](command:…)` 를 클릭 링크로 렌더하고 `allowCommands: true` 로 연다.
+ * `say.*` 는 소독을 붙였는데 **같은 파일의 `decide*` 는 안 붙어**, 적대적·탈취된 서버가 준
+ * 테넌트 코드가 그대로 알림에 실렸다(재심의 실증). 두 함수는 `extension.ts` 가 메시지를 **원문
+ * 그대로** 비-모달 알림에 띄우는 자리다.
+ *
+ * 이 시험은 링크 **형태가 살아남지 않는지**만 본다 — VS Code 실렌더러를 띄우지 않고 판정하려면
+ * 그 앵커(`](`)가 깨졌는지가 관측 가능한 조건이다.
+ */
+const RENDERS_AS_LINK = /\]\((?:https?:\/\/|command:|file:)[^)\s]+\)/i;
+const EVIL = "gc](command:workbench.action.terminal.new)";
+
+test("decideSwitch 가 서버 테넌트 코드를 소독한다", () => {
+    const d = decideSwitch(captureTenant(EVIL), "live");
+    ok(!d.ok);
+    ok(!RENDERS_AS_LINK.test(d.message), `링크가 살아남았다: ${d.message}`);
+});
+
+test("decideSwitch 는 current 도 소독한다 — 둘 다 서버값이다", () => {
+    const d = decideSwitch(captureTenant("mine"), EVIL);
+    ok(!d.ok);
+    ok(!RENDERS_AS_LINK.test(d.message), `링크가 살아남았다: ${d.message}`);
+});
+
+test("decideReadyPrompt 가 양쪽 갈래에서 소독한다", () => {
+    // redirect 갈래(uploaded !== current)와 offer 갈래(같음)를 각각 밟는다 —
+    // 한 갈래만 고치고 넘어가는 것이 이 결함의 원래 형상이었다.
+    const redirect = decideReadyPrompt(captureTenant(EVIL), "other", 5);
+    ok(!RENDERS_AS_LINK.test(redirect.message), `redirect 갈래에 링크: ${redirect.message}`);
+    const offer = decideReadyPrompt(captureTenant(EVIL), EVIL, 5);
+    ok(!RENDERS_AS_LINK.test(offer.message), `offer 갈래에 링크: ${offer.message}`);
+});
+
+test("say.* 도 같은 규율 — 대조군", () => {
+    for (const message of [
+        say.publishConfirm(captureTenant(EVIL)).message,
+        say.switchConfirm(captureTenant(EVIL), 3).message,
+        say.switched(captureTenant(EVIL), 3),
+        say.buildFailed(captureTenant(EVIL), 3),
+    ]) {
+        ok(!RENDERS_AS_LINK.test(message), `링크가 살아남았다: ${message}`);
+    }
+});
+
+test("양성 통제군 — 정상 사이트 이름은 원문 그대로 보인다", () => {
+    // 소독이 과해 평범한 이름을 깨뜨리면 그것도 결함이다.
+    for (const name of ["credium", "우리가게 본점", "Acme, Inc. (KR)"]) {
+        ok(say.switched(captureTenant(name), 7).includes(name), `이름이 깨졌다: ${name}`);
+    }
+});

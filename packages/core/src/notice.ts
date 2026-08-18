@@ -29,3 +29,19 @@ export function plainNotice(text: unknown, limit = 300): string {
     const tidy = defanged.replace(/\s+/g, " ").trim();
     return tidy.length > limit ? `${tidy.slice(0, limit)}\u2026` : tidy;
 }
+
+/**
+ * **서버가 정하지 않은 값**이라는 표기. 소독하지 않고 알림에 넣어도 되는 것에만 붙인다.
+ *
+ * 값을 바꾸지 않는다 — 오직 **사람이 한 번 판단했다는 사실**을 코드에 남긴다. `check-notice.mjs`
+ * 는 알림에 닿는 모든 보간을 **기본 거부**하고, 소독기 호출과 이 표기만 통과시킨다.
+ *
+ * ⚠ 첫 판 검사기는 반대였다 — 위험한 **이름 목록**(`tenant`·`presetName`)을 열거해 막았다.
+ *   그러면 같은 서버값이 **다른 이름**에 담기는 순간 소독도 검사도 안 된다(재심의 실증: `code`·
+ *   `current`·`expected`·`uploaded`·`errorCode` 다섯 자리가 그렇게 샜다). `notice.ts` 가 배격한
+ *   "막을 자리를 손으로 열거한다"를 식별자 층위에서 되풀이한 것이다. 목록을 뒤집는다 —
+ *   **허용을 열거하고 나머지를 거부한다.**
+ *
+ * 붙이기 전에 물을 것: 이 값이 서버 응답에서 **한 번이라도** 유래하는가? 그렇다면 `plainNotice` 다.
+ */
+export const ours = <T>(value: T): T => value;

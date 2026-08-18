@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir } from "node:fs/promises";
+import { mkdir, rm } from "node:fs/promises";
 import { meaningfulEntries } from "./emptyDir.ts";
 import type { ZalkeraApi } from "./api.ts";
 import { DevtoolsError } from "./errors.ts";
@@ -82,7 +82,21 @@ export async function startFromPreset(options: StartFromPresetOptions): Promise<
         );
     }
 
-    const { fileCount } = await extractZip(zip, options.targetDir);
+    // ⚠ **반쪽 해제를 남기지 않는다** — 형제 `fetchSource.ts` 와 같은 규율이다. `extractZip` 은
+    //    항목을 훑으며 그때그때 쓰므로, 경로 이탈·항목 상한이 중간에 걸리면 앞서 쓴 파일이 남는다.
+    //    배송 문서(`media/help.md`)는 그 두 오류를 이름까지 대며 "아무것도 풀지 않고 멈춘 것이니
+    //    폴더는 그대로입니다"라고 **보증**하는데, 그 보증은 이 경로에도 걸린다 — 앞 판이
+    //    `fetchSource` 만 고쳐 여기서는 여전히 거짓이었다(재심의 실증).
+    //
+    //    위에서 빈 폴더임을 확인한 뒤이므로 우리가 쓴 것만 지운다.
+    let fileCount: number;
+    try {
+        ({ fileCount } = await extractZip(zip, options.targetDir));
+    } catch (cause) {
+        await rm(options.targetDir, { recursive: true, force: true }).catch(() => {});
+        await mkdir(options.targetDir, { recursive: true }).catch(() => {});
+        throw cause;
+    }
     report(`${source.version} · 파일 ${fileCount}개를 풀었습니다.`);
     return { presetCode: options.presetCode, version: source.version, fileCount };
 }

@@ -270,7 +270,11 @@ async function toError(response: Response): Promise<DevtoolsError> {
         // 서버 메시지를 그대로 알림창에 넘기면 35KB 문자열이 그대로 뜬다(실측 · 백엔드 차단의 대칭).
         // 길이만으로는 부족하다 — 알림 본문은 링크를 렌더하고 그 링크는 명령을 실행할 수 있다.
         serverMessage = plainNotice(body.message, MAX_SERVER_MESSAGE);
-        errorCode = (body.errorCode ?? "").slice(0, MAX_ERROR_CODE);
+        // ⚠ **길이만 자르면 안 된다.** 바로 위 두 줄이 "알림 본문은 링크를 렌더하고 그 링크는
+        //    명령을 실행할 수 있다"고 적어 두고 `message` 만 막았는데, 이 값도 같은 서버가 정하고
+        //    `errors.ts` 의 `humanMessage` 를 타고 **같은 비-모달 알림**으로 나간다(재심의 실증).
+        //    인증된 모든 실패 응답이 지나는 경로다.
+        errorCode = plainNotice(body.errorCode ?? "", MAX_ERROR_CODE);
     } catch {
         /* 본문이 JSON 이 아닐 수 있다 — 상태코드로만 판단한다. */
     }
