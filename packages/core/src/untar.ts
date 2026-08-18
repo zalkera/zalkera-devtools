@@ -64,18 +64,6 @@ export interface UntarOptions {
      * 가드가 막으려는 바로 그 손해를 내면 안 된다.
      */
     maxEntries?: number;
-    /**
-     * 실패 문면에 쓸 이름. 이 함수는 **두 목적**을 함께 나른다(의존성 페이로드 · 사이트 소스) —
-     * 문면을 한쪽으로 박아 두면 다른 쪽 사용자가 「의존성 꾸러미」라는 말을 듣는다.
-     */
-    label?: string;
-    /**
-     * 이 해제가 대상 폴더에 만든 **최상위 이름**을 하나씩 알린다(중복 포함).
-     *
-     * 롤백은 이 목록만 되감아야 한다 — 「해제 전에 없던 것」을 지우면 받는 동안 고객이 만든 파일이
-     * 함께 사라진다. 다운로드가 최대 15분이라 그 창은 좁지 않다.
-     */
-    onWroteRoot?: (name: string) => void;
 }
 
 /** 버퍼 해제(사이트 소스용). 반환은 **쓴 파일 수**다(디렉터리·링크는 안 센다). */
@@ -139,7 +127,7 @@ export async function extractTarGzFile(
         await rm(scratchPath, { force: true }).catch(() => {});
         throw new DevtoolsError(
             "SERVER_REJECTED",
-            `${options.label ?? "받은 의존성 꾸러미"}를 풀지 못했습니다.`,
+            "받은 의존성 꾸러미를 풀지 못했습니다.",
             "다시 시도해도 같으면 잘커라에 문의해 주세요.",
             cause,
         );
@@ -303,29 +291,15 @@ async function createSink(targetDir: string, options: UntarOptions) {
             const segments = safeSegments(root, name);
             if (options.rejectVendored === true) assertNotVendored(segments, name);
 
-            /**
-             * 우리가 만든 최상위 이름을 알린다 — 롤백이 되감을 대상이다.
-             *
-             * ⚠ **실제로 쓴 뒤에만 알린다.** 종전에는 항목을 **보자마자** 알려서, 만들지도 않은
-             *   이름이 되감기 목록에 들어갔다 — 하드링크(`1`)와 거부된 심링크(`2`)는 곧바로
-             *   `return` 하는데도 알렸다. 그러면 받는 15분 사이에 고객이 같은 이름의 파일을 만들면
-             *   **되감기가 그것을 `rm -rf` 한다.** 「해제기가 알려 준 이름 = 우리가 쓴 것」이라는
-             *   등식이 거기서 깨졌다(심의 실측: 고객 메모와 `.vscode/launch.json` 이 사라졌다).
-             */
-            const noteWrote = (): void => {
-                if (segments.length > 0) options.onWroteRoot?.(segments[0]!);
-            };
 
             if (entry.type === "5") {
-                noteWrote();
                 await descend(root, segments, verified);
                 return;
             }
 
             if (entry.type === "2") {
-                if (!materializeLinks) return; // 안 만들었으니 **안 알린다** — 되감기 대상이 아니다
+                if (!materializeLinks) return;
                 await writeSymlink(root, segments, name, linkTarget, verified);
-                noteWrote();
                 return;
             }
             // 하드링크(`1`)는 만들지 않는다. **실측**(2026-08-03 · examples 레포 node_modules 를 실제로 구워
@@ -349,7 +323,6 @@ async function createSink(targetDir: string, options: UntarOptions) {
             // 마지막 조각이 이미 심링크면 **쓰기가 그 링크를 따라간다** — 조각 검사의 마지막 칸이다.
             await assertNotSymlink(path, name);
             await writeFile(path, data);
-            noteWrote();
             if (preserveMode && (entry.mode & 0o111) !== 0) {
                 // 실행 비트가 있던 것만 되살린다. 전체 mode 를 그대로 쓰지 않는 이유는 아카이브가 정한
                 // 권한(예: 0777·setuid)을 고객 디스크에 그대로 옮기지 않기 위해서다.

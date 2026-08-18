@@ -70,40 +70,6 @@ function tooBig(what: string, limit: number): DevtoolsError {
     );
 }
 
-/**
- * **받으면서 파일로 흘린다 — 통버퍼를 만들지 않는다.**
- *
- * 반환은 **실제로 쓴 바이트의 sha256** 이다. 해시를 디스크에 쓰는 것과 **같은 바이트**로 세는 것이
- * 핵심이다 — 두 스트림으로 나누면 무결성 검사가 손상 파일을 통과시킨다(형제 `payload.ts` 의 규율).
- *
- * 실측(해제 250MB 소스): 통버퍼 경로 VmHWM **566MB** · 이 경로 **113MB**. 확장 호스트는 다른 확장과
- * 프로세스를 공유하므로, 우리가 부풀면 **남의 확장까지 함께 죽는다.**
- */
-export async function downloadBoundedToFile(url: string, destPath: string, options: DownloadOptions): Promise<string> {
-    const { createHash } = await import("node:crypto");
-    const { createWriteStream } = await import("node:fs");
-    const { Readable, Transform } = await import("node:stream");
-    const { pipeline } = await import("node:stream/promises");
-
-    const body = await openBounded(url, options);
-    const limit = options.maxBytes ?? MAX_DOWNLOAD_BYTES;
-    const hash = createHash("sha256");
-    let total = 0;
-    const guard = new Transform({
-        transform(chunk: Buffer, _enc, done) {
-            total += chunk.length;
-            // `Content-Length` 는 안 믿는다(서버가 정한다). 실제로 읽은 바이트로만 판정한다.
-            if (total > limit) {
-                done(tooBig(options.what, limit));
-                return;
-            }
-            hash.update(chunk);
-            done(null, chunk);
-        },
-    });
-    await pipeline(Readable.fromWeb(body as never), guard, createWriteStream(destPath));
-    return hash.digest("hex");
-}
 
 export async function downloadBounded(url: string, options: DownloadOptions): Promise<Buffer> {
     const body = await openBounded(url, options);

@@ -28,24 +28,6 @@ const IGNORED = new Set([
     "desktop.ini", // Windows
 ]);
 
-/**
- * **우리가 쓴 것만** 되감는다.
- *
- * 형제 [removeAdded] 는 「해제 **전**에 없던 것」을 지운다. 그 기준선이 언제 찍히느냐가 전부다 —
- * 소스 받기에서는 다운로드 **전**에 찍혀 최대 15분의 창이 생겼고, 그 사이 고객이 만든 파일이
- * 함께 사라졌다(VS Code 가 폴더를 연 창에서 만드는 `.vscode/settings.json` 도 그 창 안이다).
- * `presets.ts` 는 다운로드 **뒤**에 찍어 그 창이 없으므로 [removeAdded] 를 그대로 쓴다.
- *
- * 여기서는 되감을 대상을 **해제기가 직접 알려 준 이름**으로 좁힌다([UntarOptions.onWroteRoot]) —
- * 「없던 것」은 「우리가 쓴 것」의 **근사**였고, 근사가 틀리는 창이 15분이었다.
- */
-export async function removeWritten(dir: string, names: Iterable<string>): Promise<void> {
-    for (const name of new Set(names)) {
-        if (name === "" || name === "." || name === ".." || name.includes("/") || name.includes("\\")) continue;
-        await rm(join(dir, name), { recursive: true, force: true }).catch(() => {});
-    }
-}
-
 /** 무시 대상을 뺀 실제 항목. 비어 있으면 받아도 안전하다. */
 export async function meaningfulEntries(dir: string): Promise<string[]> {
     const entries = await readdir(dir, { withFileTypes: true });

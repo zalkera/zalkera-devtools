@@ -6,7 +6,6 @@ import {
     ensureAgentDocs,
     fetchHandshake,
     fetchSiteSource,
-    sweepScratch,
     findProjectRoot,
     getAccessToken,
     login,
@@ -72,45 +71,6 @@ let session: { server: DevServer; projectDir: string; keyId: number; tenant: Cap
 /** 프리뷰 시작 재진입 가드 — 첫 실행은 수 분짜리 설치라 사용자가 반드시 두 번 누른다(심의 경고). */
 let previewStarting = false;
 /**
- * **고객 폴더에 소스를 푸는 명령**의 재진입 가드. 「내 사이트 받기」와 「예제로 시작」이 함께 쓴다.
- *
- * 둘은 서로 다른 명령이지만 **같은 자원**을 건드린다 — 고객이 고른 빈 폴더다. 받기는 최대 15분이고
- * 취소 단추가 없어 「멈춘 것 같다」며 다른 명령을 누르는 것이 자연스러운 반응인데, 「비어 있는가」
- * 판정은 **둘 다 통과한다**(그때는 정말 비어 있다). 실측: 받기가 도는 중에 같은 폴더로 「예제로
- * 시작」을 걸면, 예제 쪽 롤백이 받기가 푼 파일을 걷어 가 **「받았습니다」가 뜨고 폴더는 비었다.**
- * 형제 `previewStarting` 을 `signOut` 이 읽는 것과 같은 규율이다.
- *
- * ⚠ **판정과 점유 사이에 `await` 를 두지 않는다.** 첫 판은 폴더 대화상자 **뒤**에 잠갔다(취소하면
- *   헛되이 막힌다는 이유였는데, 그것은 `finally` 가 이미 푼다). 그 사이에 `ensureApi()` 네트워크
- *   왕복과 대화상자가 있어 **check-then-act** 가 됐다 — 파일시스템 자물쇠에서 세 라운드 연속으로
- *   깨진 바로 그 형상을 프로세스 변수로 옮긴 것이었다(심의 실측: 한 창에서 재현).
- *
- * 못 막는 것: **창이 둘**이거나 프로세스가 둘일 때. 그것까지 막으려면 파일시스템 자물쇠가 필요한데,
- * 그 길은 실패했다 — 파일시스템은 「주인이 살아 있는가」를 답해 주지 않고, 그 답을 주는 `flock` 은
- * Node 표준 라이브러리에 없다. 0.1.40 도 같은 상태이므로 회귀가 아니다. 알려진 한계로 둔다.
- */
-let receivingSource = false;
-
-/**
- * 가드를 **진입 즉시** 잠그고 무슨 일이 있어도 푼다. 두 명령이 같은 문을 지난다.
- *
- * 문면이 「받는 중」인 이유: 사용자에게는 「내 사이트 받기」와 「예제로 시작」이 같은 일이다.
- */
-async function withSourceReceiveGuard(run: () => Promise<void>): Promise<void> {
-    if (receivingSource) {
-        void vscode.window.showInformationMessage(
-            "소스를 받는 중입니다. 끝날 때까지 기다려 주세요(최대 15분).",
-        );
-        return;
-    }
-    receivingSource = true;
-    try {
-        await run();
-    } finally {
-        receivingSource = false;
-    }
-}
-/**
  * **마지막으로 발급받은 프리뷰 키.** `session` 이 아니라 여기 사는 이유(심의 경고 · 2026-08-10):
  * 종전에는 keyId 가 `session` 에만 있어서, 「프리뷰 중지」 뒤 로그아웃하면 **서버 키를 못 지웠다.**
  * 프로세스는 죽었지만 키는 TTL(최대 12시간)까지 살아 있었고, 도움말은 "서버에서도 폐기됩니다"라고
@@ -142,14 +102,6 @@ let handshake: Handshake | null = null;
 let sidebar: ZalkeraSidebar;
 /** 동봉 자원(npm)을 찾으려면 확장 설치 경로가 필요하다. */
 let extensionPath: string;
-/**
- * **우리 마당** — 임시 파일이 사는 곳. VS Code 가 확장마다 주는 전용 경로(실디스크)다.
- *
- * 고객이 고른 폴더에는 임시 파일을 두지 않는다. 한때 그렇게 했다가 사슬로 심의 차단이 연달아 났다:
- * 크래시 잔해가 폴더를 **눈에 안 보이게** 막고(점 파일이다) → 그것을 걷으려 추측하고 → 그 추측이
- * 진행 중 받기를 죽였다. 받는 것은 내 마당, 놓는 것만 남의 마당이다.
- */
-let scratchRoot: string;
 /** 동봉 매뉴얼(media/help.md)의 위치. */
 let helpUri: vscode.Uri;
 let renewTimer: NodeJS.Timeout | null = null;
@@ -174,16 +126,6 @@ export function activate(context: vscode.ExtensionContext): void {
     status.show();
     store = new SecretTokenStore(context);
     extensionPath = context.extensionPath;
-    scratchRoot = context.globalStorageUri.fsPath;
-    // ⚠ **우리 마당의 잔해를 켤 때 걷는다.** 크래시로 죽으면 `finally` 가 안 돌아 임시물이 남는데,
-    //    이 자리는 VS Code 가 절대 안 지운다 — 그대로 두면 크래시 1회당 최대 600MB 가 사용자
-    //    프로필에 **영구히·보이지 않게** 쌓인다. 종전(고객 폴더)에는 잔해가 폴더를 막아 최소한
-    //    보이기라도 했다. 실패해도 확장 켜기를 막지 않는다 — 청소는 부수 작업이다.
-    void sweepScratch(scratchRoot)
-        .then((swept) => {
-            if (swept > 0) log(`이전에 받다 만 임시 파일 ${swept}건을 정리했습니다.`);
-        })
-        .catch(() => {});
     extensionVersion = String(context.extension.packageJSON.version ?? extensionVersion);
     extensionId = context.extension.id || extensionId;
     persistedState = context.globalState;
@@ -515,10 +457,6 @@ async function revokeKeyQuietly(keyId: number, tenant: string): Promise<void> {
 
 /** B2 — **MVP 절단선의 핵심**. 이미 있는 사이트를 로컬로 받아야 체크리스트 ③ 이 선다. */
 async function openSite(): Promise<void> {
-    await withSourceReceiveGuard(openSiteInner);
-}
-
-async function openSiteInner(): Promise<void> {
     const api = await ensureApi();
     const picked = await vscode.window.showOpenDialog({
         canSelectFolders: true,
@@ -531,7 +469,7 @@ async function openSiteInner(): Promise<void> {
 
     const result = await vscode.window.withProgress<FetchSourceResult>(
         { location: vscode.ProgressLocation.Notification, title: "사이트 소스를 받는 중" },
-        () => fetchSiteSource({ api, targetDir: target, scratchRoot, onProgress: log }),
+        () => fetchSiteSource({ api, targetDir: target, onProgress: log }),
     );
 
     const root = await findProjectRoot(target);
@@ -554,10 +492,6 @@ async function openSiteInner(): Promise<void> {
  * 목록에 **공개된 팩만** 온다(서버 판정). 고를 수 없는 것을 보여 주지 않는 편이 정직하다.
  */
 async function startFromExample(): Promise<void> {
-    await withSourceReceiveGuard(startFromExampleInner);
-}
-
-async function startFromExampleInner(): Promise<void> {
     const api = await ensureApi();
     const presets = await api.listPresets();
     if (presets.length === 0) {

@@ -38,7 +38,7 @@ export { createZip, packProject, writeZip, type PackResult, type ZipEntry } from
 export { publish, type PublishOptions, type PublishResult } from "./publish.ts";
 export { startPreview, type PreviewOptions, type PreviewSession } from "./preview.ts";
 export { runDoctor, type DoctorCheck, type DoctorOptions } from "./doctor.ts";
-export { fetchSiteSource, findProjectRoot, type FetchSourceOptions, type FetchSourceResult, sweepScratch } from "./fetchSource.ts";
+export { fetchSiteSource, findProjectRoot, type FetchSourceOptions, type FetchSourceResult } from "./fetchSource.ts";
 export { extractZip, type UnzipResult } from "./unzip.ts";
 export { isReceivable, meaningfulEntries } from "./emptyDir.ts";
 
