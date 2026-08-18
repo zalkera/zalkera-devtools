@@ -37,6 +37,12 @@ export interface FetchSourceResult {
     fileCount: number;
 }
 
+/**
+ * 소스 해제 총량 상한. **형제 zip 경로와 같은 값**이다(`unzip.ts` 의 `MAX_TOTAL_BYTES`) —
+ * 두 소스 형식이 다른 기준을 쓸 이유가 없다. 근거는 그쪽 주석에 적혀 있다.
+ */
+const MAX_SOURCE_EXTRACT_BYTES = 400 * 1024 * 1024;
+
 /** 대용량 전송 상한(15분) — publish 와 같은 근거. 짧으면 느린 회선의 정상 수신을 끊는다. */
 const TRANSFER_TIMEOUT_MS = 15 * 60 * 1000;
 
@@ -120,7 +126,14 @@ export async function fetchSiteSource(options: FetchSourceOptions): Promise<Fetc
     let fileCount: number;
     try {
         // 소스 꾸러미는 `node_modules` 를 담을 수 없다 — 페이로드 경로와 갈리는 지점이다.
-        fileCount = await extractTarGz(buffer, options.targetDir, { rejectVendored: true });
+        // ⚠ **해제 상한을 넘긴다.** 안 넘기면 `untar.ts` 의 기본값(200MB)이 서는데, 그것은
+        //    형제 zip 경로(400MB)와 다르고 **최대 크기 정상 소스를 거부할 수도** 있다
+        //    (다운로드 상한 150MB × 실측 압축비 3배 ≒ 450MB). 두 소스 형식이 다른 기준을 쓸
+        //    이유가 없다 — 한 값을 쓴다.
+        fileCount = await extractTarGz(buffer, options.targetDir, {
+            rejectVendored: true,
+            maxBytes: MAX_SOURCE_EXTRACT_BYTES,
+        });
     } catch (cause) {
         await removeAdded(options.targetDir, before);
         throw cause;

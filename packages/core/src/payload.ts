@@ -307,7 +307,11 @@ export async function evictOldCaches(
 ): Promise<number> {
     try {
         const entries = await readdir(cacheRoot, { withFileTypes: true });
-        const dirs = entries.filter((e) => e.isDirectory());
+        // ⚠ **캐시 세대가 아닌 디렉터리를 세지 않는다.** `.complete`(완결 표식이 사는 자리)는
+        //   표식을 쓸 때마다 mtime 이 갱신돼 **항상 살아남고**, 그만큼 진짜 세대 하나가 밀려난다 —
+        //   3세대를 남긴다고 적어 두고 실제로는 2세대만 남았다(실측). 점으로 시작하는 이름은
+        //   우리 살림이지 세대가 아니다.
+        const dirs = entries.filter((e) => e.isDirectory() && !e.name.startsWith("."));
         if (dirs.length <= keep) return 0;
 
         const withTime = await Promise.all(

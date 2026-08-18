@@ -164,8 +164,13 @@ test("캐시가 3세대를 넘으면 정리된다", async () => {
     await ensureDependencies({ projectDir, cacheRoot, apiBase: "https://api.zalkera.com", fetchImpl: serve(gz, sha, lockSha), npmCommand: ["/nonexistent-npm"] });
 
     // 세대당 586MB 라 무한 증식은 그 자체로 결함이다. 방금 만든 세대는 반드시 살아 있어야 한다.
+    //
+    // ⚠ **세대만 센다.** 종전에는 `readdir` 전체를 세어 `.complete`(완결 표식이 사는 우리 살림)를
+    //   세대로 쳤다 — 그것이 항상 살아남으므로 실제로 남는 세대는 **2개**였다(실측). 시험이 그
+    //   오프바이원을 정답으로 굳히고 있었다. 점으로 시작하는 이름은 세대가 아니다.
     const left = await readdir(cacheRoot);
-    strictEqual(left.length, 3, `3세대만 남아야 한다: ${left.join(",")}`);
+    const generations = left.filter((name) => !name.startsWith("."));
+    strictEqual(generations.length, 3, `3세대만 남아야 한다: ${left.join(",")}`);
     ok(existsSync(join(projectDir, "node_modules", "next", "package.json")), "방금 쓴 캐시가 지워지면 안 된다");
 });
 
