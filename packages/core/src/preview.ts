@@ -3,6 +3,7 @@ import { ensureDependencies } from "./deps.ts";
 import { startDevServer, type DevServer } from "./dev.ts";
 import { writePreviewEnv } from "./env.ts";
 import { ensureEnvIgnored, inspectProject } from "./project.ts";
+import { DevtoolsError } from "./errors.ts";
 
 /**
  * 프리뷰 한 판(C1) — **이 트랜치의 존재 이유**를 한 함수로 묶는다.
@@ -73,6 +74,15 @@ export async function startPreview(options: PreviewOptions): Promise<PreviewSess
         ...(options.npmEnv ? { npmEnv: options.npmEnv } : {}),
     });
     if (deps.action === "installed") report("의존성 준비가 끝났습니다(다음부터는 즉시 시작합니다).");
+
+    // ⚠ **취소를 여기서도 본다.** `signal` 이 `ensureDependencies` 에만 걸려 있어서, 설치가 끝난
+    //    뒤에 취소를 눌러도 dev 서버가 그대로 떴다(실증: abort 뒤에도 세션이 성립). 확장에서는
+    //    「취소」를 누르고 알림이 사라진 다음 **잠시 뒤 브라우저가 열린다** — 취소가 먹은 줄 알았는데
+    //    안 먹은 것이라, 사용자는 「프리뷰 중지」를 따로 찾아야 한다. 취소 단추가 있는 구간과 없는
+    //    구간이 문면 없이 갈리던 자리다.
+    if (options.signal?.aborted) {
+        throw new DevtoolsError("CANCELLED", "프리뷰 시작을 취소했습니다.");
+    }
 
     // 포트를 먼저 정한다 — `ZALKERA_SITE_URL` 이 실제 주소와 달라지면 링크·정규 URL 이 어긋난다.
     const server = await startDevServerWithEnv(options, key.key, key.envName);

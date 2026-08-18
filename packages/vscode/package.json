@@ -1,193 +1,193 @@
 {
-    "name": "zalkera-devtools",
-    "version": "0.1.40",
-    "private": true,
-    "license": "MIT",
-    "type": "module",
-    "displayName": "잘커라(zalkera)",
-    "description": "잘커라 사이트를 내 컴퓨터에서 열고, 프리뷰로 확인하고, 올립니다.",
-    "publisher": "zalkera",
-    "engines": {
-        "vscode": "^1.90.0"
-    },
-    "preview": true,
-    "keywords": [
-        "zalkera",
-        "잘커라",
-        "storefront",
-        "headless-cms",
-        "korean",
-        "ecommerce"
+  "name": "zalkera-devtools",
+  "version": "0.1.41",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "displayName": "잘커라(zalkera)",
+  "description": "잘커라 사이트를 내 컴퓨터에서 열고, 프리뷰로 확인하고, 올립니다.",
+  "publisher": "zalkera",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "preview": true,
+  "keywords": [
+    "zalkera",
+    "잘커라",
+    "storefront",
+    "headless-cms",
+    "korean",
+    "ecommerce"
+  ],
+  "categories": [
+    "Other"
+  ],
+  "main": "./dist/extension.cjs",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "zalkera.signIn",
+        "title": "로그인",
+        "category": "잘커라"
+      },
+      {
+        "command": "zalkera.signOut",
+        "title": "로그아웃",
+        "category": "잘커라"
+      },
+      {
+        "command": "zalkera.site.open",
+        "title": "사이트 소스 받기",
+        "category": "잘커라"
+      },
+      {
+        "command": "zalkera.site.link",
+        "title": "폴더 연결",
+        "category": "잘커라"
+      },
+      {
+        "command": "zalkera.preview.start",
+        "title": "프리뷰 시작",
+        "category": "잘커라"
+      },
+      {
+        "command": "zalkera.preview.stop",
+        "title": "프리뷰 중지",
+        "category": "잘커라"
+      },
+      {
+        "command": "zalkera.preview.restart",
+        "title": "프리뷰 다시 시작",
+        "category": "잘커라"
+      },
+      {
+        "command": "zalkera.publish",
+        "title": "새 버전 올리기",
+        "category": "잘커라"
+      },
+      {
+        "command": "zalkera.doctor",
+        "title": "진단",
+        "category": "잘커라"
+      },
+      {
+        "command": "zalkera.site.choose",
+        "title": "사이트 선택",
+        "category": "잘커라"
+      },
+      {
+        "command": "zalkera.site.create",
+        "title": "예제로 시작",
+        "category": "잘커라"
+      },
+      {
+        "command": "zalkera.version.switch",
+        "title": "버전 전환",
+        "category": "잘커라"
+      },
+      {
+        "command": "zalkera.precheck",
+        "title": "배포 전 검사",
+        "category": "잘커라"
+      },
+      {
+        "command": "zalkera.agent.connect",
+        "title": "에이전트 연결(MCP)",
+        "category": "잘커라"
+      },
+      {
+        "command": "zalkera.history",
+        "title": "버전 이력",
+        "category": "잘커라"
+      },
+      {
+        "command": "zalkera.reset",
+        "title": "초기화",
+        "category": "잘커라"
+      },
+      {
+        "command": "zalkera.help",
+        "title": "도움말",
+        "category": "잘커라"
+      }
     ],
-    "categories": [
-        "Other"
-    ],
-    "main": "./dist/extension.cjs",
-    "activationEvents": [
-        "onStartupFinished"
-    ],
-    "contributes": {
-        "commands": [
-            {
-                "command": "zalkera.signIn",
-                "title": "로그인",
-                "category": "잘커라"
-            },
-            {
-                "command": "zalkera.signOut",
-                "title": "로그아웃",
-                "category": "잘커라"
-            },
-            {
-                "command": "zalkera.site.open",
-                "title": "사이트 소스 받기",
-                "category": "잘커라"
-            },
-            {
-                "command": "zalkera.site.link",
-                "title": "폴더 연결",
-                "category": "잘커라"
-            },
-            {
-                "command": "zalkera.preview.start",
-                "title": "프리뷰 시작",
-                "category": "잘커라"
-            },
-            {
-                "command": "zalkera.preview.stop",
-                "title": "프리뷰 중지",
-                "category": "잘커라"
-            },
-            {
-                "command": "zalkera.preview.restart",
-                "title": "프리뷰 다시 시작",
-                "category": "잘커라"
-            },
-            {
-                "command": "zalkera.publish",
-                "title": "새 버전 올리기",
-                "category": "잘커라"
-            },
-            {
-                "command": "zalkera.doctor",
-                "title": "진단",
-                "category": "잘커라"
-            },
-            {
-                "command": "zalkera.site.choose",
-                "title": "사이트 선택",
-                "category": "잘커라"
-            },
-            {
-                "command": "zalkera.site.create",
-                "title": "예제로 시작",
-                "category": "잘커라"
-            },
-            {
-                "command": "zalkera.version.switch",
-                "title": "버전 전환",
-                "category": "잘커라"
-            },
-            {
-                "command": "zalkera.precheck",
-                "title": "배포 전 검사",
-                "category": "잘커라"
-            },
-            {
-                "command": "zalkera.agent.connect",
-                "title": "에이전트 연결(MCP)",
-                "category": "잘커라"
-            },
-            {
-                "command": "zalkera.history",
-                "title": "버전 이력",
-                "category": "잘커라"
-            },
-            {
-                "command": "zalkera.reset",
-                "title": "초기화",
-                "category": "잘커라"
-            },
-            {
-                "command": "zalkera.help",
-                "title": "도움말",
-                "category": "잘커라"
-            }
-        ],
-        "configuration": {
-            "title": "잘커라",
-            "properties": {
-                "zalkera.apiBase": {
-                    "type": "string",
-                    "default": "https://api.zalkera.com",
-                    "description": "잘커라 서버 주소. **머신 범위**입니다 — 남의 소스 폴더(.vscode/settings.json)가 이 값을 바꿔 토큰을 가로채지 못하게 합니다.",
-                    "scope": "machine",
-                    "pattern": "^(https://[^\\s/]+|http://(127\\.0\\.0\\.1|localhost|\\[::1\\])(:\\d+)?)(/.*)?$",
-                    "patternErrorMessage": "https 주소이거나 로컬(http://127.0.0.1)이어야 합니다."
-                },
-                "zalkera.tenant": {
-                    "type": "string",
-                    "default": "",
-                    "description": "작업할 사이트(테넌트) 코드. 비우면 로그인 뒤 고릅니다."
-                },
-                "zalkera.npm": {
-                    "type": "string",
-                    "enum": [
-                        "bundled",
-                        "system",
-                        "auto"
-                    ],
-                    "default": "bundled",
-                    "enumDescriptions": [
-                        "확장이 동봉한 npm 을 씁니다(기본). VS Code 는 Node 는 싣고 npm 은 안 싣습니다.",
-                        "PATH 의 npm 을 씁니다. 락파일 v3 를 읽어야 하므로 npm 9 이상이어야 하고, 아니면 실행하지 않고 알립니다.",
-                        "조건을 만족하는 시스템 npm 이 있으면 그것, 아니면 동봉본. **있으면**이 아니라 **맞으면**입니다."
-                    ],
-                    "description": "의존성 설치에 쓸 npm. **머신 범위**입니다 — 남의 소스 폴더(.vscode/settings.json)가 우리가 실행할 바이너리를 바꾸지 못하게 합니다.",
-                    "scope": "machine"
-                }
-            }
+    "configuration": {
+      "title": "잘커라",
+      "properties": {
+        "zalkera.apiBase": {
+          "type": "string",
+          "default": "https://api.zalkera.com",
+          "description": "잘커라 서버 주소. **머신 범위**입니다 — 남의 소스 폴더(.vscode/settings.json)가 이 값을 바꿔 토큰을 가로채지 못하게 합니다.",
+          "scope": "machine",
+          "pattern": "^(https://[^\\s/]+|http://(127\\.0\\.0\\.1|localhost|\\[::1\\])(:\\d+)?)(/.*)?$",
+          "patternErrorMessage": "https 주소이거나 로컬(http://127.0.0.1)이어야 합니다."
         },
-        "viewsContainers": {
-            "activitybar": [
-                {
-                    "id": "zalkera",
-                    "title": "잘커라",
-                    "icon": "media/zalkera.svg"
-                }
-            ]
+        "zalkera.tenant": {
+          "type": "string",
+          "default": "",
+          "description": "작업할 사이트(테넌트) 코드. 비우면 로그인 뒤 고릅니다."
         },
-        "views": {
-            "zalkera": [
-                {
-                    "id": "zalkera.sidebar",
-                    "name": "사이트"
-                }
-            ]
+        "zalkera.npm": {
+          "type": "string",
+          "enum": [
+            "bundled",
+            "system",
+            "auto"
+          ],
+          "default": "bundled",
+          "enumDescriptions": [
+            "확장이 동봉한 npm 을 씁니다(기본). VS Code 는 Node 는 싣고 npm 은 안 싣습니다.",
+            "PATH 의 npm 을 씁니다. 락파일 v3 를 읽어야 하므로 npm 9 이상이어야 하고, 아니면 실행하지 않고 알립니다.",
+            "조건을 만족하는 시스템 npm 이 있으면 그것, 아니면 동봉본. **있으면**이 아니라 **맞으면**입니다."
+          ],
+          "description": "의존성 설치에 쓸 npm. **머신 범위**입니다 — 남의 소스 폴더(.vscode/settings.json)가 우리가 실행할 바이너리를 바꾸지 못하게 합니다.",
+          "scope": "machine"
         }
+      }
     },
-    "scripts": {
-        "build": "tsc -p tsconfig.json",
-        "bundle": "esbuild src/extension.ts --bundle --platform=node --target=node20 --format=cjs --external:vscode --alias:@zalkera/devtools-core=../core/dist/index.js --outfile=dist/extension.cjs",
-        "typecheck": "tsc -p tsconfig.json --noEmit"
-    },
-    "dependencies": {
-        "npm": "^12.0.2"
-    },
-    "devDependencies": {
-        "@types/vscode": "^1.90.0",
-        "esbuild": "^0.25.0",
-        "@vscode/vsce": "^3.2.0"
-    },
-    "capabilities": {
-        "untrustedWorkspaces": {
-            "supported": false,
-            "description": "이 확장은 폴더의 소스를 실행(개발 서버)하고 자격증명을 다룹니다. 신뢰한 폴더에서만 동작합니다."
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "zalkera",
+          "title": "잘커라",
+          "icon": "media/zalkera.svg"
         }
+      ]
     },
-    "repository": {
-        "type": "git",
-        "url": "https://github.com/zalkera/zalkera-devtools.git"
-    },
-    "icon": "media/icon.png"
+    "views": {
+      "zalkera": [
+        {
+          "id": "zalkera.sidebar",
+          "name": "사이트"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "bundle": "esbuild src/extension.ts --bundle --platform=node --target=node20 --format=cjs --external:vscode --alias:@zalkera/devtools-core=../core/dist/index.js --outfile=dist/extension.cjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "npm": "^12.0.2"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.90.0",
+    "esbuild": "^0.25.0",
+    "@vscode/vsce": "^3.2.0"
+  },
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false,
+      "description": "이 확장은 폴더의 소스를 실행(개발 서버)하고 자격증명을 다룹니다. 신뢰한 폴더에서만 동작합니다."
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/zalkera/zalkera-devtools.git"
+  },
+  "icon": "media/icon.png"
 }

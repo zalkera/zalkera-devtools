@@ -63,7 +63,11 @@ import { ZalkeraSidebar } from "./sidebar.ts";
 
 let output: vscode.OutputChannel;
 let status: vscode.StatusBarItem;
-let session: { server: DevServer; projectDir: string; keyId: number } | null = null;
+/**
+ * 도는 프리뷰. **`tenant` 를 함께 든다** — 자동 갱신 재기동이 「그 시점의」 선택을 다시 읽으면,
+ * 사이드바에서 사이트를 바꿔 둔 사이에 프리뷰가 **말없이 다른 사이트로** 다시 선다(심의 지적).
+ */
+let session: { server: DevServer; projectDir: string; keyId: number; tenant: CapturedTenant } | null = null;
 /** 프리뷰 시작 재진입 가드 — 첫 실행은 수 분짜리 설치라 사용자가 반드시 두 번 누른다(심의 경고). */
 let previewStarting = false;
 /**
@@ -143,7 +147,9 @@ export function activate(context: vscode.ExtensionContext): void {
         // F1 — 되돌리기 어려운 자리를 **막지 않고 알린다**(고객 소스는 고객 것이다).
         vscode.workspace.onDidOpenTextDocument((doc) => warnProtectedPath(doc)),
         vscode.window.registerTreeDataProvider("zalkera.sidebar", sidebar),
-        register("zalkera.signIn", signIn),
+        register("zalkera.signIn", async () => {
+            await signIn();
+        }),
         register("zalkera.site.choose", chooseSite),
         register("zalkera.reset", resetAll),
         register("zalkera.signOut", async () => {
@@ -279,7 +285,7 @@ function register(command: string, handler: () => Promise<void>): vscode.Disposa
 
 // ── 인증 ────────────────────────────────────────────────────────────────
 
-async function signIn(): Promise<void> {
+async function signIn(): Promise<boolean> {
     const config = await ensureHandshake();
     // **취소할 수 있어야 한다.** 이 대기는 사람의 브라우저 행동에 달려 있어, 그만두면 아무것도 오지
     // 않는다. 취소 경로가 없으면 알림이 기본 5분(코어 타임아웃)을 그대로 매달린다 — 실사용 신고.
@@ -320,11 +326,12 @@ async function signIn(): Promise<void> {
         // 사용자를 다시 누르게 만든다. 오류 창(showErrorMessage)이 아닌 것은 실패가 아니어서다.
         log("로그인을 취소했습니다.");
         void vscode.window.showInformationMessage("로그인을 취소했습니다.");
-        return;
+        return false;
     }
     log("로그인했습니다.");
     await refreshSidebar();
     void vscode.window.showInformationMessage("잘커라에 로그인했습니다.");
+    return true;
 }
 
 /** 로그아웃했으면 `true`, 준비 중이라 거절했으면 `false`. **호출부는 이 값을 봐야 한다.** */
@@ -652,7 +659,7 @@ async function linkFolder(): Promise<void> {
 
 // ── 프리뷰 ──────────────────────────────────────────────────────────────
 
-async function startPreviewCommand(): Promise<void> {
+async function startPreviewCommand(pinned?: CapturedTenant): Promise<void> {
     if (session) {
         await vscode.env.openExternal(vscode.Uri.parse(session.server.url));
         return;
@@ -669,7 +676,7 @@ async function startPreviewCommand(): Promise<void> {
     // 없는데 준비 중이라고 말하는 막다른 길이었다.
     previewStarting = true;
     try {
-        await startPreviewInner();
+        await startPreviewInner(pinned);
     } catch (error) {
         // 시작이 실패했으면 **발급받은 키를 여기서 되돌린다.** 로그아웃까지 미루면 그때까지 서버에
         // 살아 있고, 사용자는 실패했다고 들었으므로 로그아웃할 이유도 못 느낀다.
@@ -686,12 +693,12 @@ async function startPreviewCommand(): Promise<void> {
     }
 }
 
-async function startPreviewInner(): Promise<void> {
+async function startPreviewInner(pinned?: CapturedTenant): Promise<void> {
     const dir = requireWorkspace();
     // ⚠ **캡처한다**(클로징 심의 W1). 종전에는 API 만 캡처 테넌트에 묶이고 dev 서버에 넘기는 값은
     // `tenantCode()` 라이브였다. 그 사이에 await 가 여럿(핸드셰이크·progress 준비) 있어서, 그 틈에
     // 사이트를 바꾸면 **키는 A 로 발급되고 서버 env 는 B** 가 된다.
-    const { api, tenant } = await ensureApiFor();
+    const { api, tenant } = await ensureApiFor(pinned);
     const config = await ensureHandshake();
     const runtime = embeddedNodeRuntime(extensionPath);
     // ⚠ **조용히 떨어지지 않는다.** 어느 npm 이 돌았는지 모르는 채 결과만 남으면, 실사용 신고가
@@ -742,7 +749,7 @@ async function startPreviewInner(): Promise<void> {
         },
     ));
 
-    session = { server: started.server, projectDir: dir, keyId: started.keyId };
+    session = { server: started.server, projectDir: dir, keyId: started.keyId, tenant };
     setIssuedKey({ keyId: started.keyId, tenant });
     sidebar.update({ previewUrl: started.server.url, keyExpiresAt: started.expiresAt });
     started.server.onExit((code) => {
@@ -802,9 +809,20 @@ function scheduleRenewal(expiresAt: string, ttlSeconds: number): void {
         () => {
             void (async () => {
                 if (!session) return;
-                log("프리뷰 자격증명이 곧 만료되어 다시 세웁니다…");
-                void vscode.window.showInformationMessage("프리뷰 자격증명을 갱신하려고 프리뷰를 다시 시작합니다.");
-                await vscode.commands.executeCommand("zalkera.preview.restart");
+                // ⚠ **그때 그 사이트로 다시 세운다.** `zalkera.preview.restart` 는 사람이 누르는 자리라
+                //    **지금 고른** 사이트를 쓰는 것이 맞지만, 이 갱신은 사람이 아무것도 안 했는데 도는
+                //    타이머다. 여기서 라이브 선택을 다시 읽으면, 사이드바에서 사이트를 바꿔 둔 사이에
+                //    프리뷰가 **말없이 다른 사이트의 키·env 로** 다시 선다(심의 지적).
+                const pinned = session.tenant;
+                const drifted = tenantCode() !== (pinned as string);
+                log(`프리뷰 자격증명이 곧 만료되어 다시 세웁니다… (사이트 ${pinned})`);
+                void vscode.window.showInformationMessage(
+                    drifted
+                        ? `프리뷰 자격증명을 갱신합니다 — 프리뷰는 시작할 때의 사이트(${plainNotice(pinned, 64)})로 다시 섭니다.`
+                        : "프리뷰 자격증명을 갱신하려고 프리뷰를 다시 시작합니다.",
+                );
+                await stopPreview();
+                await startPreviewCommand(pinned);
             })();
         },
         delay,
@@ -1165,7 +1183,14 @@ async function ensureHandshake(): Promise<Handshake> {
  */
 async function chooseTenant(force = false): Promise<string> {
     const config = await ensureHandshake();
-    if (!(await store.read())) await signIn();
+    // ⚠ **취소를 삼키고 계속 가지 않는다.** 종전에는 `signIn()` 이 취소를 조용히 흡수하고 정상
+    //    반환해서, 곁다리로 뜬 로그인을 취소하면 「취소했습니다」 토스트 **직후에** 아래 흐름이
+    //    그대로 굴러 `getAccessToken` 이 터지고 **빨간 오류창**("로그인이 필요합니다")이 떴다.
+    //    이 레포가 세워 둔 「취소는 오류가 아니다」가 정확히 여기서 깨졌다.
+    //    `register()` 가 CANCELLED 를 조용히 로그로 처리하므로, 여기서는 끊기만 하면 된다.
+    if (!(await store.read()) && !(await signIn())) {
+        throw new DevtoolsError("CANCELLED", "로그인을 취소했습니다.");
+    }
 
     const current = tenantCode();
     if (current && !force) return current;
@@ -1270,10 +1295,12 @@ async function ensureApi(): Promise<ZalkeraApi> {
  *
  * 사이트 이름을 적어 안심시키려던 트랜치가, 틀린 이름으로 **오인을 보증**하는 자리가 된다.
  */
-async function ensureApiFor(): Promise<{ api: ZalkeraApi; tenant: CapturedTenant }> {
+async function ensureApiFor(pinned?: CapturedTenant): Promise<{ api: ZalkeraApi; tenant: CapturedTenant }> {
     const config = await ensureHandshake();
     // **여기가 유일한 캡처 지점이다.** 브랜드가 붙는 자리가 늘어나면 그것이 방어가 느슨해지는 신호다.
-    const tenant = captureTenant(await chooseTenant());
+    // `pinned` 는 **이미 캡처된 값**을 되쓰는 것이라 캡처 지점을 늘리지 않는다 — 자동 갱신이
+    // 「그때 그 사이트」로 다시 서게 하려는 것이다.
+    const tenant = pinned ?? captureTenant(await chooseTenant());
 
     return {
         tenant,

@@ -224,6 +224,9 @@ export async function packProject(options: PackOptions): Promise<PackResult> {
      */
     const dropped: string[] = [];
 
+    // ⚠ **`walk` 보다 위에 둔다.** 아래에 두면 TDZ 함정이 된다 — 지금은 호출이 선언 뒤라
+    //    돌지만, 누가 `walk` 를 위로 올려 부르는 순간 모듈이 조용히 죽는다.
+    let totalBytes = 0;
     const walk = async (dir: string): Promise<void> => {
         for (const item of await readdir(dir, { withFileTypes: true })) {
             if (excluded.has(item.name.toLowerCase())) continue;
@@ -250,6 +253,20 @@ export async function packProject(options: PackOptions): Promise<PackResult> {
                         "동영상·원본 이미지는 소스에 넣지 말고 미디어로 올려 주세요. 업로드 상한은 전체 100MB 입니다.",
                     );
                 }
+                // ⚠ **누적을 여기서 본다 — 다 담고 나서가 아니라.** 파일당 상한만 있고 총량이
+                //    없어서, 150MB 짜리 폴더는 **전부 메모리에 올린 뒤에야** 「너무 큽니다」로
+                //    거절됐다(실측 VmHWM 445MB ≈ 원본의 3배, 3.2초). 사진·영상이 섞인 1GB 폴더에
+                //    「새 버전 올리기」를 한 번 누르면 확장 호스트가 그만큼 부푼다 — 그리고 이 자리에는
+                //    취소 단추가 없다. 상한은 업로드 상한(`publish.ts` 100MB)과 **같은 값**이다:
+                //    어차피 거절될 것을 끝까지 담을 이유가 없다.
+                totalBytes += info.size;
+                if (totalBytes > MAX_TOTAL_BYTES) {
+                    throw new DevtoolsError(
+                        "PACK_FAILED",
+                        `묶을 파일이 너무 큽니다(${Math.round(totalBytes / 1024 / 1024)}MB 이상 · 상한 ${Math.round(MAX_TOTAL_BYTES / 1024 / 1024)}MB).`,
+                        "빌드 산출물·큰 이미지·동영상이 폴더에 들어 있지 않은지 확인해 주세요. 다 담기 전에 멈췄습니다.",
+                    );
+                }
                 entries.push({
                     path: relative(options.projectDir, full).split(sep).join("/"),
                     data: await readFile(full),
@@ -261,7 +278,14 @@ export async function packProject(options: PackOptions): Promise<PackResult> {
     await walk(options.projectDir);
     if (dropped.length > 0) {
         // 개수만 말하면 "무엇이?" 가 남는다. 이름을 댄다 — 다만 많으면 앞의 몇만 대고 나머지는 센다.
-        const shown = dropped.slice(0, 10);
+        //
+        // ⚠ **폴더를 앞으로 당긴다.** 배송 문서가 「폴더도 마찬가지입니다 … 그것도 이름을 알려
+        //    드립니다」라고 약속하는데, 자른 순서가 그냥 발견 순이라 비밀 파일이 10개를 넘으면
+        //    폴더 이름이 「외 N개」에 묻혔다(실증). 폴더는 **통째로** 빠지는 것이라 파일 하나보다
+        //    놀라움이 크다 — 먼저 말한다.
+        const folders = dropped.filter((name) => name.endsWith("/"));
+        const files = dropped.filter((name) => !name.endsWith("/"));
+        const shown = [...folders, ...files].slice(0, 10);
         report(
             `비밀로 판단해 뺀 파일 ${dropped.length}개: ${shown.join(", ")}` +
                 (dropped.length > shown.length ? ` 외 ${dropped.length - shown.length}개` : ""),
@@ -281,6 +305,12 @@ export async function writeZip(path: string, buffer: Buffer): Promise<void> {
 
 /** 파일 하나가 이보다 크면 어차피 전체 상한(100MB)을 다 먹는다 — 여기서 이름을 대고 끊는다. */
 const MAX_FILE_BYTES = 100 * 1024 * 1024;
+
+/**
+ * 묶는 **총량** 상한. 업로드 상한(`publish.ts`)과 같은 값이다 — 어차피 거절될 것을 끝까지 담아
+ * 메모리에 쌓을 이유가 없다. 걷는 동안 누적을 보므로 **다 담기 전에** 멈춘다.
+ */
+const MAX_TOTAL_BYTES = 100 * 1024 * 1024;
 const MAX_ENTRIES = 65_535;
 
 let crcTable: Uint32Array | null = null;

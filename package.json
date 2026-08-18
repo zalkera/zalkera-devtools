@@ -34,6 +34,7 @@
         "check:preview": "node scripts/check-preview.mjs",
         "check:notice": "node scripts/check-notice.mjs",
         "check:tracked": "node scripts/check-tracked.mjs",
-        "check:commands": "node scripts/check-command-labels.mjs"
+        "check:commands": "node scripts/check-command-labels.mjs",
+        "check:cap": "node scripts/check-extract-cap.mjs"
     }
 }

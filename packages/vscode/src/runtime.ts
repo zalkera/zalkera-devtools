@@ -131,7 +131,12 @@ export function resolveNpm(
     // ⚠ **동봉본으로 끝나는 경우에는 PATH 를 아예 안 만진다.** 종전에는 인자를 먼저 평가해,
     //   설정이 `bundled` 여도 PATH 에서 찾은 JS 를 우리 Node 로 **실행**했다. 고르지도 않을 것을
     //   실행하는 것이고, 더 나쁜 것은 "PATH 가 의심스러우면 bundled 로 두세요"가 거짓이 된다는 점이다.
-    const system = preference === "bundled" && bundled ? null : systemNpm(excludeUnder);
+    // ⚠ **`&& bundled` 를 빼는 것이 핵심이다.** 동봉본이 **없는** 설치에서는 이 조건이 거짓이 되어
+    //   PATH 를 뒤지고 찾은 `npm-cli.js` 를 우리 Node 로 `--version` 실행했다(실증: 표식 파일 생성).
+    //   그런데 `chooseNpm` 은 bundled 선호 + 동봉 부재면 `probe.system` 을 **보지도 않고** unavailable
+    //   을 낸다 — 즉 순수 낭비이면서, 배송 문서의 「bundled 로 두시면 이 컴퓨터의 npm 은 찾지도
+    //   실행하지도 않습니다」를 거짓으로 만든다.
+    const system = preference === "bundled" ? null : systemNpm(excludeUnder);
     return chooseNpm(preference, {bundled, system});
 }
 

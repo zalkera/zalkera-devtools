@@ -416,7 +416,7 @@ function parseOctal(buffer: Buffer): number {
  * 천장은 [MAX_EXTRACT_BYTES] 이고 그 값은 전선 상한에서 **유도된다**(`limits.ts`). 종전에는
  * 천장(200MB)이 소스 상한(400MB)보다 **낮아** 넓히려는 호출이 조용히 되죄어졌다.
  */
-function resolveCap(maxBytes?: number): number {
+export function resolveCap(maxBytes?: number): number {
     return Math.min(maxBytes ?? MAX_EXTRACT_BYTES, MAX_EXTRACT_BYTES);
 }
 
