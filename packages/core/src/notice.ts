@@ -20,13 +20,26 @@
 /** 링크로 렌더될 수 있는 형태. 스킴 목록이 아니라 **콜론이 있는 것 전부**를 본다 — 목록은 늘어난다. */
 const LINK_SHAPE = /\]\s*\(\s*([A-Za-z][A-Za-z0-9+.-]*:[^)]*)\)/g;
 
+/**
+ * 각괄호 오토링크(`<command:…>`) — 마크다운의 **두 번째** 링크 문법이다.
+ *
+ * 오늘 이 확장의 알림 세 API 는 본문을 평문으로 렌더하고 트리 툴팁도 전부 리터럴 문자열이라,
+ * 이 형태가 링크가 되는 싱크는 **지금 없다**. 그래도 닫는 이유는 이 소독기가 표방하는 것이
+ * 「링크 문법을 무력화한다」이기 때문이다 — 나중에 `isTrusted` MarkdownString 싱크가 하나
+ * 생기는 순간, 「소독기를 지났다」는 사실이 거짓 안심이 된다.
+ *
+ * ⚠ **스킴이 있는 것만 본다.** `<010-1234>`·`a < b` 같은 평범한 글자를 건드리면 우리 문장이 망가진다.
+ */
+const AUTOLINK_SHAPE = /<\s*([A-Za-z][A-Za-z0-9+.-]*:[^>\s]*)\s*>/g;
+
 /** 알림·대화상자에 들어가는 모든 글자가 지난다. */
 export function plainNotice(text: unknown, limit = 300): string {
     if (typeof text !== "string") return "";
     const stripped = text.replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028\u2029]+/g, " ");
     // `](스킴:...)` 만 전각으로 바꾼다. 링크가 아니게 되고 글자는 남는다.
     const defanged = stripped.replace(LINK_SHAPE, (_m, inner: string) => `\uFF3D\uFF08${inner}\uFF09`);
-    const tidy = defanged.replace(/\s+/g, " ").trim();
+    const plain = defanged.replace(AUTOLINK_SHAPE, (_m, inner: string) => `\uFF1C${inner}\uFF1E`);
+    const tidy = plain.replace(/\s+/g, " ").trim();
     return tidy.length > limit ? `${tidy.slice(0, limit)}\u2026` : tidy;
 }
 

@@ -4,6 +4,35 @@ import { basename, join, normalize, relative, resolve, sep } from "node:path";
 import { DevtoolsError } from "./errors.ts";
 
 /**
+ * **부재와 「못 읽음」을 가른다.**
+ *
+ * `lstat(...).catch(() => null)` 은 두 사실을 하나로 접는다 — *없다* 와 *못 봤다*. 앞의 것은
+ * 정상이고(아직 안 만든 자리), 뒤의 것은 **판정 불능**이다. 접으면 EACCES·EIO 가 「심링크 아님」이
+ * 되어 그대로 진행한다. 이 레포가 자리마다 세워 둔 「못 잰 것을 통과로 세지 않는다」가 여기서만
+ * 반대로 서 있었다.
+ *
+ * `ENOENT`·`ENOTDIR` 만 삼킨다(그건 진짜 부재다). 나머지는 던진다.
+ *
+ * ⚠ **경계 판정에만 쓴다.** 형제 [writeOwnedFile] 의 `lstat` 는 일부러 그대로 둔다 — 그 자리의
+ *   경계는 `rename` 이고 `lstat` 는 **예의**라고 그쪽 KDoc 이 적는다. 예의를 경계로 승격하면
+ *   `rename` 이 처리했을 상황에서 정상 쓰기가 막힌다.
+ */
+async function lstatOrAbsent(path: string, name: string) {
+  try {
+    return await lstat(path);
+  } catch (cause) {
+    const code = (cause as NodeJS.ErrnoException).code;
+    if (code === "ENOENT" || code === "ENOTDIR") return null;
+    throw new DevtoolsError(
+      "SERVER_REJECTED",
+      `${name} 을 확인하지 못해 쓰지 않았습니다(${code ?? "UNKNOWN"}).`,
+      "폴더 권한을 확인하시거나, 다른 빈 폴더로 다시 시도해 주세요.",
+      cause,
+    );
+  }
+}
+
+/**
  * **받은 것을 디스크에 내려놓을 때의 판정.** 해제기(zip·tar)와 우리가 소유하는 파일 쓰기가 **같은
  * 한 벌**을 씁니다.
  *
@@ -57,7 +86,7 @@ export async function descend(root: string, segments: string[], verified: Set<st
             current = next;
             continue;
         }
-        const info = await lstat(next).catch(() => null);
+        const info = await lstatOrAbsent(next, part);
         if (info?.isSymbolicLink()) {
             throw new DevtoolsError(
                 "SERVER_REJECTED",
@@ -80,7 +109,7 @@ export async function descend(root: string, segments: string[], verified: Set<st
 
 /** 마지막 조각 자신이 심링크면 거부한다 — 부모가 깨끗해도 파일 자리가 링크일 수 있다. */
 export async function assertNotSymlink(path: string, name: string): Promise<void> {
-    const info = await lstat(path).catch(() => null);
+    const info = await lstatOrAbsent(path, name);
     if (info?.isSymbolicLink()) {
         throw new DevtoolsError("SERVER_REJECTED", `받은 꾸러미가 기존 링크를 덮어쓰려고 합니다: ${name}`);
     }

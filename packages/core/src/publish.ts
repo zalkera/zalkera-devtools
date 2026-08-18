@@ -1,5 +1,6 @@
 import type { ZalkeraApi } from "./api.ts";
 import { DevtoolsError } from "./errors.ts";
+import { apiBaseUrl } from "./serverUrl.ts";
 import { packProject } from "./zip.ts";
 
 /**
@@ -54,7 +55,20 @@ export async function publish(options: PublishOptions): Promise<PublishResult> {
     report(`${packed.fileCount}개 파일을 올리는 중…`);
     const presigned = await options.api.presignArchive("site.zip", packed.buffer.byteLength);
 
-    // **상한을 둔다.** Node 의 fetch 는 기본 타임아웃이 없어, 연결만 붙들린 채 응답이 없으면 영원히
+    // ⚠ **주소를 검사한다 — 받는 쪽과 같은 정책으로.** 내려받는 세 경로(소스·프리셋·페이로드)는
+  //   `apiBaseUrl`(https 또는 루프백)을 강제하는데 **올리는 자리만 맨몸이었다.** 서버 응답을
+  //   신뢰 밖으로 두기로 해 놓고, 정작 **고객 소스가 나가는 문**에만 그 규율이 없었다. 피해는 임의
+  //   코드 실행이 아니라 평문 다운그레이드·타처 유출이지만, 한 번 나간 소스는 되돌릴 수 없다.
+  //   `handshake.ts` 가 이미 「자격증명을 나르는 주소에는 apiBaseUrl 을 건다」고 적어 둔 그 정책이다.
+  if (apiBaseUrl(presigned.uploadUrl) === null) {
+    throw new DevtoolsError(
+      "SERVER_REJECTED",
+      "업로드 주소를 신뢰할 수 없습니다.",
+      "잘커라에 문의해 주세요. 올리지 않고 멈췄습니다.",
+    );
+  }
+
+  // **상한을 둔다.** Node 의 fetch 는 기본 타임아웃이 없어, 연결만 붙들린 채 응답이 없으면 영원히
     // 매달린다. 제어 평면(30초)보다 훨씬 길게 잡는다 — 여기는 100MB 까지 오르는 자리라
     // 짧은 값은 **느린 회선의 정상 전송을 끊는다**(그쪽이 더 나쁜 고장이다).
     const upload = await fetchImpl(presigned.uploadUrl, {

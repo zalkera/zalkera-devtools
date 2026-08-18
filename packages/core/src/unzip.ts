@@ -4,6 +4,7 @@ import { inflateRaw } from "node:zlib";
 import { promisify } from "node:util";
 import { DevtoolsError } from "./errors.ts";
 import { assertNotSymlink, assertNotVendored, descend, safeSegments } from "./safeWrite.ts";
+import { MAX_ENTRY_BYTES, MAX_EXTRACT_BYTES } from "./limits.ts";
 
 const inflate = promisify(inflateRaw);
 
@@ -11,7 +12,6 @@ const inflate = promisify(inflateRaw);
  * 해제 산출물 상한. 업로드 상한(100MB)의 배수로 넉넉히 잡되 **무제한은 아니다** — 실측으로 408KB zip 이
  * 400MB 를 뱉었고, 확장 호스트가 OOM 으로 죽으면 **다른 확장까지 함께** 죽는다.
  */
-const MAX_ENTRY_BYTES = 200 * 1024 * 1024;
 
 /**
  * **해제 총량 상한.** 항목당 상한만으로는 못 막는다 — zip 의 중앙 디렉터리 항목 여럿이 **같은
@@ -22,11 +22,11 @@ const MAX_ENTRY_BYTES = 200 * 1024 * 1024;
  * 형제 `untar.ts` 는 총량과 항목 수를 **둘 다** 갖고 있다. zip 만 둘 다 없었다.
  *
  * **값의 근거**: 받는 아카이브는 다운로드 상한 150MB([MAX_DOWNLOAD_BYTES])로 이미 잘린다.
- * 실물 소스의 압축비는 2.5~3배(실측: 프리셋 2종). 150 × 3 ≒ 450 이므로 그 언저리에서 자른다 —
- * 정상 소스를 거부하지 않으면서 무제한도 아니다. **소스 tar.gz 도 같은 값을 쓴다**(`fetchSource.ts`) —
- * 두 형식이 다른 기준을 쓸 이유가 없다.
+ * 실물 소스의 압축비는 2.5~3배(실측: 프리셋 2종). 그래서 상한은 **150 × 3 을 계산한 값**이다 —
+ * `limits.ts` 가 그 곱을 한다. 종전에는 이 유도를 산문으로만 적고 값은 400MB 를 **타이핑**해 뒀다.
+ * **소스 tar.gz 도 같은 상수를 import 한다**(`fetchSource.ts`) — 이제 갈리려면 `limits.ts` 를 고쳐야 한다.
  */
-const MAX_TOTAL_BYTES = 400 * 1024 * 1024;
+const MAX_TOTAL_BYTES = MAX_EXTRACT_BYTES;
 
 /** 항목 수 상한. 형제 `untar.ts` 와 같은 값 — 두 형식이 다른 기준을 쓸 이유가 없다. */
 const MAX_ENTRIES = 200_000;

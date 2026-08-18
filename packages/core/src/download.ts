@@ -1,4 +1,5 @@
 import { DevtoolsError } from "./errors.ts";
+import { MAX_DOWNLOAD_BYTES } from "./limits.ts";
 import { apiBaseUrl } from "./serverUrl.ts";
 
 /**
@@ -27,8 +28,7 @@ import { apiBaseUrl } from "./serverUrl.ts";
  *   `Content-Length` 를 믿지 않는다(서버가 정한다). 실제로 읽은 바이트로만 판정한다.
  */
 
-/** 내려받기 상한. 업로드 상한(100MB · `publish.ts`)에 여유를 얹은 값이다. */
-const MAX_DOWNLOAD_BYTES = 150 * 1024 * 1024;
+// 내려받기 상한은 `limits.ts` 가 소유한다 — 해제 상한이 이 값에서 **유도**되므로 둘이 갈리면 안 된다.
 
 export interface DownloadOptions {
     fetchImpl: typeof fetch;
@@ -40,7 +40,8 @@ export interface DownloadOptions {
     maxBytes?: number;
 }
 
-export async function downloadBounded(url: string, options: DownloadOptions): Promise<Buffer> {
+/** 주소 검사 + 응답 열기. 두 형제(버퍼·파일)가 **같은 문**을 지난다. */
+async function openBounded(url: string, options: DownloadOptions): Promise<ReadableStream<Uint8Array>> {
     if (apiBaseUrl(url) === null) {
         // 주소를 서버가 정하므로, 우리가 아는 형태가 아니면 **받지 않는다.**
         throw new DevtoolsError(
@@ -49,7 +50,6 @@ export async function downloadBounded(url: string, options: DownloadOptions): Pr
             "잘커라에 문의해 주세요. 받지 않고 멈췄습니다.",
         );
     }
-
     const response = await options.fetchImpl(url, { signal: AbortSignal.timeout(options.timeoutMs) });
     if (!response.ok || !response.body) {
         throw new DevtoolsError(
@@ -58,20 +58,64 @@ export async function downloadBounded(url: string, options: DownloadOptions): Pr
             "잠시 뒤 다시 시도해 주세요.",
         );
     }
+    return response.body as ReadableStream<Uint8Array>;
+}
 
+/** 상한 초과 — 두 형제가 **같은 문장**을 낸다. */
+function tooBig(what: string, limit: number): DevtoolsError {
+    return new DevtoolsError(
+        "SERVER_REJECTED",
+        `${what}가 너무 큽니다(상한 ${Math.round(limit / 1024 / 1024)}MB).`,
+        "받은 것이 정상이 아닙니다. 잘커라에 문의해 주세요.",
+    );
+}
+
+/**
+ * **받으면서 파일로 흘린다 — 통버퍼를 만들지 않는다.**
+ *
+ * 반환은 **실제로 쓴 바이트의 sha256** 이다. 해시를 디스크에 쓰는 것과 **같은 바이트**로 세는 것이
+ * 핵심이다 — 두 스트림으로 나누면 무결성 검사가 손상 파일을 통과시킨다(형제 `payload.ts` 의 규율).
+ *
+ * 실측(해제 250MB 소스): 통버퍼 경로 VmHWM **566MB** · 이 경로 **113MB**. 확장 호스트는 다른 확장과
+ * 프로세스를 공유하므로, 우리가 부풀면 **남의 확장까지 함께 죽는다.**
+ */
+export async function downloadBoundedToFile(url: string, destPath: string, options: DownloadOptions): Promise<string> {
+    const { createHash } = await import("node:crypto");
+    const { createWriteStream } = await import("node:fs");
+    const { Readable, Transform } = await import("node:stream");
+    const { pipeline } = await import("node:stream/promises");
+
+    const body = await openBounded(url, options);
+    const limit = options.maxBytes ?? MAX_DOWNLOAD_BYTES;
+    const hash = createHash("sha256");
+    let total = 0;
+    const guard = new Transform({
+        transform(chunk: Buffer, _enc, done) {
+            total += chunk.length;
+            // `Content-Length` 는 안 믿는다(서버가 정한다). 실제로 읽은 바이트로만 판정한다.
+            if (total > limit) {
+                done(tooBig(options.what, limit));
+                return;
+            }
+            hash.update(chunk);
+            done(null, chunk);
+        },
+    });
+    await pipeline(Readable.fromWeb(body as never), guard, createWriteStream(destPath));
+    return hash.digest("hex");
+}
+
+export async function downloadBounded(url: string, options: DownloadOptions): Promise<Buffer> {
+    const body = await openBounded(url, options);
     const limit = options.maxBytes ?? MAX_DOWNLOAD_BYTES;
     const chunks: Buffer[] = [];
     let total = 0;
-    for await (const chunk of response.body as unknown as AsyncIterable<Uint8Array>) {
+    for await (const chunk of body as unknown as AsyncIterable<Uint8Array>) {
         total += chunk.byteLength;
         if (total > limit) {
             // 스트림을 끊는다 — 남은 것을 마저 받을 이유가 없다.
-            await response.body.cancel().catch(() => {});
-            throw new DevtoolsError(
-                "SERVER_REJECTED",
-                `${options.what}가 너무 큽니다(상한 ${Math.round(limit / 1024 / 1024)}MB).`,
-                "받은 것이 정상이 아닙니다. 잘커라에 문의해 주세요.",
-            );
+            await body.cancel().catch(() => {});
+            throw tooBig(options.what, limit);
         }
         chunks.push(Buffer.from(chunk));
     }

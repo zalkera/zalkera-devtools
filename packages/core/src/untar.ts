@@ -4,6 +4,7 @@ import { isAbsolute, join, normalize, relative, resolve, sep } from "node:path";
 import { Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { createGunzip } from "node:zlib";
+import { MAX_ENTRY_BYTES, MAX_EXTRACT_BYTES } from "./limits.ts";
 import { DevtoolsError } from "./errors.ts";
 import {assertNotSymlink, descend, safeSegments, assertNotVendored} from "./safeWrite.ts";
 
@@ -63,6 +64,11 @@ export interface UntarOptions {
      * 가드가 막으려는 바로 그 손해를 내면 안 된다.
      */
     maxEntries?: number;
+    /**
+     * 실패 문면에 쓸 이름. 이 함수는 **두 목적**을 함께 나른다(의존성 페이로드 · 사이트 소스) —
+     * 문면을 한쪽으로 박아 두면 다른 쪽 사용자가 「의존성 꾸러미」라는 말을 듣는다.
+     */
+    label?: string;
 }
 
 /** 버퍼 해제(사이트 소스용). 반환은 **쓴 파일 수**다(디렉터리·링크는 안 센다). */
@@ -109,11 +115,11 @@ export async function extractTarGzFile(
     options: UntarOptions = {},
 ): Promise<number> {
     try {
-        const limit = options.maxBytes;
+        const limit = resolveCap(options.maxBytes); // 버퍼 경로와 **같은 문**을 지난다
         const guard = new Transform({
             transform(chunk: Buffer, _enc, done) {
                 written += chunk.length;
-                if (limit !== undefined && written > limit) {
+                if (written > limit) {
                     done(new Error(`해제 산출물이 상한(${limit}B)을 넘었습니다`));
                     return;
                 }
@@ -126,7 +132,7 @@ export async function extractTarGzFile(
         await rm(scratchPath, { force: true }).catch(() => {});
         throw new DevtoolsError(
             "SERVER_REJECTED",
-            "받은 의존성 꾸러미를 풀지 못했습니다.",
+            `${options.label ?? "받은 의존성 꾸러미"}를 풀지 못했습니다.`,
             "다시 시도해도 같으면 잘커라에 문의해 주세요.",
             cause,
         );
@@ -398,11 +404,27 @@ function parseOctal(buffer: Buffer): number {
     return text.length === 0 ? 0 : Number.parseInt(text, 8);
 }
 
+/**
+ * 이 해제에 실제로 설 상한.
+ *
+ * ⚠ **두 경로가 이 한 함수를 지난다.** 종전에는 버퍼 경로만 `Math.min` 으로 죄고 스트리밍 경로는
+ *   `options.maxBytes` 를 날로 썼다. 그래서 같은 파서·같은 옵션이 **경로에 따라 다르게 섰다**
+ *   (해제 250MB 정상 소스: 버퍼 거부 · 스트리밍 성공). 아래 KDoc 이 스스로 「호출부가 건 상한이
+ *   경로에 따라 있다 없다 하면 그건 상한이 아니다」라고 적어 둔 바로 그 형상이다.
+ *
+ * 의미는 하나다 — 호출부는 **더 좁게만** 잡을 수 있다([UntarOptions.maxEntries] 와 같은 성질).
+ * 천장은 [MAX_EXTRACT_BYTES] 이고 그 값은 전선 상한에서 **유도된다**(`limits.ts`). 종전에는
+ * 천장(200MB)이 소스 상한(400MB)보다 **낮아** 넓히려는 호출이 조용히 되죄어졌다.
+ */
+function resolveCap(maxBytes?: number): number {
+    return Math.min(maxBytes ?? MAX_EXTRACT_BYTES, MAX_EXTRACT_BYTES);
+}
+
 /** 압축 폭탄 방어 — 무제한 해제는 확장 호스트를 OOM 으로 죽이고, 그러면 다른 확장까지 함께 죽는다. */
 async function gunzipBuffer(input: Buffer, maxBytes?: number): Promise<Buffer> {
     const { gunzip: gunzipCb } = await import("node:zlib");
     const { promisify } = await import("node:util");
-    const cap = Math.min(maxBytes ?? MAX_ARCHIVE_BYTES, MAX_ARCHIVE_BYTES);
+    const cap = resolveCap(maxBytes);
     try {
         return (await promisify(gunzipCb)(input, { maxOutputLength: cap })) as Buffer;
     } catch (cause) {
@@ -415,12 +437,6 @@ async function gunzipBuffer(input: Buffer, maxBytes?: number): Promise<Buffer> {
     }
 }
 
-const MAX_ARCHIVE_BYTES = 200 * 1024 * 1024;
 /** 항목 수 상한(zip 의 65,535 와 같은 목적). 실측 의존성 트리가 14,229 파일이라 두 자릿수 여유를 둔다. */
 const MAX_ENTRIES = 200_000;
 
-/**
- * 항목 **하나**의 상한. 트리 전체가 아니라 개별 파일 기준이다 — node_modules 의 개별 파일은 수 MB 를
- * 넘지 않는다. 2GB 를 넘는 신고가 네이티브 abort 를 부르므로(재심의 차단 1) 그보다 훨씬 아래에서 자른다.
- */
-const MAX_ENTRY_BYTES = 256 * 1024 * 1024;
