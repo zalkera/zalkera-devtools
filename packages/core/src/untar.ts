@@ -4,7 +4,7 @@ import { isAbsolute, join, normalize, relative, resolve, sep } from "node:path";
 import { Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { createGunzip } from "node:zlib";
-import { MAX_ENTRY_BYTES, MAX_EXTRACT_BYTES } from "./limits.ts";
+import { MAX_ENTRIES, MAX_ENTRY_BYTES, MAX_EXTRACT_BYTES } from "./limits.ts";
 import { DevtoolsError } from "./errors.ts";
 import {assertNotSymlink, descend, safeSegments, assertNotVendored} from "./safeWrite.ts";
 
@@ -69,6 +69,13 @@ export interface UntarOptions {
      * 문면을 한쪽으로 박아 두면 다른 쪽 사용자가 「의존성 꾸러미」라는 말을 듣는다.
      */
     label?: string;
+    /**
+     * 이 해제가 대상 폴더에 만든 **최상위 이름**을 하나씩 알린다(중복 포함).
+     *
+     * 롤백은 이 목록만 되감아야 한다 — 「해제 전에 없던 것」을 지우면 받는 동안 고객이 만든 파일이
+     * 함께 사라진다. 다운로드가 최대 15분이라 그 창은 좁지 않다.
+     */
+    onWroteRoot?: (name: string) => void;
 }
 
 /** 버퍼 해제(사이트 소스용). 반환은 **쓴 파일 수**다(디렉터리·링크는 안 센다). */
@@ -295,6 +302,11 @@ async function createSink(targetDir: string, options: UntarOptions) {
 
             const segments = safeSegments(root, name);
             if (options.rejectVendored === true) assertNotVendored(segments, name);
+            // ⚠ **우리가 만든 최상위 이름을 알린다.** 롤백이 「해제 전 스냅샷에 없던 것」을 지우면,
+            //    받는 **동안**(최대 15분) 고객이 만든 파일까지 지운다 — `emptyDir.ts` 가 「이 도구가
+            //    낼 수 있는 가장 큰 손해」라고 적어 둔 바로 그것이다(실측: `.vscode/settings.json` 과
+            //    고객 메모가 함께 사라졌다). 되감을 것은 **우리가 쓴 것**뿐이다.
+            if (segments.length > 0) options.onWroteRoot?.(segments[0]!);
 
             if (entry.type === "5") {
                 await descend(root, segments, verified);
@@ -440,5 +452,4 @@ async function gunzipBuffer(input: Buffer, maxBytes?: number): Promise<Buffer> {
 }
 
 /** 항목 수 상한(zip 의 65,535 와 같은 목적). 실측 의존성 트리가 14,229 파일이라 두 자릿수 여유를 둔다. */
-const MAX_ENTRIES = 200_000;
 

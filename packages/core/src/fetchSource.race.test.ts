@@ -16,12 +16,12 @@
  */
 import { ok, rejects, strictEqual } from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readdir, rm, symlink, utimes, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
 import { gzipSync } from "node:zlib";
-import { sweepOurScratch } from "./emptyDir.ts";
+import { acquireFolderLock } from "./emptyDir.ts";
 import { fetchSiteSource } from "./fetchSource.ts";
 
 const made: string[] = [];
@@ -74,6 +74,11 @@ const slow = (ms: number) => (async () => {
     await sleep(ms);
     return new Response(PAYLOAD, { status: 200 });
 }) as never;
+/** 무결성 대조에서 반드시 실패하는 응답 — 롤백 경로를 재는 데 쓴다. */
+const badPayload = (ms: number) => (async () => {
+    await sleep(ms);
+    return new Response("garbage", { status: 200 });
+}) as never;
 
 test("먼저 시작한 받기가 이긴다 — 나중 것은 「이미 받는 중」으로 끊는다", async () => {
     const target = await scratch("race-");
@@ -89,49 +94,106 @@ test("먼저 시작한 받기가 이긴다 — 나중 것은 「이미 받는 �
     strictEqual((await readdir(target)).join(","), "index.html");
 });
 
-test("죽은 잔해는 걷는다 — 그것이 폴더를 눈에 안 보이게 막던 것이다", async () => {
-    const target = await scratch("stale-");
-    const dead = join(target, ".zalkera-fetch-abc123");
-    await mkdir(dead, { recursive: true });
-    await writeFile(join(dead, "source.tar.gz"), "x");
-    const old = new Date(Date.now() - 30 * 60 * 1000);
-    await utimes(join(dead, "source.tar.gz"), old, old);
-    await utimes(dead, old, old);
-
-    const result = await sweepOurScratch(target, 15 * 60 * 1000);
-    strictEqual(result.swept, 1);
-    strictEqual(result.active, 0);
-    strictEqual((await readdir(target)).length, 0);
+test("먼저 잡은 쪽만 이긴다 — 판정이 아니라 **원자 점유**다", async () => {
+    // 종전에는 「살아 있는 임시 자리가 있으면 물러난다」는 **판정**이었다. 판정과 점유 사이에 fs
+    // 호출이 여럿 있어 두 실행이 **둘 다** 「비어 있다」를 봤다(check-then-act).
+    const target = await scratch("lock-");
+    const first = await acquireFolderLock(target, 15 * 60 * 1000);
+    ok(first !== null, "첫 번째는 잡아야 한다");
+    strictEqual(await acquireFolderLock(target, 15 * 60 * 1000), null, "두 번째는 못 잡아야 한다");
+    await first!.release();
+    const again = await acquireFolderLock(target, 15 * 60 * 1000);
+    ok(again !== null, "놓으면 다시 잡힌다");
+    await again!.release();
 });
 
-test("갓 만든 것은 안 걷는다 — 살아 있는 받기다", async () => {
-    const target = await scratch("live-");
-    await mkdir(join(target, ".zalkera-fetch-xyz789"), { recursive: true });
-    const result = await sweepOurScratch(target, 15 * 60 * 1000);
-    strictEqual(result.swept, 0);
-    strictEqual(result.active, 1);
+test("죽은 주인의 자물쇠는 **즉시** 회수한다 — 15분을 안 기다린다", async () => {
+    // mtime 휴리스틱은 크래시 잔해에 최대 15분을 기다리게 했다(그 사이 「이미 받는 중입니다」 —
+    // 아무도 안 받는데). 주인의 생사를 물으면 기다릴 이유가 없다.
+    const target = await scratch("dead-");
+    await mkdir(join(target, ".zalkera-fetch-lock", "work"), { recursive: true });
+    await writeFile(join(target, ".zalkera-fetch-lock", "owner.json"), JSON.stringify({ pid: 999_999, startedAt: Date.now() }));
+    const lock = await acquireFolderLock(target, 15 * 60 * 1000);
+    ok(lock !== null, "죽은 주인의 자물쇠는 회수한다");
+    await lock!.release();
 });
 
-test("고객 파일은 접두가 같아도 안 지운다 — 이름 접두만 보면 남의 것을 지운다", async () => {
-    const target = await scratch("cust-");
-    await writeFile(join(target, ".zalkera-fetch-메모.txt"), "고객 것");
-    await mkdir(join(target, ".zalkera-fetch-내작업"), { recursive: true });
-    await writeFile(join(target, ".zalkera-fetch-내작업", "중요.txt"), "고객 것");
-
-    const result = await sweepOurScratch(target, 0); // 상한 0 — 「전부 오래됐다」로 가장 공격적으로
-    strictEqual(result.swept, 0, "우리 것이 아니면 하나도 안 지운다");
-    strictEqual((await readdir(target)).length, 2);
+test("살아 있는 주인의 자물쇠는 안 뺏는다", async () => {
+    const target = await scratch("alive-");
+    await mkdir(join(target, ".zalkera-fetch-lock", "work"), { recursive: true });
+    await writeFile(join(target, ".zalkera-fetch-lock", "owner.json"), JSON.stringify({ pid: process.pid, startedAt: Date.now() }));
+    strictEqual(await acquireFolderLock(target, 15 * 60 * 1000), null);
 });
 
-test("이름만 흉내 낸 심링크를 따라가 폴더 밖을 지우지 않는다", async () => {
-    const target = await scratch("link-");
-    const outside = await scratch("outside-");
-    await writeFile(join(outside, "카나리.txt"), "밖의 것");
-    await symlink(outside, join(target, ".zalkera-fetch-abcdef"));
+test("자물쇠는 「비어 있는가」 판정에 안 걸린다 — 고객 눈에 안 보이는 것이 폴더를 막으면 안 된다", async () => {
+    const { isReceivable } = await import("./emptyDir.ts");
+    const target = await scratch("vis-");
+    const lock = await acquireFolderLock(target, 15 * 60 * 1000);
+    ok(await isReceivable(target), "자물쇠가 폴더를 «비어 있지 않다»로 만들면 안 된다");
+    await lock!.release();
+});
 
-    const result = await sweepOurScratch(target, 0);
-    strictEqual(result.swept, 0);
-    ok((await readdir(outside)).includes("카나리.txt"), "레포 밖 파일이 사라졌다");
+test("받는 **동안** 생긴 고객 파일을 롤백이 지우지 않는다", async () => {
+    // `emptyDir.ts` 가 「이 도구가 낼 수 있는 가장 큰 손해」라고 적어 둔 자리다. 스냅샷 뺄셈은
+    // 받기 시작 **전** 한 번만 찍히는데 다운로드는 최대 15분이다 — VS Code 가 폴더를 연 창에서
+    // 만드는 `.vscode/settings.json` 도 그 창 안이다(실측으로 고객 메모와 함께 사라졌다).
+    const target = await scratch("during-");
+    const failing = fetchSiteSource({ api, targetDir: target, fetchImpl: badPayload(300) }).then(
+        () => "성공",
+        (error: Error) => error.message,
+    );
+    await sleep(80);
+    await writeFile(join(target, "내메모.md"), "받는 동안 쓴 것");
+    await mkdir(join(target, ".vscode"), { recursive: true });
+    await writeFile(join(target, ".vscode", "settings.json"), "{}");
+
+    ok(String(await failing).includes("원본과 다릅니다"), "이 시험은 실패 경로를 재야 한다");
+    const left = (await readdir(target)).sort();
+    strictEqual(left.join(","), ".vscode,내메모.md", `고객 파일이 사라졌다: ${left.join(",")}`);
+});
+
+
+
+
+
+test("반쪽 해제는 되감는다 — 고객 것은 두고 **우리 것만**", async () => {
+    // 「쓴 것만 되감는다」는 양쪽을 다 재야 한다. 고객 파일 보존만 재면 «아무것도 안 지우는»
+    // 롤백으로도 통과하고, 그러면 배송 문서의 «아무것도 풀지 않고 멈춘 것이니 폴더는 그대로입니다»
+    // 가 거짓이 된다 — 그리고 같은 폴더로 재시도하면 「비어 있지 않습니다」에 막힌다.
+    // 받을 폴더는 **비어 있어야** 시작한다(그 규칙이 먼저 선다). 그러니 여기서 재는 것은
+    // 「우리가 쓴 것이 되감기는가」다 — 고객 파일 보존은 위 시험이 따로 잰다.
+    const target = await scratch("partial-");
+
+    // 앞 항목은 정상, 뒤 항목이 폴더 밖을 가리킨다 — 앞 것은 이미 디스크에 쓰인 뒤다.
+    const escaping = gzipSync(
+        Buffer.concat([
+            header("site/index.html", 5),
+            Buffer.from("hello"),
+            Buffer.alloc(507),
+            header("../탈출.txt", 5),
+            Buffer.from("evil!"),
+            Buffer.alloc(507),
+            Buffer.alloc(1024),
+        ]),
+    );
+    const sha = createHash("sha256").update(escaping).digest("hex");
+    const escapeApi = {
+        listRevisions: async () => [{ revisionNo: 7, isActive: true }],
+        sourceUrl: async () => ({ url: "https://s3.example/s.tar.gz", sha256: sha }),
+    } as never;
+
+    await rejects(
+        () =>
+            fetchSiteSource({
+                api: escapeApi,
+                targetDir: target,
+                fetchImpl: (async () => new Response(escaping, { status: 200 })) as never,
+            }),
+        /폴더 밖|이상한 경로/,
+    );
+
+    const left = (await readdir(target)).sort();
+    strictEqual(left.join(","), "", `되감기가 반쪽이다 — 남은 것: ${left.join(",")}`);
 });
 
 test("양성 통제군 — 단독 받기는 그대로 되고 임시물이 안 남는다", async () => {

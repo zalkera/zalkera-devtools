@@ -4,7 +4,7 @@ import { inflateRaw } from "node:zlib";
 import { promisify } from "node:util";
 import { DevtoolsError } from "./errors.ts";
 import { assertNotSymlink, assertNotVendored, descend, safeSegments } from "./safeWrite.ts";
-import { MAX_ENTRY_BYTES, MAX_EXTRACT_BYTES } from "./limits.ts";
+import { MAX_ENTRIES, MAX_ENTRY_BYTES, MAX_EXTRACT_BYTES } from "./limits.ts";
 
 const inflate = promisify(inflateRaw);
 
@@ -29,7 +29,6 @@ const inflate = promisify(inflateRaw);
 const MAX_TOTAL_BYTES = MAX_EXTRACT_BYTES;
 
 /** 항목 수 상한. 형제 `untar.ts` 와 같은 값 — 두 형식이 다른 기준을 쓸 이유가 없다. */
-const MAX_ENTRIES = 200_000;
 
 /**
  * zip 해제기 — **의존성 0**(내장 zlib). 시작 소스 팩(B1)이 zip 으로 오기 때문에 필요하다

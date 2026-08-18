@@ -27,8 +27,12 @@
  * 그것은 방어가 아니라 마찰입니다. 그래서 **이름과 표기를 안 봅니다** — 보는 것은 셋뿐입니다.
  *
  * **대입의 존재만 보고 그 값이 쓰이는지는 안 봅니다.** `resolveCap(...) * 1024` 나 파이프라인에서
- * `guard` 를 빼는 우회는 못 잡습니다 — 그 축은 `npm test` 가 잡습니다(심의 실측: B1·B3·B4·B6
- * 전부 시험이 물었습니다). 형태와 동작을 나눠 맡는 것이 이 자리의 설계입니다.
+ * `guard` 를 빼는 우회는 못 잡습니다 — 그 축은 `npm test` 가 잡습니다(실측으로 확인했습니다).
+ *
+ * ⚠ **다만 시험이 무는 것은 «무조건 제거» 뿐입니다.** 값에 조건을 건 제거
+ * (`if (limit < 2_000_000 && …)`)는 시험 상한이 1024B·1MB 라 초록입니다 — **상용 크기(450MB)의
+ * 가드는 검사기도 시험도 안 밟습니다.** 그 공백은 ⑷ 규칙이 메웁니다. 한때 이 문단이 「그 축은
+ * 시험이 잡습니다」라고만 적었는데, 그 문장이 **거짓**이었습니다(심의 반증).
  */
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -86,6 +90,26 @@ const sourceCode = readFileSync(SOURCE_SRC, "utf8")
     .replace(/(^|[^:])\/\/[^\n]*/g, "$1 ");
 if (!/const\s+MAX_SOURCE_EXTRACT_BYTES\s*=\s*MAX_EXTRACT_BYTES\s*;/.test(sourceCode)) {
     fail.push("`fetchSource.ts` 의 소스 상한이 `MAX_EXTRACT_BYTES` 그대로가 아닙니다 — 실제 천장이 검사기 밖에 삽니다.");
+}
+
+// ⑷ 상한 판정에 **크기 리터럴**이 끼지 않았는가
+//
+// ⚠ 직전 판이 이 규칙을 **삭제**했다가 우회 두 개를 놓쳤다(심의 실측):
+//
+//     if (limit < 2_000_000 && written > limit)          ← 스트리밍 상한 무력화
+//     maxOutputLength: cap < 2_000_000 ? cap : undefined ← 버퍼 상한 무력화
+//
+//   둘 다 `resolveCap` 은 그대로 부르므로 위 규칙들을 전부 통과하고, **시험도 안 문다** — 시험의
+//   상한이 1024B·1MB 라 «작은 상한만 지키는» 가드가 초록이기 때문이다. 상용 크기(450MB)의 가드는
+//   검사기도 시험도 한 번도 안 밟는다. 그 공백을 메우는 것이 이 규칙이다.
+//
+//   삭제됐던 이유는 오탐이었다 — 셈 상수(`MAX_ENTRIES`)와 **오류 문자열 안의 숫자**를 함께 잡았다.
+//   지금은 주석·문자열을 지운 사본(`code`)에서 재고 셈 규모를 가르므로 그 둘이 안 걸린다(실측).
+for (const m of code.matchAll(/\b0[xX][0-9a-fA-F_]+\b|\b\d[\d_]*\b/g)) {
+    const value = Number(m[0].replace(/_/g, ""));
+    if (Number.isFinite(value) && value >= 1_000_000) {
+        fail.push(`크기 리터럴이 남아 있습니다: \`${m[0]}\` — 상한은 limits.ts 가 유도합니다.`);
+    }
 }
 
 if (fail.length > 0) {
