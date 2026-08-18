@@ -302,20 +302,30 @@ async function createSink(targetDir: string, options: UntarOptions) {
 
             const segments = safeSegments(root, name);
             if (options.rejectVendored === true) assertNotVendored(segments, name);
-            // ⚠ **우리가 만든 최상위 이름을 알린다.** 롤백이 「해제 전 스냅샷에 없던 것」을 지우면,
-            //    받는 **동안**(최대 15분) 고객이 만든 파일까지 지운다 — `emptyDir.ts` 가 「이 도구가
-            //    낼 수 있는 가장 큰 손해」라고 적어 둔 바로 그것이다(실측: `.vscode/settings.json` 과
-            //    고객 메모가 함께 사라졌다). 되감을 것은 **우리가 쓴 것**뿐이다.
-            if (segments.length > 0) options.onWroteRoot?.(segments[0]!);
+
+            /**
+             * 우리가 만든 최상위 이름을 알린다 — 롤백이 되감을 대상이다.
+             *
+             * ⚠ **실제로 쓴 뒤에만 알린다.** 종전에는 항목을 **보자마자** 알려서, 만들지도 않은
+             *   이름이 되감기 목록에 들어갔다 — 하드링크(`1`)와 거부된 심링크(`2`)는 곧바로
+             *   `return` 하는데도 알렸다. 그러면 받는 15분 사이에 고객이 같은 이름의 파일을 만들면
+             *   **되감기가 그것을 `rm -rf` 한다.** 「해제기가 알려 준 이름 = 우리가 쓴 것」이라는
+             *   등식이 거기서 깨졌다(심의 실측: 고객 메모와 `.vscode/launch.json` 이 사라졌다).
+             */
+            const noteWrote = (): void => {
+                if (segments.length > 0) options.onWroteRoot?.(segments[0]!);
+            };
 
             if (entry.type === "5") {
+                noteWrote();
                 await descend(root, segments, verified);
                 return;
             }
 
             if (entry.type === "2") {
-                if (!materializeLinks) return;
+                if (!materializeLinks) return; // 안 만들었으니 **안 알린다** — 되감기 대상이 아니다
                 await writeSymlink(root, segments, name, linkTarget, verified);
+                noteWrote();
                 return;
             }
             // 하드링크(`1`)는 만들지 않는다. **실측**(2026-08-03 · examples 레포 node_modules 를 실제로 구워
@@ -339,6 +349,7 @@ async function createSink(targetDir: string, options: UntarOptions) {
             // 마지막 조각이 이미 심링크면 **쓰기가 그 링크를 따라간다** — 조각 검사의 마지막 칸이다.
             await assertNotSymlink(path, name);
             await writeFile(path, data);
+            noteWrote();
             if (preserveMode && (entry.mode & 0o111) !== 0) {
                 // 실행 비트가 있던 것만 되살린다. 전체 mode 를 그대로 쓰지 않는 이유는 아카이브가 정한
                 // 권한(예: 0777·setuid)을 고객 디스크에 그대로 옮기지 않기 위해서다.

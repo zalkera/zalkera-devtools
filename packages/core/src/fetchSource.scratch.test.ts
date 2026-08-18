@@ -53,6 +53,18 @@ function header(name: string, size: number): Buffer {
     return h;
 }
 
+/** 링크 항목 한 장. 데이터는 없고 헤더만 있다(`linkname` 자리에 대상). */
+function linkEntry(name: string, target: string, type: "1" | "2"): Buffer {
+    const h = header(name, 0);
+    h.write(type, 156, 1, "ascii");
+    h.write(target, 157, 100, "utf8");
+    h.write("        ", 148, 8, "ascii");
+    let sum = 0;
+    for (const byte of h) sum += byte;
+    h.write(`${sum.toString(8).padStart(6, "0")}\0 `, 148, 8, "ascii");
+    return h;
+}
+
 function entry(name: string, body: string): Buffer[] {
     const data = Buffer.from(body, "utf8");
     return [header(name, data.length), data, Buffer.alloc((512 - (data.length % 512)) % 512)];
@@ -217,6 +229,50 @@ test("반쪽 해제는 되감는다 — 우리가 쓴 것만", async () => {
         /폴더 밖|이상한 경로/,
     );
     strictEqual((await readdir(target)).join(","), "", "되감기가 반쪽이다");
+});
+
+test("크래시 잔해를 다음 켜기에 걷는다 — 우리 마당은 무한히 쌓이면 안 된다", async () => {
+    // 크래시(창 닫기·SIGKILL·절전)면 `finally` 가 안 돈다. 우리 마당은 VS Code 가 **절대 안 지우므로**
+    // 그대로 두면 크래시 1회당 최대 600MB 가 사용자 프로필에 영구히·보이지 않게 쌓인다.
+    // 종전(고객 폴더)에는 잔해가 폴더를 막아 최소한 **보이기라도** 했다.
+    const { sweepScratch } = await import("./fetchSource.ts");
+    const mine = await scratch("mine-");
+    await mkdir(join(mine, "fetch-abc123"), { recursive: true });
+    await writeFile(join(mine, "fetch-abc123", "source.tar.gz"), "찌꺼기");
+    await mkdir(join(mine, "fetch-def456"), { recursive: true });
+    // 우리 것이 아닌 이름은 안 건드린다 — 이 자리를 다른 용도로 쓰게 될 수 있다.
+    await writeFile(join(mine, "keep.json"), "{}");
+
+    strictEqual(await sweepScratch(mine), 2);
+    strictEqual((await readdir(mine)).join(","), "keep.json");
+});
+
+test("걷을 것이 없거나 마당이 아직 없어도 조용히 넘어간다", async () => {
+    const { sweepScratch } = await import("./fetchSource.ts");
+    strictEqual(await sweepScratch(join(await scratch("mine-"), "아직없음")), 0);
+});
+
+test("과대보고 없음 — 안 쓴 이름은 되감기 대상이 아니다", async () => {
+    // 해제기가 항목을 **보자마자** 알리던 시절, 만들지도 않은 하드링크·거부된 심링크의 이름이
+    // 되감기 목록에 들어갔다. 받는 15분 사이에 고객이 같은 이름의 파일을 만들면 **그것이 지워진다**.
+    const { extractTarGzFile } = await import("./untar.ts");
+    const payload = gzipSync(
+        Buffer.concat([
+            ...entry("진짜.txt", "ok"),
+            linkEntry("하드링크.txt", "진짜.txt", "1"),
+            linkEntry("심링크.txt", "진짜.txt", "2"),
+            Buffer.alloc(1024),
+        ]),
+    );
+    const target = await scratch("t-");
+    const mine = await scratch("mine-");
+    const gzPath = join(mine, "in.tar.gz");
+    await writeFile(gzPath, payload);
+    const wrote: string[] = [];
+    await extractTarGzFile(gzPath, target, join(mine, "s.tar"), { onWroteRoot: (n) => wrote.push(n) });
+
+    // 디스크에 실제로 있는 것과 알린 것이 **같아야** 한다.
+    strictEqual([...new Set(wrote)].sort().join(","), (await readdir(target)).sort().join(","));
 });
 
 test("`scratchRoot` 를 안 주면 OS 임시 디렉터리로 물러난다 — 못 받는 것보다 낫다", async () => {

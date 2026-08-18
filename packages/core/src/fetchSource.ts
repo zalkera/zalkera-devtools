@@ -178,6 +178,42 @@ export async function fetchSiteSource(
 }
 
 /**
+ * **우리 마당의 잔해를 걷는다.** 확장이 켜질 때 한 번 부른다.
+ *
+ * 크래시(창 닫기·SIGKILL·절전)로 죽으면 `finally` 가 안 돌아 `fetch-*` 가 남는다. 우리 마당은
+ * VS Code 가 절대 안 지우므로, 그대로 두면 크래시 1회당 최대 `150MB(gz) + 450MB(중간 tar)` 가
+ * 사용자 프로필에 **영구히·보이지 않게** 쌓인다.
+ *
+ * ⚠ **여기서는 추측하지 않는다.** 고객 폴더의 잔해를 걷을 때는 「버려진 것」과 「받는 중인 것」을
+ *   갈라야 했고, 그 추측이 세 라운드 연속으로 진행 중 받기를 죽였다. 여기는 **우리 마당**이라
+ *   갈 필요가 없다 — 살아 있는 것을 지워도 피해는 그 받기의 실패뿐이고(롤백은 이제 우리가 쓴
+ *   것만 지운다), 고객 파일은 애초에 여기 없다. 그래서 **조건 없이** 지운다.
+ *
+ *   다만 확장은 창마다 한 번씩 `activate` 한다 — 창 A 가 받는 중에 창 B 가 켜지면 A 의 작업
+ *   자리가 지워진다. 그 피해가 「A 의 받기 실패」로 끝나는 것이 위 문단의 근거다. 창이 둘일 때의
+ *   상호배제는 애초에 없다고 선언한 축이라 새 구멍이 아니다.
+ */
+export async function sweepScratch(root: string): Promise<number> {
+    let entries;
+    try {
+        entries = await readdir(root, { withFileTypes: true });
+    } catch {
+        return 0; // 아직 안 만들어졌다 — 걷을 것도 없다
+    }
+    let swept = 0;
+    for (const entry of entries) {
+        if (!entry.name.startsWith("fetch-") || !entry.isDirectory()) continue;
+        try {
+            await rm(join(root, entry.name), { recursive: true, force: true });
+            swept += 1; // **성공만 센다** — 시도를 세면 「정리했습니다」가 거짓이 된다
+        } catch {
+            /* 못 지웠다 — 다음 회차가 다시 시도한다 */
+        }
+    }
+    return swept;
+}
+
+/**
  * 임시 자리의 뿌리. 호출부가 안 주면 OS 임시 디렉터리로 물러난다.
  *
  * ⚠ **호출부가 주는 것이 옳다.** `os.tmpdir()` 은 리눅스에서 tmpfs(=메모리)인 경우가 많아, 150MB
@@ -187,7 +223,20 @@ export async function fetchSiteSource(
  */
 async function scratchBase(root: string | undefined): Promise<string> {
     const base = root ?? tmpdir();
-    await mkdir(base, { recursive: true });
+    try {
+        await mkdir(base, { recursive: true });
+    } catch (cause) {
+        // ⚠ **원시 errno 를 사용자에게 보내지 않는다.** 고객이 **한 번도 고른 적 없는 경로**가
+        //   `EACCES: permission denied, mkdtemp '/…/fetch-vSrRXM'` 로 튀어나오고 행동 지시가 없다.
+        //   그리고 이제 스크래치와 받을 폴더가 **다른 디스크일 수 있다** — 외장 디스크에 큰 사이트를
+        //   받으면 시스템 디스크가 차서 여기서 터진다. 그 사실을 말해 준다.
+        throw new DevtoolsError(
+            "PACK_FAILED",
+            "받는 중에 쓸 임시 자리를 만들지 못했습니다.",
+            "이 컴퓨터의 시스템 디스크 여유 공간과 권한을 확인해 주세요(받을 폴더와 다른 디스크일 수 있습니다).",
+            cause,
+        );
+    }
     return base;
 }
 

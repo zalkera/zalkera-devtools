@@ -111,23 +111,39 @@ if (!/const\s+MAX_SOURCE_EXTRACT_BYTES\s*=\s*MAX_EXTRACT_BYTES\s*;/.test(sourceC
 //   넣었든(리터럴이든 함수 호출이든) 걸린다. 덤으로 무관한 상수에 대한 오탐이 사라진다.
 const capVars = new Set([...code.matchAll(/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*resolveCap\s*\(/g)].map((m) => m[1]));
 
-// ⑷-a 버퍼 경로: `maxOutputLength` 는 그 변수 **하나**여야 한다(삼항·산술 금지).
-const capArg = /maxOutputLength:\s*([^,}]+?)\s*[,}]/.exec(code);
-if (capArg === null) {
+// ⚠ **모든 매치를 본다 — 첫 것만 보면 미끼 한 줄로 뚫린다.**
+//   첫 판이 `.exec()` 로 첫 매치만 봤다. 그래서 앞에 죽은 미끼(`if (written > limit) { void 0; }`)를
+//   두고 뒤에 진짜 가드를 되죄면 검사기가 미끼에서 멈췄다 — 5회전이 뚫은 두 형태가 미끼 한 줄로
+//   부활했고 `npm run verify` 전체가 초록이었다(심의 실측).
+
+// ⑷-a 버퍼 경로: `maxOutputLength` 는 **모든 자리에서** 해결된 상한 변수 하나여야 한다.
+const capArgs = [...code.matchAll(/maxOutputLength:\s*([^,}]+?)\s*[,}]/g)];
+if (capArgs.length === 0) {
     fail.push("버퍼 경로에서 `maxOutputLength` 를 찾지 못했습니다 — 상한이 zlib 에 안 걸립니다.");
-} else if (!capVars.has(capArg[1].trim())) {
-    fail.push(`\`maxOutputLength\` 이 해결된 상한 변수가 아닙니다: \`${capArg[1].trim()}\` — 값에 조건을 걸면 큰 입력에서 가드가 죽습니다.`);
+}
+for (const m of capArgs) {
+    const arg = m[1].trim();
+    if (!capVars.has(arg)) {
+        fail.push(`\`maxOutputLength\` 이 해결된 상한 변수가 아닙니다: \`${arg}\` — 값에 조건을 걸면 큰 입력에서만 가드가 죽습니다.`);
+    }
 }
 
-// ⑷-b 스트리밍 경로: 누적 비교는 `written > <상한변수>` **그 자체**여야 한다(추가 조건 금지).
-const writtenIf = /if\s*\(([^)]*\bwritten\b[^)]*)\)/.exec(code);
-if (writtenIf === null) {
+// ⑷-b 스트리밍 경로: 누적 비교는 **모든 자리에서** 상한과의 직접 비교여야 한다.
+//
+//   ⚠ 방향과 연산자는 안 따진다 — `written > limit`·`written >= limit`·`limit < written` 은 같은
+//     뜻이거나 더 안전하다. 첫 판이 한 형태만 허용해 정당한 편집 둘을 막았다(심의 실측). 우리가
+//     보는 것은 **상한 그 자체와 비교하는가**이지 표기가 아니다.
+const DIRECT = /^(?:written\s*>=?\s*(?<a>[A-Za-z_$][\w$]*)|(?<b>[A-Za-z_$][\w$]*)\s*<=?\s*written)$/;
+const writtenIfs = [...code.matchAll(/if\s*\(([^)]*\bwritten\b[^)]*)\)/g)];
+if (writtenIfs.length === 0) {
     fail.push("스트리밍 경로에서 누적 비교(`written > …`)를 찾지 못했습니다.");
-} else {
-    const condition = writtenIf[1].trim();
-    const simple = /^written\s*>\s*([A-Za-z_$][\w$]*)$/.exec(condition);
-    if (simple === null || !capVars.has(simple[1])) {
-        fail.push(`누적 비교가 해결된 상한과의 직접 비교가 아닙니다: \`${condition}\` — 조건을 덧붙이면 큰 입력에서 가드가 죽습니다.`);
+}
+for (const m of writtenIfs) {
+    const condition = m[1].trim();
+    const parts = DIRECT.exec(condition)?.groups;
+    const bound = parts?.a ?? parts?.b;
+    if (bound === undefined || !capVars.has(bound)) {
+        fail.push(`누적 비교가 해결된 상한과의 직접 비교가 아닙니다: \`${condition}\` — 조건을 덧붙이면 큰 입력에서만 가드가 죽습니다.`);
     }
 }
 
