@@ -71,6 +71,22 @@ let session: { server: DevServer; projectDir: string; keyId: number; tenant: Cap
 /** 프리뷰 시작 재진입 가드 — 첫 실행은 수 분짜리 설치라 사용자가 반드시 두 번 누른다(심의 경고). */
 let previewStarting = false;
 /**
+ * 소스 받기 재진입 가드.
+ *
+ * 받기는 **최대 15분**이고 취소 단추가 없다 — 「멈춘 것 같다」며 다시 누르는 것이 자연스러운
+ * 반응이다. 그러면 두 받기가 **같은 폴더**를 목표로 돌 수 있는데, 「비어 있는가」 판정은 둘 다
+ * 통과한다(그때는 정말 비어 있다). 결과는 두 소스가 겹쳐 써진 잡탕이고 **둘 다 성공을 보고**한다.
+ *
+ * ⚠ **가드를 여기(확장)에 두는 것이 요점이다.** 한때 이 상호배제를 고객 폴더의 파일시스템
+ *   자물쇠로 풀려다 심의 차단이 다섯 라운드 났다 — 잔해가 폴더를 눈에 안 보이게 막고, 이름이
+ *   아카이브와 부딪혀 파일이 사라지고, 회수 판정이 진행 중 받기를 죽였다. 프로세스 안 변수는
+ *   그 표면이 **없다.**
+ *
+ * 못 막는 것: **창이 둘**이거나 프로세스가 둘일 때. 그것까지 막으려면 다시 파일시스템 자물쇠가
+ * 필요하고, 그 길은 실패했다. 0.1.40 도 같은 상태이므로 회귀가 아니다 — 알려진 한계로 둔다.
+ */
+let fetchingSource = false;
+/**
  * **마지막으로 발급받은 프리뷰 키.** `session` 이 아니라 여기 사는 이유(심의 경고 · 2026-08-10):
  * 종전에는 keyId 가 `session` 에만 있어서, 「프리뷰 중지」 뒤 로그아웃하면 **서버 키를 못 지웠다.**
  * 프로세스는 죽었지만 키는 TTL(최대 12시간)까지 살아 있었고, 도움말은 "서버에서도 폐기됩니다"라고
@@ -466,6 +482,12 @@ async function revokeKeyQuietly(keyId: number, tenant: string): Promise<void> {
 
 /** B2 — **MVP 절단선의 핵심**. 이미 있는 사이트를 로컬로 받아야 체크리스트 ③ 이 선다. */
 async function openSite(): Promise<void> {
+    if (fetchingSource) {
+        void vscode.window.showInformationMessage(
+            "사이트 소스를 받는 중입니다. 끝날 때까지 기다려 주세요(최대 15분).",
+        );
+        return;
+    }
     const api = await ensureApi();
     const picked = await vscode.window.showOpenDialog({
         canSelectFolders: true,
@@ -476,10 +498,21 @@ async function openSite(): Promise<void> {
     const target = picked?.[0]?.fsPath;
     if (!target) return;
 
-    const result = await vscode.window.withProgress<FetchSourceResult>(
-        { location: vscode.ProgressLocation.Notification, title: "사이트 소스를 받는 중" },
-        () => fetchSiteSource({ api, targetDir: target, scratchRoot, onProgress: log }),
-    );
+    // ⚠ **가드는 반드시 `finally` 로 푼다**(형제 `previewStarting` 이 같은 실수를 한 적이 있다).
+    //    성공 경로에서만 풀면 한 번의 실패로 가드가 영영 잠겨, 창을 새로 열 때까지 「받는 중입니다」
+    //    만 반복한다 — 받는 것이 없는데 받는 중이라고 말하는 막다른 길이다.
+    //
+    //    폴더를 고른 **뒤**에 잠근다: 고르는 도중(취소·ESC)에 잠그면 그 시간만큼 헛되이 막힌다.
+    fetchingSource = true;
+    let result: FetchSourceResult;
+    try {
+        result = await vscode.window.withProgress<FetchSourceResult>(
+            { location: vscode.ProgressLocation.Notification, title: "사이트 소스를 받는 중" },
+            () => fetchSiteSource({ api, targetDir: target, scratchRoot, onProgress: log }),
+        );
+    } finally {
+        fetchingSource = false;
+    }
 
     const root = await findProjectRoot(target);
     log(`버전 ${count(result.revisionNo)} · 파일 ${count(result.fileCount)}개를 받았습니다.`);
