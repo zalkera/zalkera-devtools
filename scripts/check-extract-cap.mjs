@@ -15,72 +15,83 @@
  *
  * ## 세 가지를 본다
  *
- *  ⑴ `resolveCap` 이 [MAX_EXTRACT_BYTES] 로 죈다 — 파일 안 리터럴로 죄면 `limits.ts` 와 갈린다.
+ *  ⑴ `resolveCap` 의 기본값이 `MAX_EXTRACT_BYTES` 이고, 호출부 값을 **되죄지 않는다**.
  *  ⑵ 두 해제 경로가 **둘 다** `resolveCap(` 을 지난다.
- *  ⑶ `untar.ts` 안에 크기 리터럴이 없다 — 상한은 `limits.ts` 에서 온다.
+ *  ⑶ 소스 경로의 상한이 `limits.ts` 의 상수 그대로다 — 실제 천장이 검사기 밖에 살면 안 된다.
  *
- * ## 이 검사기가 못 하는 것 — 적어 둔다
+ * ## 무엇을 안 보는가 — 그리고 왜 그게 낫다고 보는가
  *
- * **형태만 봅니다.** 값을 딴 이름으로 계산해 끼워 넣거나(`const c2 = options.maxBytes ?? limit`),
- * `limits.ts` 쪽 유도식을 바꾸는 우회는 못 잡습니다. 이 검사기가 막는 것은 **되돌아가는 편집**
- * (되죄기 부활 · 한쪽 경로만 날값 · 리터럴 재도입)이지 작정한 우회가 아닙니다. 그 선을 넘는
- * 것은 시험이 해야 하는데, 천장을 관찰하려면 수백 MB 픽스처가 필요해 이 자리에서는 못 합니다 —
- * 대신 `resolveCap` 을 노출해 **그 함수의 계약**을 `limits.test.ts` 가 직접 잽니다.
+ * **정확한 문자열을 요구하지 않습니다.** 첫 판이 `Math.min(…)` 을, 둘째 판이 지역변수 이름과
+ * 인자 표기를 요구했더니, **정당한 편집 7건 중 6건**(변수 개명 · 줄바꿈 · 구조분해 · 셈 상수
+ * 조정 · 오류 문자열 안의 숫자)에 빨간불이 났습니다(심의 실측). 검사기가 고치려는 손을 막으면
+ * 그것은 방어가 아니라 마찰입니다. 그래서 **이름과 표기를 안 봅니다** — 보는 것은 셋뿐입니다.
+ *
+ * **대입의 존재만 보고 그 값이 쓰이는지는 안 봅니다.** `resolveCap(...) * 1024` 나 파이프라인에서
+ * `guard` 를 빼는 우회는 못 잡습니다 — 그 축은 `npm test` 가 잡습니다(심의 실측: B1·B3·B4·B6
+ * 전부 시험이 물었습니다). 형태와 동작을 나눠 맡는 것이 이 자리의 설계입니다.
  */
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-const SRC = fileURLToPath(new URL("../packages/core/src/untar.ts", import.meta.url));
-const text = readFileSync(SRC, "utf8");
+const CAP_SRC = fileURLToPath(new URL("../packages/core/src/untar.ts", import.meta.url));
+const SOURCE_SRC = fileURLToPath(new URL("../packages/core/src/fetchSource.ts", import.meta.url));
+const text = readFileSync(CAP_SRC, "utf8");
 const fail = [];
 
-// ⑴ 기본값이 공용 상수인가 — 그리고 **되죄지 않는가**
-//
-// ⚠ 이 검사기의 첫 판이 `Math.min(…)` 문자열을 **요구**했다. 그 되죄기가 바로 뒤에 차단으로
-//   드러났는데(페이로드 경로가 통째로 막혔다), 검사기는 그것을 요구사항으로 굳혀 두어 고치려는
-//   손을 빨간불로 막았다. **검사기도 심의 대상이다.**
-if (!/return maxBytes \?\? MAX_EXTRACT_BYTES;/.test(text)) {
-    fail.push("`resolveCap` 이 `maxBytes ?? MAX_EXTRACT_BYTES` 가 아닙니다 — 기본값은 공용 상수여야 합니다.");
+/** 주석과 문자열을 지운 사본. 문면·설명은 판정 재료가 아니다(오류 문자열 안의 숫자도 마찬가지다). */
+const code = text
+    .replace(/\/\*[\s\S]*?\*\//g, " ")
+    .replace(/(^|[^:])\/\/[^\n]*/g, "$1 ")
+    .replace(/`(?:\\[\s\S]|[^\\`])*`/g, "``")
+    .replace(/"(?:\\.|[^\\"\n])*"/g, '""')
+    .replace(/'(?:\\.|[^\\'\n])*'/g, "''");
+
+/** `resolveCap` 본문. 이름·표기는 안 보고 **무엇을 하는가**만 본다. */
+const capBody = /function resolveCap\s*\([^)]*\)\s*(?::[^{]*)?\{([\s\S]*?)\n\}/.exec(code)?.[1];
+if (capBody === undefined) {
+    fail.push("`resolveCap` 함수를 찾지 못했습니다 — 두 해제 경로가 지나는 유일한 문입니다.");
+} else {
+    // ⑴-a 기본값이 공용 상수인가
+    if (!/\bMAX_EXTRACT_BYTES\b/.test(capBody)) {
+        fail.push("`resolveCap` 이 `MAX_EXTRACT_BYTES` 를 안 씁니다 — 기본값이 limits.ts 와 갈립니다.");
+    }
+    // ⑴-b 호출부 값을 되죄지 않는가
+    if (/\bMath\.min\b/.test(capBody)) {
+        fail.push(
+            "`resolveCap` 이 호출부 값을 되죕니다 — 호출부는 자기 입력에서 자기 상한을 유도합니다. " +
+                "되죘더니 의존성 페이로드 해제가 **항상** 실패했습니다(마감 심의 차단).",
+        );
+    }
 }
-if (/resolveCap[\s\S]{0,200}?Math\.min/.test(text)) {
-    fail.push("`resolveCap` 이 호출부 값을 되죕니다 — 호출부는 자기 입력에서 자기 상한을 유도합니다(마감 심의 차단).");
-}
-// ⑴-b 상수를 이 파일에서 가려 놓지 않았는가(별칭 import 로 이름만 남기는 우회)
-if (!/import \{[^}]*\bMAX_EXTRACT_BYTES\b[^}]*\} from "\.\/limits\.ts";/.test(text)) {
+
+// ⑴-c 상수를 이 파일에서 가리지 않았는가(별칭 import · 재선언)
+// ⚠ **원문에서 본다.** 지정자는 문자열 리터럴이라 위 사본에서는 지워져 있다.
+if (!/import\s*\{[^}]*\bMAX_EXTRACT_BYTES\b[^}]*\}\s*from\s*["']\.\/limits\.ts["']/.test(text)) {
     fail.push("`MAX_EXTRACT_BYTES` 를 limits.ts 에서 **그 이름 그대로** 들여오지 않았습니다.");
 }
-if (/\b(?:const|let|var|function)\s+MAX_EXTRACT_BYTES\b/.test(text)) {
+if (/\b(?:const|let|var|function)\s+MAX_EXTRACT_BYTES\b/.test(code)) {
     fail.push("`MAX_EXTRACT_BYTES` 를 이 파일에서 다시 선언했습니다 — 이름은 같고 값만 다른 우회입니다.");
 }
 
-// ⑵ 두 경로가 모두 그 문을 지나는가
-const buffered = /const cap = resolveCap\(maxBytes\);/.test(text);
-const streamed = /const limit = resolveCap\(options\.maxBytes\)/.test(text);
-if (!buffered) fail.push("버퍼 경로(gunzipBuffer)가 `resolveCap` 을 안 지납니다.");
-if (!streamed) fail.push("스트리밍 경로(extractTarGzFile)가 `resolveCap` 을 안 지납니다.");
+// ⑵ 두 경로가 **둘 다** 그 문을 지나는가
+const buffered = /function gunzipBuffer\s*\([\s\S]*?\n\}/.exec(code)?.[0] ?? "";
+const streamed = /export async function extractTarGzFile\s*\([\s\S]*?\n\}/.exec(code)?.[0] ?? "";
+if (!/\bresolveCap\s*\(/.test(buffered)) fail.push("버퍼 경로(gunzipBuffer)가 `resolveCap` 을 안 지납니다.");
+if (!/\bresolveCap\s*\(/.test(streamed)) fail.push("스트리밍 경로(extractTarGzFile)가 `resolveCap` 을 안 지납니다.");
 
-// ⑶ 크기 리터럴이 남아 있지 않은가 — 주석은 뺀다(주석은 값이 아니다)
-const code = text.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:])\/\/[^\n]*/g, "$1 ");
-// 표기를 가리지 않는다 — `200 * 1024 * 1024` 도 `0x8000_0000` 도 `209715200` 도 같은 것이다.
-//
-// ⚠ **바이트 규모만 본다.** 이 파일에는 개수 상한(`MAX_ENTRIES = 200_000`)도 산다. 그것은 크기가
-//   아니라 **셈**이고 `limits.ts` 의 관할이 아니다 — 규모로 가른다(1,000,000 미만은 셈으로 본다).
-for (const m of code.matchAll(/\b0[xX][0-9a-fA-F_]+\b|\b\d[\d_]*\b|\b\d+\s*\*\s*1024\b/g)) {
-    const token = m[0];
-    if (/\*/.test(token)) {
-        fail.push(`크기 리터럴이 남아 있습니다: \`${token}\` — 상한은 limits.ts 가 유도합니다.`);
-        continue;
-    }
-    const value = Number(token.replace(/_/g, ""));
-    if (Number.isFinite(value) && value >= 1_000_000) {
-        fail.push(`크기 리터럴이 남아 있습니다: \`${token}\` — 상한은 limits.ts 가 유도합니다.`);
-    }
+// ⑶ 소스 경로의 실제 천장이 검사기 밖에 살지 않는가
+//    `fetchSource.ts` 의 상한을 `Infinity` 로 바꾸면 여기까지 전부 초록이면서 상한이 사라진다(심의 우회).
+const sourceCode = readFileSync(SOURCE_SRC, "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, " ")
+    .replace(/(^|[^:])\/\/[^\n]*/g, "$1 ");
+if (!/const\s+MAX_SOURCE_EXTRACT_BYTES\s*=\s*MAX_EXTRACT_BYTES\s*;/.test(sourceCode)) {
+    fail.push("`fetchSource.ts` 의 소스 상한이 `MAX_EXTRACT_BYTES` 그대로가 아닙니다 — 실제 천장이 검사기 밖에 삽니다.");
 }
 
 if (fail.length > 0) {
     console.error(`❌ 해제 상한 일원화 검사 — ${fail.length}건:`);
     for (const f of fail) console.error(`   · ${f}`);
-    console.error("   → 두 경로가 같은 문을 지나야 합니다. `resolveCap` 을 쓰십시오.");
+    console.error("   → 두 경로가 같은 문을 지나고, 그 문이 호출부를 되죄지 않아야 합니다.");
     process.exit(1);
 }
-console.log("✅ 해제 상한 일원화 — 통과 (두 경로가 같은 문 · 천장은 limits.ts)");
+console.log("✅ 해제 상한 일원화 — 통과 (두 경로가 같은 문 · 되죄기 없음 · 소스 천장은 limits.ts)");

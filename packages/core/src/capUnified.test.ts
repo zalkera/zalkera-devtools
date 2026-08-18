@@ -79,15 +79,18 @@ test("상한 아래 — 두 경로가 **함께** 거부한다", async () => {
     await rejects(() => streamRun(gz, 1024));
 });
 
-test("호출부가 준 상한을 **되죄지 않는다** — 페이로드는 자기 입력에서 유도한다", async () => {
-    // 마감 심의 차단: 소스 천장(450MB)으로 모든 호출부를 되죄자, 실측 158MB 페이로드가 요구하는
-    // 1264MB 가 450MB 로 깎여 **정상 페이로드 해제가 항상 실패**했다. 조용한 고장이었다 —
-    // `tryFetchPayload` 가 `null` 로 수렴해 「가속기가 영영 안 켜지는」 모습으로만 나타난다.
+test("상한을 안 주면 **두 경로가 같은 기본값**으로 선다", async () => {
+    // 「기본값이 두 경로에서 같다」가 이 파일의 존재 이유인데, 그것을 재는 자리가 한때 사라졌다
+    // (`resolveCap` 단위 시험으로 갈아탔더니 `limits.test.ts` 와 완전 중복이 됐다 — 심의 지적).
     //
-    // 천장을 넘는 실물 입력으로는 못 잰다(수백 MB 픽스처). `resolveCap` 의 **계약**을 직접 잰다.
+    // 천장(450MB)을 넘는 입력으로는 못 잰다. 대신 **두 경로가 같은 문을 지나는지**를 그 문의
+    // 반환값으로 잰다 — 어느 한쪽이 날값을 쓰면 이 값과 갈린다.
     const { resolveCap } = await import("./untar.ts");
-    const asks = 158 * 1024 * 1024 * 8;
-    strictEqual(resolveCap(asks), asks, "호출부가 준 상한을 되죄면 안 된다");
-    strictEqual(resolveCap(undefined), MAX_EXTRACT_BYTES, "안 주면 소스 기본값이 선다");
-    strictEqual(resolveCap(1024), 1024, "좁게 주면 그대로 선다");
+    strictEqual(resolveCap(undefined), MAX_EXTRACT_BYTES, "안 주면 소스 기본값");
+    strictEqual(resolveCap(1024), 1024, "주면 그대로 — 되죄지 않는다");
+
+    // 그 기본값 아래의 정상 입력은 **양쪽 다** 통과한다(가드가 «전부 막는» 상태가 아님을 못박는다).
+    const gz = tarGz(SIZE);
+    strictEqual(await bufferRun(gz, MAX_EXTRACT_BYTES), 1);
+    strictEqual(await streamRun(gz, MAX_EXTRACT_BYTES), 1);
 });

@@ -257,14 +257,14 @@ export async function packProject(options: PackOptions): Promise<PackResult> {
                 //    없어서, 150MB 짜리 폴더는 **전부 메모리에 올린 뒤에야** 「너무 큽니다」로
                 //    거절됐다(실측 VmHWM 445MB ≈ 원본의 3배, 3.2초). 사진·영상이 섞인 1GB 폴더에
                 //    「새 버전 올리기」를 한 번 누르면 확장 호스트가 그만큼 부푼다 — 그리고 이 자리에는
-                //    취소 단추가 없다. 상한은 업로드 상한(`publish.ts` 100MB)과 **같은 값**이다:
-                //    어차피 거절될 것을 끝까지 담을 이유가 없다.
+                //    취소 단추가 없다. 상한은 **메모리 예산**이다 — 업로드 상한과 다른 양이다([MAX_RAW_BYTES]).
                 totalBytes += info.size;
                 if (totalBytes > MAX_RAW_BYTES) {
                     throw new DevtoolsError(
                         "PACK_FAILED",
-                        `폴더가 너무 큽니다(원본 ${Math.round(totalBytes / 1024 / 1024)}MB 이상 · 한 번에 다룰 수 있는 양은 ${Math.round(MAX_RAW_BYTES / 1024 / 1024)}MB).`,
-                        "동영상·원본 이미지·빌드 산출물이 폴더에 들어 있지 않은지 확인해 주세요. 다 담기 전에 멈췄습니다.",
+                        `폴더가 너무 큽니다 — 원본 ${Math.round(totalBytes / 1024 / 1024)}MB 이상입니다(한 번에 묶을 수 있는 원본은 ${Math.round(MAX_RAW_BYTES / 1024 / 1024)}MB).`,
+                        "소스가 아닌 것이 폴더에 들어 있지 않은지 보세요 — 동영상·원본 이미지·빌드 산출물이 흔한 원인입니다. " +
+                            "업로드 자체의 상한은 묶은 뒤 크기 100MB 로 따로 있습니다. 다 담기 전에 멈췄습니다.",
                     );
                 }
                 entries.push({

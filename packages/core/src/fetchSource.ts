@@ -71,8 +71,21 @@ export async function fetchSiteSource(options: FetchSourceOptions): Promise<Fetc
     //    죽으면 `.zalkera-fetch-*` 가 남는다. 그것은 점으로 시작해 `ls` 에 **안 보이는데**, 그
     //    폴더는 그 뒤 모든 「소스 받기」에서 막힌다 — 고객 눈에 그 폴더는 비어 있고, 안내문은
     //    "빈 폴더를 고르세요"다. 우리가 만든 것이니 우리가 지운다(마감 심의 차단).
-    const swept = await sweepOurScratch(options.targetDir);
-    if (swept > 0) report(`이전에 받다 만 임시 파일 ${swept}건을 정리했습니다.`);
+    const scratch = await sweepOurScratch(options.targetDir, TRANSFER_TIMEOUT_MS);
+    if (scratch.swept > 0) report(`이전에 받다 만 임시 파일 ${scratch.swept}건을 정리했습니다.`);
+    if (scratch.active > 0) {
+        // ⚠ **이 폴더는 자물쇠 노릇도 한다.** 죽은 잔해만 걷고 살아 있는 것은 남기므로, 여기까지
+        //    왔다는 것은 **지금 누가 이 폴더로 받고 있다**는 뜻이다. 그대로 진행하면 두 받기가
+        //    같은 폴더에 겹쳐 쓰고, 먼저 것의 롤백이 나중 것이 푼 파일까지 걷어 간다 — 사용자에게는
+        //    「받았습니다」가 뜨고 폴더는 비어 있었다(실측).
+        //
+        //    「비어 있지 않습니다」로 답하지 않는다 — 그 문장은 **거짓**이다(폴더는 비어 보인다).
+        throw new DevtoolsError(
+            "NOT_A_SITE",
+            "이 폴더로 이미 소스를 받는 중입니다.",
+            "끝날 때까지 기다리시거나, 다른 빈 폴더를 골라 주세요. 받기는 최대 15분 걸릴 수 있습니다.",
+        );
+    }
 
     // **편집기가 만든 것 때문에 막히지 않는다**(emptyDir.ts) — `.vscode` 는 우리가 만드는 쪽이다.
     const existing = await meaningfulEntries(options.targetDir);

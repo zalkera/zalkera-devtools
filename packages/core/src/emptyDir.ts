@@ -1,4 +1,4 @@
-import { readdir, rm } from "node:fs/promises";
+import { readdir, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 
 /**
@@ -39,24 +39,68 @@ const IGNORED = new Set([
  *   [IGNORED] 에 넣어 **무시**하면 그 잔해가 소스 트리에 영원히 남는다. 우리가 만든 것이니
  *   우리가 지운다.
  */
-const OUR_SCRATCH_PREFIX = ".zalkera-fetch-";
+export const OUR_SCRATCH_PREFIX = ".zalkera-fetch-";
 
 /** 우리가 남긴 임시 자리를 걷어낸다. 없으면 아무 일도 안 한다. */
-export async function sweepOurScratch(dir: string): Promise<number> {
+/**
+ * 이 폴더에 우리 임시 자리가 있는가. `{swept, active}` — **지운 수**와 **아직 살아 있는 수**다.
+ *
+ * ⚠ **살아 있는 것과 죽은 것을 반드시 가른다.** 이름 접두만 보고 다 지웠더니, 같은 폴더로 두 번째
+ *   받기를 시작한 순간 **진행 중인 첫 번째의 임시 파일이 사라져** 첫 번째가 ENOENT 로 죽고, 그
+ *   실패의 롤백이 두 번째가 푼 파일까지 걷어 갔다. 사용자에게는 「1개 파일을 받았습니다」가 뜨고
+ *   폴더는 **비어 있었다**(실측). 다운로드는 최대 15분이고 취소 단추가 없어 「멈춘 것 같다」며 다시
+ *   누르는 것이 유일한 대응이라, 그 형상이 곧 정상 사용 경로다.
+ *
+ *   이 폴더는 **자물쇠 노릇도 한다** — 살아 있는 것이 있으면 부르는 쪽이 그렇게 말해야 한다.
+ *
+ * 판정은 **가장 최근에 손댄 시각**으로 한다: 전송 상한(15분)보다 오래됐으면 그 받기는 이미 죽었다.
+ */
+export async function sweepOurScratch(dir: string, staleAfterMs: number): Promise<{ swept: number; active: number }> {
     let entries;
     try {
         entries = await readdir(dir, { withFileTypes: true });
     } catch {
-        return 0; // 폴더가 없거나 못 읽는다 — 부르는 쪽이 판정한다
+        return { swept: 0, active: 0 }; // 폴더가 없거나 못 읽는다 — 부르는 쪽이 판정한다
     }
     let swept = 0;
+    let active = 0;
     for (const entry of entries) {
-        // 심링크는 안 따라간다 — 이름만 흉내 낸 링크가 우리 지우개를 밖으로 끌고 갈 수 있다.
-        if (!entry.name.startsWith(OUR_SCRATCH_PREFIX) || entry.isSymbolicLink()) continue;
-        await rm(join(dir, entry.name), { recursive: true, force: true }).catch(() => {});
-        swept += 1;
+        // ⚠ **`mkdtemp` 가 만드는 모양만 본다** — 접두 + 무작위 6자 **디렉터리**. 접두만 보면
+        //   고객이 둔 `.zalkera-fetch-메모.txt` 나 `.zalkera-fetch-내작업/` 을 지운다(실측).
+        //   심링크는 안 따라간다 — 이름만 흉내 낸 링크가 우리 지우개를 폴더 밖으로 끌고 간다.
+        if (!OUR_SCRATCH_NAME.test(entry.name) || !entry.isDirectory() || entry.isSymbolicLink()) continue;
+        const full = join(dir, entry.name);
+        if (!(await isStale(full, staleAfterMs))) {
+            active += 1; // 누가 지금 받고 있다 — 건드리지 않는다
+            continue;
+        }
+        try {
+            await rm(full, { recursive: true, force: true });
+            swept += 1; // ⚠ **성공만 센다.** 시도를 세면 「정리했습니다」 뒤에 「비어 있지 않습니다」가 온다(실측).
+        } catch {
+            /* 못 지웠다 — 부르는 쪽의 빈 폴더 판정이 그 사실을 말한다 */
+        }
     }
-    return swept;
+    return { swept, active };
+}
+
+/** 접두 + `mkdtemp` 의 무작위 6자. 고객이 우연히 만들 이름이 아니다. */
+const OUR_SCRATCH_NAME = /^\.zalkera-fetch-[A-Za-z0-9]{6}$/;
+
+/** 이 받기가 죽었는가 — 안의 것 중 **가장 최근**에 손댄 시각으로 판정한다. */
+async function isStale(dir: string, staleAfterMs: number): Promise<boolean> {
+    let newest = 0;
+    try {
+        const info = await stat(dir);
+        newest = info.mtimeMs;
+        for (const name of await readdir(dir)) {
+            const child = await stat(join(dir, name)).catch(() => null);
+            if (child && child.mtimeMs > newest) newest = child.mtimeMs;
+        }
+    } catch {
+        return false; // 못 읽으면 **살아 있는 것으로 본다** — 지우는 쪽으로 실패하지 않는다
+    }
+    return Date.now() - newest > staleAfterMs;
 }
 
 /** 무시 대상을 뺀 실제 항목. 비어 있으면 받아도 안전하다. */

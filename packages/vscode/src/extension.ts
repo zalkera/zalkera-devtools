@@ -780,7 +780,23 @@ async function startPreviewInner(pinned?: CapturedTenant): Promise<void> {
 
     // **웹뷰가 아니라 실제 브라우저로 연다**(§3.5) — 웹뷰는 쿠키·CSP 가 실제 탭과 달라
     // "로컬에선 됐는데 배포하니 다르다"를 만드는 정확한 자리다.
-    await vscode.env.openExternal(vscode.Uri.parse(started.server.url));
+    //
+    // ⚠ **여기서 실패해도 프리뷰 시작은 성공이다.** 이 줄은 **마지막 await** 이고, 그 앞에서 키
+    //    발급·`session` 설정·사이드바·갱신 예약이 전부 끝나 있다. 그런데 던지면 위쪽 호출부까지
+    //    올라가 「프리뷰를 시작하지 못했습니다」 계열 문면이 뜬다 — 갱신 경로에서는 「갱신하지 못해
+    //    프리뷰가 멈췄습니다」가 됐다(마감 3회전 차단). **둘 다 거짓이다**: 프리뷰는 돌고 있고
+    //    브라우저만 안 열렸다. 원격 호스트·오프너 부재에서 실제로 거부된다.
+    //
+    //    주소는 말해 준다 — 사용자가 직접 열 수 있어야 한다.
+    const opened = await vscode.env
+        .openExternal(vscode.Uri.parse(started.server.url))
+        .then((ok) => ok, () => false);
+    if (!opened) {
+        log(`브라우저를 열지 못했습니다 — 주소를 직접 여세요: ${started.server.url}`);
+        void vscode.window.showInformationMessage(
+            `프리뷰가 시작됐습니다. 브라우저를 자동으로 열지 못했으니 주소를 직접 열어 주세요 — ${plainNotice(started.server.url)}`,
+        );
+    }
 }
 
 /**
