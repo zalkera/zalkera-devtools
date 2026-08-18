@@ -7,6 +7,7 @@ import { createGunzip } from "node:zlib";
 import { pipeline } from "node:stream/promises";
 import type { ZalkeraApi } from "./api.ts";
 import { DevtoolsError } from "./errors.ts";
+import { downloadBounded } from "./download.ts";
 import { extractTarGz } from "./untar.ts";
 
 // 해제기 본체는 `untar.ts` 로 옮겼다(페이로드 스트리밍 경로와 **같은 파서**를 쓰기 위해 · §13.10.6).
@@ -59,15 +60,6 @@ export async function fetchSiteSource(options: FetchSourceOptions): Promise<Fetc
 
     report(`버전 ${revisionNo} 소스를 받는 중…`);
     const source = await options.api.sourceUrl(revisionNo);
-    const response = await fetchImpl(source.url, { signal: AbortSignal.timeout(TRANSFER_TIMEOUT_MS) });
-    if (!response.ok || !response.body) {
-        throw new DevtoolsError(
-            "SERVER_REJECTED",
-            `소스를 내려받지 못했습니다(HTTP ${response.status}).`,
-            "잠시 뒤 다시 시도해 주세요.",
-        );
-    }
-
     await mkdir(options.targetDir, { recursive: true });
     // **편집기가 만든 것 때문에 막히지 않는다**(emptyDir.ts) — `.vscode` 는 우리가 만드는 쪽이다.
     const existing = await meaningfulEntries(options.targetDir);
@@ -81,24 +73,35 @@ export async function fetchSiteSource(options: FetchSourceOptions): Promise<Fetc
         );
     }
 
-    const buffer = Buffer.from(await response.arrayBuffer());
+    // 주소 검사·크기 상한은 형제 셋이 공유한다(`download.ts`) — 자리마다 다르게 두던 것이 결함이었다.
+    const buffer = await downloadBounded(source.url, {
+        fetchImpl,
+        timeoutMs: TRANSFER_TIMEOUT_MS,
+        what: "소스",
+    });
 
     // ⚠ **받은 바이트가 원장의 그 바이트인지 대조한다**(심의 반영 · 2026-08-03).
     // 시작 소스(B1)는 진작 대조하는데 **이 경로만 비어 있었다** — 그런데 이쪽이 MVP 절단선의 본체다.
     // 불일치면 **풀지 않는다**: 풀고 나면 무엇이 깨졌는지 모른 채 소스가 남고, 그 소스로 만든 사이트의
-    // 원인 추적이 불가능해진다. 서버가 sha 를 안 주면(구버전 서버) 그 사실을 말하고 진행한다 —
-    // **검사가 있는 척하지 않는다.**
-    if (source.sha256) {
-        const actual = createHash("sha256").update(buffer).digest("hex");
-        if (actual !== source.sha256) {
-            throw new DevtoolsError(
-                "SERVER_REJECTED",
-                "받은 소스가 원본과 다릅니다(무결성 확인 실패).",
-                "네트워크 문제일 수 있습니다. 다시 시도해 주세요.",
-            );
-        }
-    } else {
-        report("⚠ 서버가 무결성 해시를 주지 않아 대조를 건너뜁니다(서버가 오래된 버전일 수 있습니다).");
+    // 원인 추적이 불가능해진다.
+    //
+    // ⚠ 종전에는 서버가 sha 를 안 주면 **경고하고 진행**했다. 그 경고는 출력 채널로만 가서 패널을
+    //   안 여는 사용자에게는 아무것도 안 보였고, 그러면 "검사가 있는 척"이 된다 — 형제 `presets.ts`
+    //   가 같은 지적으로 이미 끊는 쪽으로 갔는데 이 경로만 남아 있었다(심의 실측).
+    if (!source.sha256) {
+        throw new DevtoolsError(
+            "SERVER_REJECTED",
+            "서버가 무결성 해시를 주지 않아 소스를 검증할 수 없습니다.",
+            "잘커라에 문의해 주세요. 검증 없이 진행하지 않았습니다.",
+        );
+    }
+    const actual = createHash("sha256").update(buffer).digest("hex");
+    if (actual !== source.sha256) {
+        throw new DevtoolsError(
+            "SERVER_REJECTED",
+            "받은 소스가 원본과 다릅니다(무결성 확인 실패).",
+            "네트워크 문제일 수 있습니다. 다시 시도해 주세요.",
+        );
     }
 
     // ⚠ **반쪽 해제를 남기지 않는다.** `extractTarGz` 는 항목을 훑으며 **그때그때 쓴다** — 경로 이탈·

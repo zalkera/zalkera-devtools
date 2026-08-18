@@ -3,6 +3,7 @@ import { mkdir, rm } from "node:fs/promises";
 import { meaningfulEntries } from "./emptyDir.ts";
 import type { ZalkeraApi } from "./api.ts";
 import { DevtoolsError } from "./errors.ts";
+import { downloadBounded } from "./download.ts";
 import { extractZip } from "./unzip.ts";
 
 /**
@@ -52,15 +53,12 @@ export async function startFromPreset(options: StartFromPresetOptions): Promise<
     //    고친 자리다). 이 호출은 신규 고객이 제일 먼저 누르는 「예제로 시작」의 다운로드이고,
     //    그 위를 덮은 진행 알림에는 취소 버튼이 없다 — 상한이 유일한 탈출구다.
     //    형제 전송로 `fetchSource.ts`·`publish.ts` 와 같은 값을 쓴다.
-    const response = await fetchImpl(source.url, { signal: AbortSignal.timeout(TRANSFER_TIMEOUT_MS) });
-    if (!response.ok) {
-        throw new DevtoolsError(
-            "SERVER_REJECTED",
-            `시작 소스를 내려받지 못했습니다(HTTP ${response.status}).`,
-            "잠시 뒤 다시 시도해 주세요.",
-        );
-    }
-    const zip = Buffer.from(await response.arrayBuffer());
+    // 주소 검사·크기 상한은 형제 셋이 공유한다(`download.ts`).
+    const zip = await downloadBounded(source.url, {
+        fetchImpl,
+        timeoutMs: TRANSFER_TIMEOUT_MS,
+        what: "시작 소스",
+    });
 
     // ⚠ **fail-open 이었다**(심의 지적): `source.sha256 &&` 라 서버가 빈 값을 주면 검사가 소멸했는데,
     // 주석은 "중간자도 여기서 걸린다"고 강하게 적혀 있었다. 검사가 있는 척하는 것이 없는 것보다 나쁘다.

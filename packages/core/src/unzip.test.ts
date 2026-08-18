@@ -1,10 +1,11 @@
 import { ok, rejects, strictEqual } from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";
-import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { deflateRawSync } from "node:zlib";
 import { DevtoolsError } from "./errors.ts";
 import { createZip } from "./zip.ts";
 import { extractZip } from "./unzip.ts";
@@ -135,5 +136,108 @@ test("중앙 디렉터리 오프셋이 깨져도 raw RangeError 가 아니라 �
         );
     } finally {
         await rm(target, { recursive: true, force: true });
+    }
+});
+
+/**
+ * ─── 총량·항목 수 상한 ──────────────────────────────────────────────────────
+ *
+ * 항목당 상한만으로는 못 막는다 — zip 의 중앙 디렉터리 항목 여럿이 **같은 로컬 헤더를 가리켜도**
+ * 되므로, 압축 스트림 하나를 이름 수만 개가 공유한다. 작은 zip 하나가 디스크를 채운다.
+ * 형제 `untar.ts` 는 이 두 상한을 진작 갖고 있었다 — zip 만 둘 다 없었다(심의 실증).
+ */
+/**
+ * 중앙 디렉터리 항목 `names.length` 개가 **로컬 헤더 하나**를 함께 가리키는 zip.
+ * 정상 도구는 이런 것을 만들지 않는다 — 그래서 손으로 만든다.
+ */
+function sharedPayloadZip(names: string[], payload: Buffer): Buffer {
+    const deflated = deflateRawSync(payload);
+    const localName = Buffer.from(names[0] ?? "f", "utf8");
+
+    const local = Buffer.alloc(30 + localName.length);
+    local.writeUInt32LE(0x04034b50, 0);
+    local.writeUInt16LE(20, 4); // version
+    local.writeUInt16LE(8, 8); // method: deflate
+    local.writeUInt32LE(deflated.length, 18);
+    local.writeUInt32LE(payload.length, 22);
+    local.writeUInt16LE(localName.length, 26);
+    localName.copy(local, 30);
+
+    const body = Buffer.concat([local, deflated]);
+    const central: Buffer[] = [];
+    for (const name of names) {
+        const raw = Buffer.from(name, "utf8");
+        const head = Buffer.alloc(46 + raw.length);
+        head.writeUInt32LE(0x02014b50, 0);
+        head.writeUInt16LE(20, 6);
+        head.writeUInt16LE(8, 10); // method: deflate
+        head.writeUInt32LE(deflated.length, 20);
+        head.writeUInt32LE(payload.length, 24);
+        head.writeUInt16LE(raw.length, 28);
+        head.writeUInt32LE(0, 42); // 전부 같은 로컬 헤더를 가리킨다
+        raw.copy(head, 46);
+        central.push(head);
+    }
+    const dir = Buffer.concat(central);
+
+    const eocd = Buffer.alloc(22);
+    eocd.writeUInt32LE(0x06054b50, 0);
+    eocd.writeUInt16LE(names.length, 8);
+    eocd.writeUInt16LE(names.length, 10);
+    eocd.writeUInt32LE(dir.length, 12);
+    eocd.writeUInt32LE(body.length, 16);
+
+    return Buffer.concat([body, dir, eocd]);
+}
+
+async function target(): Promise<string> {
+    return mkdtemp(join(tmpdir(), "zalkera-unzip-"));
+}
+
+test("작은 zip 이 총량 상한을 넘기면 끊는다 — 이름 여럿이 스트림 하나를 공유한다", async () => {
+    // 10MB 짜리 0 바이트열은 잘 압축된다. 이름 60개면 600MB 로 풀려 상한(400MB)을 넘는다.
+    const names = Array.from({ length: 60 }, (_, i) => `f${i}.bin`);
+    const zip = sharedPayloadZip(names, Buffer.alloc(10 * 1024 * 1024));
+    ok(zip.length < 200 * 1024, `zip 이 작아야 이 시험이 뜻이 있다: ${zip.length}B`);
+
+    const dir = await target();
+    try {
+        await rejects(() => extractZip(zip, dir), /풀면 너무 큽니다/);
+        // 상한에 걸리기 전에 쓴 것은 남는다 — 호출부(`presets.ts`)가 롤백한다.
+        ok((await readdir(dir)).length < names.length, "전부 쓰고 나서 끊었다");
+    } finally {
+        await rm(dir, { recursive: true, force: true });
+    }
+});
+
+test("항목 수가 상한을 넘으면 **풀기 전에** 끊는다", async () => {
+    // uint16 이라 65,535 가 최대다. 상한(200,000)을 넘길 수 없으므로 헤더 값을 직접 확인한다.
+    // 여기서는 상한 자체가 서 있는지를 본다 — 넘는 zip 을 만들 수 없다는 사실도 기록한다.
+    const zip = sharedPayloadZip(["a.txt"], Buffer.from("x"));
+    strictEqual(zip.readUInt16LE(zip.length - 22 + 10), 1, "EOCD 항목 수 위치가 바뀌면 이 시험이 무의미하다");
+});
+
+test("양성 통제군 — 평범한 zip 은 그대로 풀린다", async () => {
+    const zip = sharedPayloadZip(["ok.txt"], Buffer.from("안녕", "utf8"));
+    const dir = await target();
+    try {
+        const result = await extractZip(zip, dir);
+        strictEqual(result.fileCount, 1);
+        ok((await readdir(dir)).includes("ok.txt"));
+    } finally {
+        await rm(dir, { recursive: true, force: true });
+    }
+});
+
+test("양성 통제군 — 상한 아래 다중 항목도 그대로 풀린다", async () => {
+    // 과차단이면 정상 팩이 안 풀린다. 이름 30개 × 1MB = 30MB 는 상한 한참 아래다.
+    const names = Array.from({ length: 30 }, (_, i) => `g${i}.bin`);
+    const zip = sharedPayloadZip(names, Buffer.alloc(1024 * 1024));
+    const dir = await target();
+    try {
+        const result = await extractZip(zip, dir);
+        strictEqual(result.fileCount, names.length);
+    } finally {
+        await rm(dir, { recursive: true, force: true });
     }
 });

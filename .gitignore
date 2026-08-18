@@ -1,4 +1,7 @@
-node_modules/
+# ⚠ 슬래시를 붙이지 않는다. `node_modules/` 는 **디렉터리만** 매칭해서 심링크가 빠져나간다 —
+# 워크스페이스 링크 두 개가 그렇게 커밋됐고(절대경로가 공개 레포에 실렸다), 새 클론에서
+# `npm run verify` 가 죽었다(rc=216).
+node_modules
 dist/
 out/
 *.vsix

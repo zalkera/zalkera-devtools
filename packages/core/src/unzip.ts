@@ -14,6 +14,20 @@ const inflate = promisify(inflateRaw);
 const MAX_ENTRY_BYTES = 200 * 1024 * 1024;
 
 /**
+ * **해제 총량 상한.** 항목당 상한만으로는 못 막는다 — zip 의 중앙 디렉터리 항목 여럿이 **같은
+ * 로컬 헤더를 가리켜도** 되므로, 압축 스트림 하나를 이름 수만 개가 공유할 수 있다. 실측: 9KB zip
+ * 하나가 파일 150개·157MB 를 오류 없이 뱉었다(증폭 17,320:1). 항목 수 상한(uint16 라 65,535)까지
+ * 채우면 같은 방식으로 디스크가 찰 때까지 간다.
+ *
+ * 형제 `untar.ts` 는 총량과 항목 수를 **둘 다** 갖고 있다. zip 만 둘 다 없었다.
+ * 값은 항목당 상한과 같은 근거다 — 업로드 상한(100MB)의 배수로 넉넉히, 그러나 무제한은 아니게.
+ */
+const MAX_TOTAL_BYTES = 400 * 1024 * 1024;
+
+/** 항목 수 상한. 형제 `untar.ts` 와 같은 값 — 두 형식이 다른 기준을 쓸 이유가 없다. */
+const MAX_ENTRIES = 200_000;
+
+/**
  * zip 해제기 — **의존성 0**(내장 zlib). 시작 소스 팩(B1)이 zip 으로 오기 때문에 필요하다
  * (버전 이력의 소스는 tar.gz 라 `fetchSource.ts` 가 따로 맡는다 — 두 형식이 실제로 둘 다 온다).
  *
@@ -30,6 +44,15 @@ export async function extractZip(zip: Buffer, targetDir: string): Promise<UnzipR
     let offset = zip.readUInt32LE(eocd + 16);
     const root = resolve(targetDir);
     let fileCount = 0;
+    let totalBytes = 0;
+
+    if (entryCount > MAX_ENTRIES) {
+        throw new DevtoolsError(
+            "SERVER_REJECTED",
+            `받은 파일에 항목이 너무 많습니다(${entryCount.toLocaleString()}개 · 상한 ${MAX_ENTRIES.toLocaleString()}개).`,
+            "받은 꾸러미가 정상이 아닙니다. 잘커라에 문의해 주세요.",
+        );
+    }
 
     // 부모 조각을 하나씩 확인한 결과를 재사용한다 — 항목마다 뿌리부터 다시 `lstat` 하지 않는다.
     const verified = new Set<string>();
@@ -72,6 +95,15 @@ export async function extractZip(zip: Buffer, targetDir: string): Promise<UnzipR
         const raw = zip.subarray(dataStart, dataStart + compressedSize);
 
         const data = method === 0 ? raw : await inflateGuarded(raw);
+        // ⚠ **총량은 쓰기 전에 본다.** 항목당 상한을 통과한 조각도 쌓이면 디스크를 채운다.
+        totalBytes += data.length;
+        if (totalBytes > MAX_TOTAL_BYTES) {
+            throw new DevtoolsError(
+                "SERVER_REJECTED",
+                `받은 파일이 풀면 너무 큽니다(상한 ${Math.round(MAX_TOTAL_BYTES / 1024 / 1024)}MB).`,
+                "받은 꾸러미가 정상이 아닙니다. 잘커라에 문의해 주세요.",
+            );
+        }
         // ⚠ **문자열 판정만으로는 부족하다.** `resolve` 가 뿌리 안이라 해도 부모 조각이 심링크면
         //   `writeFile` 은 그 링크를 따라간다 — 판정은 파일시스템에 물어야 한다(`safeWrite.ts`).
         const segments = safeSegments(root, name);
