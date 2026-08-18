@@ -31,6 +31,21 @@ export function plainNotice(text: unknown, limit = 300): string {
 }
 
 /**
+ * **숫자로 보여 줄 값.** 서버가 준 `number` 를 문장에 넣을 때 쓴다.
+ *
+ * ⚠ 타입이 `number` 라고 런타임에도 숫자인 것은 아니다. `api.ts` 는 응답 본문의 필드 타입을
+ *   검증하지 않으므로, 적대적·탈취된 서버가 `revisionNo` 에 `1 [열기](command:…)` 를 넣으면
+ *   그 문자열이 그대로 알림에 실린다 — `notice.ts` 가 상정한 바로 그 위협 모델이다.
+ *   `ours(...)` 는 값을 바꾸지 않는 **표기**라 이것을 막지 못한다(심의 실증).
+ *
+ * 숫자로 읽히면 숫자를, 아니면 `?` 를 돌려준다. **모르면 보여 주지 않는 쪽**이다.
+ */
+export const count = (value: unknown): string => {
+    const n = typeof value === "bigint" ? Number(value) : Number(value);
+    return Number.isFinite(n) ? String(n) : "?";
+};
+
+/**
  * **서버가 정하지 않은 값**이라는 표기. 소독하지 않고 알림에 넣어도 되는 것에만 붙인다.
  *
  * 값을 바꾸지 않는다 — 오직 **사람이 한 번 판단했다는 사실**을 코드에 남긴다. `check-notice.mjs`
@@ -42,6 +57,7 @@ export function plainNotice(text: unknown, limit = 300): string {
  *   "막을 자리를 손으로 열거한다"를 식별자 층위에서 되풀이한 것이다. 목록을 뒤집는다 —
  *   **허용을 열거하고 나머지를 거부한다.**
  *
- * 붙이기 전에 물을 것: 이 값이 서버 응답에서 **한 번이라도** 유래하는가? 그렇다면 `plainNotice` 다.
+ * 붙이기 전에 물을 것: 이 값이 서버 응답에서 **한 번이라도** 유래하는가? 그렇다면 문자열은
+ * `plainNotice`, 숫자는 [count] 다 — 타입이 `number` 라는 것은 런타임 보장이 아니다.
  */
 export const ours = <T>(value: T): T => value;

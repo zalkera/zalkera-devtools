@@ -77,7 +77,7 @@ export {
     UPGRADE_NOTICE_INTERVAL_MS,
     type UpgradeNoticeState,
 } from "./upgradeNotice.ts";
-export { plainNotice, ours } from "./notice.ts";
+export { plainNotice, ours, count} from "./notice.ts";
 export {
     say,
     type CapturedTenant,

@@ -33,6 +33,7 @@
  */
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { realpathSync } from "node:fs";
 
 /**
  * 이 보고서가 **실제로 잰 것**인가. 잰 것이면 `null`, 아니면 사람에게 보여 줄 이유.
@@ -86,7 +87,12 @@ const ACCEPTED = new Map([
 ]);
 
 // 판정([whyUnmeasured])은 import 로 불러 확인할 수 있어야 하고, 그때 감사가 돌면 안 된다.
-if (process.argv[1] !== fileURLToPath(import.meta.url)) {
+//
+// ⚠ **실경로로 비교한다.** `process.argv[1]` 은 부른 경로(심링크일 수 있다)이고
+//   `import.meta.url` 은 실경로다. 그대로 비교하면 심링크·래퍼로 부를 때 본문이 안 돌고
+//   **게이트가 안 도는데 rc=0** 이 된다 — 이 검사기가 막으려는 바로 그 형상이다.
+const invokedAs = process.argv[1] === undefined ? null : realpathSync.native?.(process.argv[1]) ?? realpathSync(process.argv[1]);
+if (invokedAs !== realpathSync(fileURLToPath(import.meta.url))) {
     // 라이브러리로 불렸다 — 아래 게이트는 돌지 않는다.
 } else {
     run();

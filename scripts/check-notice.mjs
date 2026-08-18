@@ -21,7 +21,9 @@
  *
  * ■ 무엇을 허용하는가 (이 셋뿐)
  *   ⑴ 리터럴(숫자·문자열) — 서버가 정할 수 없다.
- *   ⑵ 소독기 호출 `plainNotice(...)` · `shown(...)` — 별칭은 **정의까지** 확인한다.
+ *   ⑵ 소독기 호출 `plainNotice(...)` · `shown(...)` · `count(...)` — 별칭은 **정의까지** 확인한다.
+ *       `count` 는 **숫자**용이다. 타입이 `number` 라는 것은 런타임 보장이 아니라, 서버가 그 자리에
+ *       문자열을 넣으면 `ours(...)` 는 아무것도 막지 못한다(심의 실증).
  *   ⑶ 표기 `ours(...)` — "서버가 정하지 않은 값"이라고 사람이 한 번 판단했다는 기록.
  *
  *   그 밖의 모든 표현식(맨 식별자·속성 접근·연산·임의 함수 호출)은 **반려**다. 값이 안전해도
@@ -53,11 +55,13 @@ import { parse, walk } from "./lib/ast.mjs";
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 /** 소독을 거쳤다고 인정하는 호출. 별칭은 아래 [assertDefinitionsAreReal] 이 정의까지 확인한다. */
-const SANITIZERS = new Set(["plainNotice", "shown"]);
+const SANITIZERS = new Set(["plainNotice", "shown", "count"]);
 /** "서버가 정하지 않았다"는 사람의 판단 표기. 값을 바꾸지 않으므로 정의도 확인한다. */
 const MARKER = "ours";
 /** 별칭 → 그 정의가 반드시 불러야 하는 진짜 소독기. */
 const ALIAS_MUST_CALL = new Map([["shown", "plainNotice"]]);
+/** 소독기 중 **정의가 이 파일에 있어야** 하는 것. 이름만 흉내 낸 가짜를 막는다. */
+const SANITIZER_HOME = new Map([["count", "packages/core/src/notice.ts"]]);
 
 const NOTIFY = new Set(["showInformationMessage", "showWarningMessage", "showErrorMessage"]);
 
@@ -162,8 +166,8 @@ function scan(rel, { allTemplates }) {
 
         // ⑶ 알림 호출의 **첫 인자**(= 본문). 뒤 인자는 옵션 객체와 단추 라벨이라 본문이 아니다 —
         //    거기까지 잡으면 `{modal: true, detail: …}` 같은 정상 코드가 빨개진다(첫 판이 그랬다).
-        if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)) {
-            if (!NOTIFY.has(node.expression.name.getText())) return;
+        //    부르는 형태는 점 표기만이 아니다 — 문자열 인덱스도 같은 호출이다([notifyName]).
+        if (ts.isCallExpression(node) && notifyName(node.expression) !== null) {
             const body = node.arguments[0];
             if (body) inspect(body, rel, "알림 본문");
         }
@@ -222,8 +226,13 @@ function assertMarkerIsIdentity() {
 function assertNoIndirectNotify(rel) {
     const source = parse(join(root, rel));
     walk(source, (node) => {
-        if (!ts.isPropertyAccessExpression(node)) return;
-        if (!NOTIFY.has(node.name.getText())) return;
+        if (notifyName(node) === null) return;
+        // 구조분해로 이름을 빼내는 것은 그 자체가 별칭화다 — 부르는 자리가 검사기 눈에 안 보인다.
+        if (ts.isBindingElement(node)) {
+            const { line: at } = source.getLineAndCharacterOfPosition(node.getStart());
+            findings.push(`${rel}:${at + 1} — 알림 API 를 구조분해로 빼냈습니다 — 검사기가 호출을 못 찾습니다`);
+            return;
+        }
         // 호출의 피호출자로 쓰인 것만 정상이다. 그 밖(대입·인자 전달)은 별칭화다.
         const parent = node.parent;
         if (parent && ts.isCallExpression(parent) && parent.expression === node) return;
@@ -240,7 +249,13 @@ function assertNoIndirectNotify(rel) {
  */
 const NOTICE_SOURCES = ["packages/core/src/tenantScope.ts"];
 
-/** `packages/&#42;/src` 아래 `.ts` 전부(시험 제외). 관할을 손으로 적지 않기 위한 목록. */
+/**
+ * 소스로 볼 확장자. ⚠ `.ts` 만 보면 `.mts`·`.cts`·`.tsx` 로 옮기는 순간 그 파일이 **관할 밖**이
+ * 된다 — 이 검사기가 스스로 배격한 형상이 확장자 층위에서 재발한다.
+ */
+const SOURCE_EXT = /\.[cm]?[jt]sx?$/;
+
+/** `packages/&#42;/src` 아래 소스 전부(시험 제외). 관할을 손으로 적지 않기 위한 목록. */
 function sourceFiles() {
     const out = [];
     const walkDir = (dir) => {
@@ -248,7 +263,7 @@ function sourceFiles() {
             const full = join(dir, entry);
             if (statSync(full).isDirectory()) {
                 walkDir(full);
-            } else if (entry.endsWith(".ts") && !entry.endsWith(".test.ts") && !entry.endsWith(".d.ts")) {
+            } else if (SOURCE_EXT.test(entry) && !/\.(?:test|spec)\.[cm]?tsx?$/.test(entry) && !entry.endsWith(".d.ts")) {
                 out.push(full.slice(root.length + 1));
             }
         }
@@ -270,10 +285,32 @@ function sourceFiles() {
 function callsNotify(rel) {
     let found = false;
     walk(parse(join(root, rel)), (node) => {
-        if (ts.isPropertyAccessExpression(node) && NOTIFY.has(node.name.getText())) found = true;
+        if (notifyName(node) !== null) found = true;
         if (ts.isPropertyAccessExpression(node) && node.name.getText() === "withProgress") found = true;
     });
     return found;
+}
+
+/**
+ * 이 노드가 알림 API 를 **가리키는가**. 점 표기만 보면 세 갈래로 빠져나간다:
+ *   · `vscode.window["showErrorMessage"]`  — 문자열 인덱스
+ *   · `const {showErrorMessage} = vscode.window` — 구조분해
+ *   · 위 둘을 변수에 담아 부르기 — [assertNoIndirectNotify] 가 잡는다
+ * 현재 코드에는 하나도 없다 — **지금 닫아 두는 것**이지 오늘의 결함이 아니다.
+ */
+function notifyName(node) {
+    if (ts.isPropertyAccessExpression(node) && NOTIFY.has(node.name.getText())) return node.name.getText();
+    if (ts.isElementAccessExpression(node)) {
+        const arg = node.argumentExpression;
+        if (arg && (ts.isStringLiteral(arg) || ts.isNoSubstitutionTemplateLiteral(arg)) && NOTIFY.has(arg.text)) {
+            return arg.text;
+        }
+    }
+    if (ts.isBindingElement(node)) {
+        const name = (node.propertyName ?? node.name).getText();
+        if (NOTIFY.has(name)) return name;
+    }
+    return null;
 }
 
 const all = sourceFiles();

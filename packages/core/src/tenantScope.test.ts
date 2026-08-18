@@ -170,3 +170,36 @@ test("양성 통제군 — 정상 사이트 이름은 원문 그대로 보인다
         ok(say.switched(captureTenant(name), 7).includes(name), `이름이 깨졌다: ${name}`);
     }
 });
+
+// ── 서버가 준 «숫자» ────────────────────────────────────────────────────────
+// 타입이 `number` 라는 것은 런타임 보장이 아니다. `api.ts` 는 응답 필드의 타입을 검증하지 않으므로
+// 적대적 서버가 그 자리에 문자열을 넣을 수 있고, `ours(...)` 는 값을 바꾸지 않아 아무것도 막지 못한다.
+
+test("서버가 revisionNo 에 링크를 넣어도 문장에 살아남지 않는다", () => {
+    const evil = "1 [열기](command:workbench.action.terminal.new)" as unknown as number;
+    const tenant = captureTenant("acme");
+    for (const line of [
+        say.switched(tenant, evil),
+        say.switchConfirm(tenant, evil).message,
+        say.building(tenant, evil),
+        say.buildFailed(tenant, evil),
+        say.buildTimedOut(tenant, evil),
+        say.buildWaitCancelled(tenant, evil),
+        say.cannotSwitch(tenant, evil),
+        say.buildGone(tenant, evil),
+    ]) {
+        ok(!RENDERS_AS_LINK.test(line), `링크가 살아 있다: ${line}`);
+    }
+});
+
+test("정상 숫자는 그대로 보인다 — 과소독 아님", () => {
+    const tenant = captureTenant("acme");
+    ok(say.switched(tenant, 42).includes("버전 42 "), say.switched(tenant, 42));
+    ok(say.building(tenant, 0).includes("버전 0 "), say.building(tenant, 0));
+});
+
+test("숫자로 못 읽으면 물음표 — 남의 글자를 문장에 싣지 않는다", () => {
+    const tenant = captureTenant("acme");
+    const line = say.switched(tenant, "abc" as unknown as number);
+    ok(line.includes("버전 ? "), line);
+});

@@ -1,4 +1,4 @@
-import { ours, plainNotice } from "./notice.ts";
+import {ours, plainNotice, count} from "./notice.ts";
 /**
  * **"어느 사이트냐"를 판정하고 말하는 자리.** 순수 함수만 있고 `vscode` 를 모른다.
  *
@@ -71,13 +71,13 @@ export function decideReadyPrompt(uploaded: CapturedTenant, current: string, rev
         return {
             kind: "redirect",
             message:
-                `「${shown(uploaded)}」 버전 ${ours(revisionNo)} 가 준비됐습니다. 지금 작업 사이트는 「${shown(current)}」 라서 ` +
+                `「${shown(uploaded)}」 버전 ${count(revisionNo)} 가 준비됐습니다. 지금 작업 사이트는 「${shown(current)}」 라서 ` +
                 `여기서 바로 전환하지 않습니다 — 「${shown(uploaded)}」 로 돌아가 「버전 전환」에서 고르십시오.`,
         };
     }
     return {
         kind: "offer",
-        message: `「${shown(uploaded)}」 버전 ${ours(revisionNo)} 가 준비됐습니다. 사이트는 아직 바뀌지 않았습니다.`,
+        message: `「${shown(uploaded)}」 버전 ${count(revisionNo)} 가 준비됐습니다. 사이트는 아직 바뀌지 않았습니다.`,
         action: "지금 전환",
     };
 }
@@ -114,22 +114,22 @@ export const say = {
     },
     switchConfirm(tenant: CapturedTenant, revisionNo: number): { message: string; detail: string; action: string } {
         return {
-            message: `「${shown(tenant)}」 사이트를 버전 ${ours(revisionNo)} 로 바꿉니다.`,
+            message: `「${shown(tenant)}」 사이트를 버전 ${count(revisionNo)} 로 바꿉니다.`,
             detail: "방문자가 보는 화면이 바로 바뀝니다.",
             action: "바꾸기",
         };
     },
     switched(tenant: CapturedTenant, revisionNo: number): string {
-        return `「${shown(tenant)}」 사이트를 버전 ${ours(revisionNo)} 로 바꿨습니다.`;
+        return `「${shown(tenant)}」 사이트를 버전 ${count(revisionNo)} 로 바꿨습니다.`;
     },
     building(tenant: CapturedTenant, revisionNo: number): string {
-        return `「${shown(tenant)}」 버전 ${ours(revisionNo)} 를 서버가 빌드하는 중`;
+        return `「${shown(tenant)}」 버전 ${count(revisionNo)} 를 서버가 빌드하는 중`;
     },
     buildFailed(tenant: CapturedTenant, revisionNo: number): string {
-        return `「${shown(tenant)}」 버전 ${ours(revisionNo)} 를 서버가 만들지 못했습니다. 사이트는 그대로입니다.`;
+        return `「${shown(tenant)}」 버전 ${count(revisionNo)} 를 서버가 만들지 못했습니다. 사이트는 그대로입니다.`;
     },
     buildTimedOut(tenant: CapturedTenant, revisionNo: number): string {
-        return `「${shown(tenant)}」 버전 ${ours(revisionNo)} 가 아직 빌드 중입니다. 끝나면 「버전 전환」에서 고르실 수 있습니다.`;
+        return `「${shown(tenant)}」 버전 ${count(revisionNo)} 가 아직 빌드 중입니다. 끝나면 「버전 전환」에서 고르실 수 있습니다.`;
     },
     /**
      * 기다리기를 그만뒀을 때. ⚠ **취소는 빌드를 멈추는 것이 아니다** — 서버는 계속 짓는다.
@@ -139,15 +139,15 @@ export const say = {
      * 사용자가 "어느 사이트가 빌드 중이라는 거지"로 오독하는 자리였다.
      */
     buildWaitCancelled(tenant: CapturedTenant, revisionNo: number): string {
-        return `「${shown(tenant)}」 버전 ${ours(revisionNo)} 는 서버에서 계속 빌드됩니다. 기다리기만 그만뒀습니다 — ` +
+        return `「${shown(tenant)}」 버전 ${count(revisionNo)} 는 서버에서 계속 빌드됩니다. 기다리기만 그만뒀습니다 — ` +
             `끝나면 「버전 전환」에 나옵니다.`;
     },
     /** 전환 대상이 목록에 없을 때(빌드 중·실패·이미 활성). */
     cannotSwitch(tenant: CapturedTenant, revisionNo: number): string {
-        return `「${shown(tenant)}」 버전 ${ours(revisionNo)} 로 바꿀 수 없습니다.`;
+        return `「${shown(tenant)}」 버전 ${count(revisionNo)} 로 바꿀 수 없습니다.`;
     },
     buildGone(tenant: CapturedTenant, revisionNo: number): string {
-        return `「${shown(tenant)}」 에서 버전 ${ours(revisionNo)} 를 찾지 못했습니다.`;
+        return `「${shown(tenant)}」 에서 버전 ${count(revisionNo)} 를 찾지 못했습니다.`;
     },
 };
 
