@@ -28,6 +28,9 @@ export interface StartFromPresetResult {
     fileCount: number;
 }
 
+/** 큰 전송의 상한. 형제 `fetchSource.ts`·`publish.ts` 와 같은 값이다. */
+const TRANSFER_TIMEOUT_MS = 15 * 60 * 1000;
+
 export async function startFromPreset(options: StartFromPresetOptions): Promise<StartFromPresetResult> {
     const report = options.onProgress ?? (() => {});
     const fetchImpl = options.fetchImpl ?? fetch;
@@ -44,7 +47,12 @@ export async function startFromPreset(options: StartFromPresetOptions): Promise<
 
     report("시작 소스를 받는 중…");
     const source = await options.api.presetSourceUrl(options.presetCode);
-    const response = await fetchImpl(source.url);
+    // ⚠ **상한을 건다.** Node 의 `fetch` 는 기본 타임아웃이 없어, 연결만 받고 응답을 안 주는
+    //    프록시·게이트웨이에 물리면 호출자가 **영원히 매달린다**(`api.ts` 가 같은 말을 적어 두고
+    //    고친 자리다). 이 호출은 신규 고객이 제일 먼저 누르는 「예제로 시작」의 다운로드이고,
+    //    그 위를 덮은 진행 알림에는 취소 버튼이 없다 — 상한이 유일한 탈출구다.
+    //    형제 전송로 `fetchSource.ts`·`publish.ts` 와 같은 값을 쓴다.
+    const response = await fetchImpl(source.url, { signal: AbortSignal.timeout(TRANSFER_TIMEOUT_MS) });
     if (!response.ok) {
         throw new DevtoolsError(
             "SERVER_REJECTED",

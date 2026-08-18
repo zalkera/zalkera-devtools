@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { createWriteStream } from "node:fs";
-import { mkdir, readdir } from "node:fs/promises";
+import { mkdir, readdir, rm } from "node:fs/promises";
 import { meaningfulEntries } from "./emptyDir.ts";
 import { join } from "node:path";
 import { createGunzip } from "node:zlib";
@@ -77,7 +77,7 @@ export async function fetchSiteSource(options: FetchSourceOptions): Promise<Fetc
         throw new DevtoolsError(
             "NOT_A_SITE",
             "받을 폴더가 비어 있지 않습니다.",
-            "빈 폴더를 고르거나, 기존 폴더는 「기존 폴더 연결」로 이어 주세요.",
+            "빈 폴더를 고르거나, 기존 폴더는 「잘커라: 폴더 연결」로 이어 주세요.",
         );
     }
 
@@ -101,7 +101,24 @@ export async function fetchSiteSource(options: FetchSourceOptions): Promise<Fetc
         report("⚠ 서버가 무결성 해시를 주지 않아 대조를 건너뜁니다(서버가 오래된 버전일 수 있습니다).");
     }
 
-    const fileCount = await extractTarGz(buffer, options.targetDir);
+    // ⚠ **반쪽 해제를 남기지 않는다.** `extractTarGz` 는 항목을 훑으며 **그때그때 쓴다** — 경로 이탈·
+    //    항목 상한 같은 검사가 중간 항목에서 걸리면 앞서 쓴 파일들이 그대로 남는다. 배송 문서
+    //    (`media/help.md`)는 그 두 오류를 이름까지 대며 "아무것도 풀지 않고 멈춘 것이니 폴더는
+    //    그대로입니다"라고 **보증**하는데, 롤백이 없어 그 문장이 거짓이었다(심의 실증 — 두 오류를
+    //    각각 재현해 파일이 남는 것을 확인했다).
+    //
+    //    남으면 피해가 문면에 그치지 않는다: 같은 폴더로 재시도하면 위쪽 "빈 폴더" 조건에 막혀
+    //    **되돌아갈 길이 없다.** 형제 `deps.ts` 는 같은 형상을 이미 `rm(target)` 으로 푼다.
+    //
+    //    이 자리는 위에서 **빈 폴더임을 확인한 뒤**이므로, 우리가 쓴 것만 지운다.
+    let fileCount: number;
+    try {
+        fileCount = await extractTarGz(buffer, options.targetDir);
+    } catch (cause) {
+        await rm(options.targetDir, { recursive: true, force: true }).catch(() => {});
+        await mkdir(options.targetDir, { recursive: true }).catch(() => {});
+        throw cause;
+    }
     report(`${fileCount}개 파일을 받았습니다.`);
     return { revisionNo, fileCount };
 }

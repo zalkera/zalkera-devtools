@@ -22,6 +22,7 @@ import {
     waitForBuild,
     captureTenant,
     type CapturedTenant,
+    plainNotice,
     decideReadyPrompt,
     decideSwitch,
     resolveHelpUrl,
@@ -494,13 +495,15 @@ async function startFromExample(): Promise<void> {
     if (!target) return;
 
     const result = await vscode.window.withProgress<StartFromPresetResult>(
-        { location: vscode.ProgressLocation.Notification, title: `${preset.name} 를 받는 중` },
+        { location: vscode.ProgressLocation.Notification, title: `${plainNotice(preset.name, 64)} 를 받는 중` },
         () => startFromPreset({ api, presetCode: preset.code, targetDir: target, onProgress: log }),
     );
     log(`시작 소스 ${result.presetCode}@${result.version} · 파일 ${result.fileCount}개.`);
 
     const open = await vscode.window.showInformationMessage(
-        `${preset.name} 를 받았습니다(${result.fileCount}개 파일).`,
+        // ⚠ `preset.name` 은 서버 응답(`/api/partner/site-preset/presets`)이다. 소독 없이 넣으면
+        // 비-모달 알림이 `[글](command:…)` 를 클릭 링크로 렌더한다(심의 실증).
+        `${plainNotice(preset.name, 64)} 를 받았습니다(${result.fileCount}개 파일).`,
         "이 폴더 열기",
     );
     if (open === "이 폴더 열기") {
@@ -678,10 +681,18 @@ async function startPreviewInner(): Promise<void> {
     }
 
     setStatus("$(sync~spin) 프리뷰 준비 중");
+    // ⚠ **취소 단추를 준다.** 첫 실행은 수 분짜리 설치이고, 사내망 프록시에 물리면 자식 프로세스가
+    //   **끝나지 않는다** — 그러면 이 알림은 영원히 돈다. 이 파일이 이미 적어 둔 "사용자가 반드시 두 번
+    //   누른다"는 실측에 재진입 가드는 만들었으면서 **멈출 방법은 안 만들었다**(심의 지적).
+    //   `signOut` 도 준비 중에는 거절하므로, 취소가 없으면 남는 탈출구는 편집기 강제 종료뿐이다.
+    //   형제 `signIn`(위)이 쓰는 패턴을 그대로 옮긴다.
     const started = await withStartGuard(() => vscode.window.withProgress<PreviewSession>(
-        { location: vscode.ProgressLocation.Notification, title: "프리뷰를 준비하는 중" },
-        () =>
-            startPreview({
+        { location: vscode.ProgressLocation.Notification, title: "프리뷰를 준비하는 중", cancellable: true },
+        (_progress, token) => {
+            const controller = new AbortController();
+            const subscription = token.onCancellationRequested(() => controller.abort());
+            return startPreview({
+                signal: controller.signal,
                 projectDir: dir,
                 api,
                 apiBase: apiBase(),
@@ -698,7 +709,8 @@ async function startPreviewInner(): Promise<void> {
                 },
                 onProgress: log,
                 onLog: log,
-            }),
+            }).finally(() => subscription.dispose());
+        },
     ));
 
     session = { server: started.server, projectDir: dir, keyId: started.keyId };

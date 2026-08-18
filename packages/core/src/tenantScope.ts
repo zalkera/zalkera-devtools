@@ -1,3 +1,4 @@
+import { plainNotice } from "./notice.ts";
 /**
  * **"어느 사이트냐"를 판정하고 말하는 자리.** 순수 함수만 있고 `vscode` 를 모른다.
  *
@@ -87,10 +88,24 @@ export function decideReadyPrompt(uploaded: CapturedTenant, current: string, rev
  * 확인창이 침묵하면 두 번 물어도 소용이 없다. 폴더와 사이트는 따로 정해지고 사이드바에서 사이트만
  * 바꿀 수 있어서, 말하지 않으면 A 의 소스가 B 의 라이브가 된다.
  */
+/**
+ * ⚠ **표시 직전에 소독한다.** 여기 박히는 사이트 이름은 **서버가 준 값**이고(`/api/me` 의
+ * `tenants[].code`), 이 문장들은 **비-모달 알림**으로 나간다. VS Code 는 비-모달 알림의
+ * `[글](command:…)`·`[글](file:…)` 를 **클릭 가능한 링크로 렌더**하므로, 적대적·탈취된 서버가
+ * 우리 신뢰 알림에 자기 문구의 링크를 띄울 수 있다(심의 실증 — 링크 정규식이 실제로 물었다).
+ *
+ * 이 레포는 같은 서버의 `handshake.message`·API 오류를 이미 신뢰 못 할 값으로 보고 `plainNotice`
+ * 로 막는다. **자기 위협 모델 기준으로 누락된 소독**이었지, 새 방어가 아니다.
+ *
+ * 소독은 **표시 자리에서만** 한다 — `x-tenant` 헤더는 `api.ts` 의 `tenantCode()` 가 따로 만들며
+ * 그쪽은 원문이어야 한다. 여기서 defang 한 값이 와이어로 가지 않는다.
+ */
+const shown = (tenant: CapturedTenant): string => plainNotice(tenant, 64);
+
 export const say = {
     publishConfirm(tenant: CapturedTenant): { message: string; detail: string; action: string } {
         return {
-            message: `「${tenant}」 사이트에 지금 소스를 새 버전으로 올립니다.`,
+            message: `「${shown(tenant)}」 사이트에 지금 소스를 새 버전으로 올립니다.`,
             detail:
                 "올리기만 합니다 — 방문자가 보는 사이트는 그대로입니다.\n" +
                 "그 버전으로 바꾸려면 올린 뒤 따로 전환하십시오.",
@@ -99,22 +114,22 @@ export const say = {
     },
     switchConfirm(tenant: CapturedTenant, revisionNo: number): { message: string; detail: string; action: string } {
         return {
-            message: `「${tenant}」 사이트를 버전 ${revisionNo} 로 바꿉니다.`,
+            message: `「${shown(tenant)}」 사이트를 버전 ${revisionNo} 로 바꿉니다.`,
             detail: "방문자가 보는 화면이 바로 바뀝니다.",
             action: "바꾸기",
         };
     },
     switched(tenant: CapturedTenant, revisionNo: number): string {
-        return `「${tenant}」 사이트를 버전 ${revisionNo} 로 바꿨습니다.`;
+        return `「${shown(tenant)}」 사이트를 버전 ${revisionNo} 로 바꿨습니다.`;
     },
     building(tenant: CapturedTenant, revisionNo: number): string {
-        return `「${tenant}」 버전 ${revisionNo} 를 서버가 빌드하는 중`;
+        return `「${shown(tenant)}」 버전 ${revisionNo} 를 서버가 빌드하는 중`;
     },
     buildFailed(tenant: CapturedTenant, revisionNo: number): string {
-        return `「${tenant}」 버전 ${revisionNo} 를 서버가 만들지 못했습니다. 사이트는 그대로입니다.`;
+        return `「${shown(tenant)}」 버전 ${revisionNo} 를 서버가 만들지 못했습니다. 사이트는 그대로입니다.`;
     },
     buildTimedOut(tenant: CapturedTenant, revisionNo: number): string {
-        return `「${tenant}」 버전 ${revisionNo} 가 아직 빌드 중입니다. 끝나면 「버전 전환」에서 고르실 수 있습니다.`;
+        return `「${shown(tenant)}」 버전 ${revisionNo} 가 아직 빌드 중입니다. 끝나면 「버전 전환」에서 고르실 수 있습니다.`;
     },
     /**
      * 기다리기를 그만뒀을 때. ⚠ **취소는 빌드를 멈추는 것이 아니다** — 서버는 계속 짓는다.
@@ -124,15 +139,15 @@ export const say = {
      * 사용자가 "어느 사이트가 빌드 중이라는 거지"로 오독하는 자리였다.
      */
     buildWaitCancelled(tenant: CapturedTenant, revisionNo: number): string {
-        return `「${tenant}」 버전 ${revisionNo} 는 서버에서 계속 빌드됩니다. 기다리기만 그만뒀습니다 — ` +
+        return `「${shown(tenant)}」 버전 ${revisionNo} 는 서버에서 계속 빌드됩니다. 기다리기만 그만뒀습니다 — ` +
             `끝나면 「버전 전환」에 나옵니다.`;
     },
     /** 전환 대상이 목록에 없을 때(빌드 중·실패·이미 활성). */
     cannotSwitch(tenant: CapturedTenant, revisionNo: number): string {
-        return `「${tenant}」 버전 ${revisionNo} 로 바꿀 수 없습니다.`;
+        return `「${shown(tenant)}」 버전 ${revisionNo} 로 바꿀 수 없습니다.`;
     },
     buildGone(tenant: CapturedTenant, revisionNo: number): string {
-        return `「${tenant}」 에서 버전 ${revisionNo} 를 찾지 못했습니다.`;
+        return `「${shown(tenant)}」 에서 버전 ${revisionNo} 를 찾지 못했습니다.`;
     },
 };
 

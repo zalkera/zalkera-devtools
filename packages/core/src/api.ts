@@ -225,7 +225,35 @@ export class ZalkeraApi {
             );
         }
         if (!response.ok) throw await toError(response);
-        const envelope = (await response.json()) as Envelope<T>;
+
+        // ⚠ **본문이 우리 형식이라고 가정하지 않는다.** 200 이어도 캡티브 포털·프록시 오류 페이지는
+        //    HTML 을 준다. 종전에는 곧장 `.json()` 을 부르고 `.data` 를 읽어, 그 입력에 raw
+        //    `SyntaxError`/`TypeError` 가 **고객 대화상자로 그대로** 나갔다(`register()` 는
+        //    `DevtoolsError` 가 아니면 `String(error)` 를 띄운다).
+        //
+        //    형제 `handshake.ts` 는 같은 파싱을 이미 감싸고 있고, 그 주석이 "초판은 곧장 읽어
+        //    SyntaxError 가 그대로 사용자에게 갔다"고 적었다 — **그 수정이 한쪽에만 적용돼 있었다.**
+        //    이 경로는 발행·리비전 목록·프리뷰 키 발급 등 **인증된 모든 호출**이 지난다.
+        let envelope: Envelope<T>;
+        try {
+            envelope = (await response.json()) as Envelope<T>;
+        } catch (cause) {
+            throw new DevtoolsError(
+                "SERVER_UNREACHABLE",
+                "서버 응답을 이해하지 못했습니다.",
+                `${this.options.apiBase} 가 잘커라 서버가 맞는지, 사내망 프록시가 응답을 바꾸고 있지 않은지 확인해 주세요.`,
+                cause,
+            );
+        }
+        // `data` 누락도 여기서 끊는다. 통과시키면 `undefined` 가 호출부까지 흘러가 엉뚱한 자리에서
+        // `revisions.filter(...)` 같은 raw TypeError 가 된다 — 원인에서 먼 곳에서 터진다.
+        if (envelope === null || typeof envelope !== "object" || !("data" in envelope)) {
+            throw new DevtoolsError(
+                "SERVER_UNREACHABLE",
+                "서버 응답에 필요한 정보가 없습니다.",
+                `${this.options.apiBase} 가 잘커라 서버가 맞는지 확인해 주세요.`,
+            );
+        }
         return envelope.data;
     }
 }

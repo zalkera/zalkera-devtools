@@ -24,6 +24,11 @@ import { computePayloadKey, currentPlatform, evictOldCaches, tryFetchPayload, wr
  */
 export interface DepsOptions {
     projectDir: string;
+    /**
+     * 취소 신호. 첫 설치는 수 분이고, 사내망 프록시에 물리면 자식이 **끝나지 않는다** — 그때
+     * 사용자가 멈출 수 있어야 한다. 안 주면 종전과 같이 취소할 수 없다(호출부가 명시적으로 정한다).
+     */
+    signal?: AbortSignal;
     /** 캐시 뿌리. 기본 `~/.zalkera/deps`. 프로젝트와 같은 볼륨이면 하드링크가 먹는다. */
     cacheRoot?: string;
     /** 진행 상황을 사람 말로 흘린다. */
@@ -136,7 +141,7 @@ export async function ensureDependencies(options: DepsOptions): Promise<DepsResu
         );
     }
     report("의존성을 처음 한 번 내려받습니다. 몇 분 걸릴 수 있습니다…");
-    await runNpmInstall(projectDir, options.npmCommand, options.npmEnv ?? {}, report);
+    await runNpmInstall(projectDir, options.npmCommand, options.npmEnv ?? {}, report, options.signal);
     await seedCache(target, cacheDir, cacheKey, report);
     await markComplete(doneAt);
     await evictOldCaches(cacheRoot, KEEP_CACHES, report, cacheDir);
@@ -328,12 +333,23 @@ async function runNpmInstall(
     command: string[],
     env: Record<string, string>,
     report: (m: string) => void,
+    signal?: AbortSignal,
 ): Promise<void> {
     const [bin, ...args] = command;
     if (!bin) throw new DevtoolsError("DEPENDENCIES_FAILED", "npm 실행 방법을 알 수 없습니다.");
 
     await new Promise<void>((resolve, reject) => {
-        const child = spawn(bin, args, { cwd, env: { ...process.env, ...env }, stdio: ["ignore", "pipe", "pipe"] });
+        // ⚠ **취소를 받는다.** 이 설치는 첫 실행에서 수 분이 걸리고, 사내망 프록시에 물리면
+        //   `close`/`error` 가 **영원히 안 온다** — 이 Promise 가 정착하지 않는다. 그 위를 덮은
+        //   진행 알림에 취소 단추가 없으면 사용자에게 남는 탈출구는 편집기 강제 종료뿐이다.
+        //   (`signOut` 도 프리뷰 준비 중이면 거절하므로 로그아웃으로도 못 빠져나간다.)
+        //   형제 경로 `signIn` 이 이미 같은 패턴을 쓴다 — 새 설계가 아니라 그것을 여기로 옮긴 것이다.
+        const child = spawn(bin, args, {
+            cwd,
+            env: { ...process.env, ...env },
+            stdio: ["ignore", "pipe", "pipe"],
+            signal,
+        });
         child.stdout?.on("data", (chunk: Buffer) => report(chunk.toString().trimEnd()));
         child.stderr?.on("data", (chunk: Buffer) => report(chunk.toString().trimEnd()));
         child.on("error", (cause) =>

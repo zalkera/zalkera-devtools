@@ -12,6 +12,8 @@ import { ensureEnvIgnored, inspectProject } from "./project.ts";
  * 시킨 뒤에 거절을 통보하지 않기 위해서다(순수 STAFF 계정은 프리뷰 키를 못 받는다).
  */
 export interface PreviewOptions {
+    /** 취소 신호. 의존성 설치(수 분)를 사용자가 멈출 수 있게 한다. */
+    signal?: AbortSignal;
     projectDir: string;
     api: ZalkeraApi;
     apiBase: string;
@@ -62,6 +64,7 @@ export async function startPreview(options: PreviewOptions): Promise<PreviewSess
     options.onKeyIssued?.(key.id);
 
     const deps = await ensureDependencies({
+        signal: options.signal,
         projectDir: options.projectDir,
         onProgress: report,
         // 캐시 미스면 **미리 구운 꾸러미를 먼저 물어본다**(T-D2c). 서버가 안 주면 그대로 npm 으로 내려간다.

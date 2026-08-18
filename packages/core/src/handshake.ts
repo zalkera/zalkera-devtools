@@ -54,6 +54,12 @@ interface Envelope<T> {
  *
  * `UPGRADE_REQUIRED` 면 여기서 던진다 — 호출부가 판정을 다시 해석하지 않게 하려는 것이다.
  */
+/**
+ * 핸드셰이크 상한. 본문이 수 KB JSON 이므로 전송 상한(15분)과 다른 값이다 — 이 호출이 늦으면
+ * 고객은 아무 화면도 못 보고 기다린다.
+ */
+const HANDSHAKE_TIMEOUT_MS = 15 * 1000;
+
 export async function fetchHandshake(
     apiBase: string,
     extensionVersion: string,
@@ -64,7 +70,18 @@ export async function fetchHandshake(
 
     let response: Response;
     try {
-        response = await fetchImpl(url, { headers: { accept: "application/json" } });
+        // ⚠ **상한을 건다.** Node 의 `fetch` 는 기본 타임아웃이 없다 — 연결만 받고 응답을 안 주는
+        //    프록시·게이트웨이에 물리면 이 await 가 **영원히 정착하지 않는다**(`api.ts` 가 같은 말을
+        //    적어 두고 고쳤는데 먼저 도는 이쪽에는 그 규율이 안 왔다). TCP 를 끊는 고장은 OS 가
+        //    상한을 주지만, 붙드는 고장은 아무 상한도 주지 않는다.
+        //
+        //    이 함수는 로그인·사이트 선택·프리뷰·발행의 **첫 await** 이고 그 위를 덮은 진행 알림은
+        //    대부분 취소 불가다. 여기서 안 끊으면 고객에게 남는 것은 영원히 도는 스피너뿐이다.
+        //    본문이 수 KB JSON 이라 전송 상한(15분)보다 훨씬 짧게 잡는다.
+        response = await fetchImpl(url, {
+            headers: { accept: "application/json" },
+            signal: AbortSignal.timeout(HANDSHAKE_TIMEOUT_MS),
+        });
     } catch (cause) {
         throw new DevtoolsError(
             "SERVER_UNREACHABLE",
