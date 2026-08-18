@@ -18,6 +18,8 @@
  *  ⑴ `resolveCap` 의 기본값이 `MAX_EXTRACT_BYTES` 이고, 호출부 값을 **되죄지 않는다**.
  *  ⑵ 두 해제 경로가 **둘 다** `resolveCap(` 을 지난다.
  *  ⑶ 소스 경로의 상한이 `limits.ts` 의 상수 그대로다 — 실제 천장이 검사기 밖에 살면 안 된다.
+ *  ⑷ 두 가드가 **해결된 상한 변수 그 자체**와 비교한다 — 값에 조건을 걸어 큰 입력에서만 죽는
+ *     형태를 막는다. 숫자 표기를 열거하지 않으므로 무관한 상수에 오탐하지 않는다.
  *
  * ## 무엇을 안 보는가 — 그리고 왜 그게 낫다고 보는가
  *
@@ -92,23 +94,40 @@ if (!/const\s+MAX_SOURCE_EXTRACT_BYTES\s*=\s*MAX_EXTRACT_BYTES\s*;/.test(sourceC
     fail.push("`fetchSource.ts` 의 소스 상한이 `MAX_EXTRACT_BYTES` 그대로가 아닙니다 — 실제 천장이 검사기 밖에 삽니다.");
 }
 
-// ⑷ 상한 판정에 **크기 리터럴**이 끼지 않았는가
+// ⑷ **가드가 «해결된 상한 그 자체»와 비교하는가** — 표기를 열거하지 않는다
 //
-// ⚠ 직전 판이 이 규칙을 **삭제**했다가 우회 두 개를 놓쳤다(심의 실측):
+// ⚠ 앞선 판이 「크기 리터럴을 찾는」 규칙을 뒀다가 표기 다섯 개에 뚫렸다(심의 실측):
 //
-//     if (limit < 2_000_000 && written > limit)          ← 스트리밍 상한 무력화
-//     maxOutputLength: cap < 2_000_000 ? cap : undefined ← 버퍼 상한 무력화
+//     limit < 2 * 1024 * 1024      ← `limits.ts` 자신이 쓰는 **집안 표기**
+//     limit < 2e6                  limit < Number("2000000")      BigInt(limit) < 2_000_000n
+//     maxOutputLength: cap < 2 * 1024 * 1024 ? cap : undefined
 //
-//   둘 다 `resolveCap` 은 그대로 부르므로 위 규칙들을 전부 통과하고, **시험도 안 문다** — 시험의
-//   상한이 1024B·1MB 라 «작은 상한만 지키는» 가드가 초록이기 때문이다. 상용 크기(450MB)의 가드는
-//   검사기도 시험도 한 번도 안 밟는다. 그 공백을 메우는 것이 이 규칙이다.
+//   전부 `resolveCap` 은 그대로 부르므로 앞의 규칙들을 지나고, **시험도 안 문다** — 시험 상한이
+//   1024B·1MB 라 「작은 상한만 지키는」 가드가 초록이기 때문이다. 즉 상용 크기(450MB)의 가드는
+//   검사기도 시험도 한 번도 안 밟는다.
 //
-//   삭제됐던 이유는 오탐이었다 — 셈 상수(`MAX_ENTRIES`)와 **오류 문자열 안의 숫자**를 함께 잡았다.
-//   지금은 주석·문자열을 지운 사본(`code`)에서 재고 셈 규모를 가르므로 그 둘이 안 걸린다(실측).
-for (const m of code.matchAll(/\b0[xX][0-9a-fA-F_]+\b|\b\d[\d_]*\b/g)) {
-    const value = Number(m[0].replace(/_/g, ""));
-    if (Number.isFinite(value) && value >= 1_000_000) {
-        fail.push(`크기 리터럴이 남아 있습니다: \`${m[0]}\` — 상한은 limits.ts 가 유도합니다.`);
+//   숫자 표기를 더 찾는 것은 **열거**다 — 이 레포가 반복해 밟은 병이고, 다음 표기에서 또 샌다.
+//   뒤집는다: 가드는 **해결된 상한 변수 하나와 직접** 비교해야 한다. 그 형태가 아니면 무엇을 끼워
+//   넣었든(리터럴이든 함수 호출이든) 걸린다. 덤으로 무관한 상수에 대한 오탐이 사라진다.
+const capVars = new Set([...code.matchAll(/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*resolveCap\s*\(/g)].map((m) => m[1]));
+
+// ⑷-a 버퍼 경로: `maxOutputLength` 는 그 변수 **하나**여야 한다(삼항·산술 금지).
+const capArg = /maxOutputLength:\s*([^,}]+?)\s*[,}]/.exec(code);
+if (capArg === null) {
+    fail.push("버퍼 경로에서 `maxOutputLength` 를 찾지 못했습니다 — 상한이 zlib 에 안 걸립니다.");
+} else if (!capVars.has(capArg[1].trim())) {
+    fail.push(`\`maxOutputLength\` 이 해결된 상한 변수가 아닙니다: \`${capArg[1].trim()}\` — 값에 조건을 걸면 큰 입력에서 가드가 죽습니다.`);
+}
+
+// ⑷-b 스트리밍 경로: 누적 비교는 `written > <상한변수>` **그 자체**여야 한다(추가 조건 금지).
+const writtenIf = /if\s*\(([^)]*\bwritten\b[^)]*)\)/.exec(code);
+if (writtenIf === null) {
+    fail.push("스트리밍 경로에서 누적 비교(`written > …`)를 찾지 못했습니다.");
+} else {
+    const condition = writtenIf[1].trim();
+    const simple = /^written\s*>\s*([A-Za-z_$][\w$]*)$/.exec(condition);
+    if (simple === null || !capVars.has(simple[1])) {
+        fail.push(`누적 비교가 해결된 상한과의 직접 비교가 아닙니다: \`${condition}\` — 조건을 덧붙이면 큰 입력에서 가드가 죽습니다.`);
     }
 }
 

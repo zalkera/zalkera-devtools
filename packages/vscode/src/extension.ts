@@ -102,6 +102,14 @@ let handshake: Handshake | null = null;
 let sidebar: ZalkeraSidebar;
 /** 동봉 자원(npm)을 찾으려면 확장 설치 경로가 필요하다. */
 let extensionPath: string;
+/**
+ * **우리 마당** — 임시 파일이 사는 곳. VS Code 가 확장마다 주는 전용 경로(실디스크)다.
+ *
+ * 고객이 고른 폴더에는 임시 파일을 두지 않는다. 한때 그렇게 했다가 사슬로 심의 차단이 연달아 났다:
+ * 크래시 잔해가 폴더를 **눈에 안 보이게** 막고(점 파일이다) → 그것을 걷으려 추측하고 → 그 추측이
+ * 진행 중 받기를 죽였다. 받는 것은 내 마당, 놓는 것만 남의 마당이다.
+ */
+let scratchRoot: string;
 /** 동봉 매뉴얼(media/help.md)의 위치. */
 let helpUri: vscode.Uri;
 let renewTimer: NodeJS.Timeout | null = null;
@@ -126,6 +134,7 @@ export function activate(context: vscode.ExtensionContext): void {
     status.show();
     store = new SecretTokenStore(context);
     extensionPath = context.extensionPath;
+    scratchRoot = context.globalStorageUri.fsPath;
     extensionVersion = String(context.extension.packageJSON.version ?? extensionVersion);
     extensionId = context.extension.id || extensionId;
     persistedState = context.globalState;
@@ -469,7 +478,7 @@ async function openSite(): Promise<void> {
 
     const result = await vscode.window.withProgress<FetchSourceResult>(
         { location: vscode.ProgressLocation.Notification, title: "사이트 소스를 받는 중" },
-        () => fetchSiteSource({ api, targetDir: target, onProgress: log }),
+        () => fetchSiteSource({ api, targetDir: target, scratchRoot, onProgress: log }),
     );
 
     const root = await findProjectRoot(target);
