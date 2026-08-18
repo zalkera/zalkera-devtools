@@ -266,9 +266,11 @@ function register(command: string, handler: () => Promise<void>): vscode.Disposa
             }
             const message = error instanceof DevtoolsError ? error.humanMessage : String(error);
             log(`오류: ${message}`);
-            // `humanMessage` 는 우리 문장 + 경계에서 소독된 서버 조각(`api.ts` 의 `plainNotice`)이다.
-            // `String(error)` 갈래는 우리 런타임 오류다. 둘 다 서버가 문장을 정하지 못한다.
-            const choice = await vscode.window.showErrorMessage(ours(message), "자세히 보기");
+            // ⚠ `ours(message)` 였다 — **거짓이었다**(3회전 심의 실증). `humanMessage` 가 소독된 것은
+            //    `api.ts` 응답 파싱 경로뿐이고, `safeWrite.ts`·`untar.ts` 는 서버가 정한 항목 이름을
+            //    그대로 실어 보냈다. `String(error)` 갈래도 안전하지 않다 — `JSON.parse` 실패 메시지는
+            //    입력 조각을 담는다. 출력 채널(위 `log`)은 링크를 렌더하지 않아 원문을 남긴다.
+            const choice = await vscode.window.showErrorMessage(plainNotice(message), "자세히 보기");
             if (choice === "자세히 보기") output.show();
         }
     });

@@ -27,9 +27,15 @@
  *   그 밖의 모든 표현식(맨 식별자·속성 접근·연산·임의 함수 호출)은 **반려**다. 값이 안전해도
  *   반려한다 — 안전하다면 `ours(...)` 를 붙여 그 판단을 코드에 남기면 된다.
  *
- * ■ 어디를 보는가
- *   · `packages/core/src/tenantScope.ts` — 사용자 문구 **정본**. 템플릿 전부.
- *   · `packages/vscode/src/extension.ts` — 알림 호출의 인자와 진행 알림 `title`.
+ * ■ 어디를 보는가 — **찾아낸다. 적어 두지 않는다.**
+ *   앞 판은 파일 두 개를 손으로 적었다. 그것 역시 열거이고, **새로 생기는 파일이 통째로 관할 밖**이
+ *   된다 — 이 파일이 스스로 배격한 형상을 파일 층위에서 되풀이한 것이다.
+ *
+ *   그래서 `packages/&#42;/src` 를 훑어 **알림 API 를 부르는 파일을 전부** 관할로 잡는다. 관할이 0이면
+ *   초록이 아니라 중단이다(아래 [spansSeen]·[NOTICE_SOURCES] 검사).
+ *
+ *   · 알림을 부르는 모든 파일 — 그 호출의 인자와 진행 알림 `title`.
+ *   · [NOTICE_SOURCES] — 알림 **문구를 만들어 돌려주는** 파일. 호출이 없어도 템플릿 전부를 본다.
  *     (`log()`(출력 채널)는 링크를 렌더하지 않으므로 관할 밖이다 — 거기까지 잡으면 오검이다.)
  *
  *   **문면이 아니라 구문으로 본다** — 정규식 주석 제거는 이 레포에서 양방향으로 뚫렸다(`ast.mjs`).
@@ -39,7 +45,7 @@
  *   한다 — `x-tenant` 헤더로 가는 값(`api.ts` 의 `tenantCode()`)은 원문이어야 한다.
  */
 import ts from "typescript";
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { parse, walk } from "./lib/ast.mjs";
@@ -228,10 +234,77 @@ function assertNoIndirectNotify(rel) {
     });
 }
 
-scan("packages/core/src/tenantScope.ts", { allTemplates: true });
-assertDefinitionsAreReal("packages/core/src/tenantScope.ts");
-scan("packages/vscode/src/extension.ts", { allTemplates: false });
-assertNoIndirectNotify("packages/vscode/src/extension.ts");
+/**
+ * 알림 **문구를 만들어 돌려주는** 파일. 알림 API 를 부르지 않아 자동 탐색에 안 걸리므로 여기 적는다.
+ * 이 파일들은 템플릿 전부를 본다 — 어느 문자열이 알림으로 갈지는 호출부가 정하기 때문이다.
+ */
+const NOTICE_SOURCES = ["packages/core/src/tenantScope.ts"];
+
+/** `packages/&#42;/src` 아래 `.ts` 전부(시험 제외). 관할을 손으로 적지 않기 위한 목록. */
+function sourceFiles() {
+    const out = [];
+    const walkDir = (dir) => {
+        for (const entry of readdirSync(dir)) {
+            const full = join(dir, entry);
+            if (statSync(full).isDirectory()) {
+                walkDir(full);
+            } else if (entry.endsWith(".ts") && !entry.endsWith(".test.ts") && !entry.endsWith(".d.ts")) {
+                out.push(full.slice(root.length + 1));
+            }
+        }
+    };
+    for (const pkg of readdirSync(join(root, "packages"))) {
+        const src = join(root, "packages", pkg, "src");
+        if (existsSync(src)) walkDir(src);
+    }
+    return out.sort();
+}
+
+/**
+ * 알림 API 를 부르는 파일을 **구문으로** 고른다.
+ *
+ * ⚠ 문면(`includes("showErrorMessage")`)으로 고르면 주석·문자열에 그 이름이 있는 파일이 딸려 오고,
+ *   반대로 이름을 쪼개 쓰면(`"show" + "ErrorMessage"`) 빠진다. 여기서 고르는 일이 곧 관할이라,
+ *   고르는 방법이 뚫리면 검사 전체가 뚫린다.
+ */
+function callsNotify(rel) {
+    let found = false;
+    walk(parse(join(root, rel)), (node) => {
+        if (ts.isPropertyAccessExpression(node) && NOTIFY.has(node.name.getText())) found = true;
+        if (ts.isPropertyAccessExpression(node) && node.name.getText() === "withProgress") found = true;
+    });
+    return found;
+}
+
+const all = sourceFiles();
+const notifiers = all.filter(callsNotify);
+
+// **관할이 비었는데 초록**을 막는 첫 그물. 탐색이 깨지면(경로 변경·파서 오류) 여기서 죽는다.
+if (all.length === 0) {
+    console.error("❌ 알림 소독 검사 — 소스를 하나도 못 찾았습니다(통과가 아닙니다).");
+    process.exit(2);
+}
+if (notifiers.length === 0) {
+    console.error("❌ 알림 소독 검사 — 알림을 부르는 파일이 0개입니다(통과가 아닙니다). 탐색을 확인하십시오.");
+    process.exit(2);
+}
+
+for (const rel of NOTICE_SOURCES) {
+    if (!existsSync(join(root, rel))) {
+        console.error(`❌ 알림 소독 검사 — ${rel} 이 없습니다(통과가 아닙니다).`);
+        process.exit(2);
+    }
+    scan(rel, { allTemplates: true });
+    assertDefinitionsAreReal(rel);
+}
+for (const rel of notifiers) {
+    if (!NOTICE_SOURCES.includes(rel)) scan(rel, { allTemplates: false });
+    assertNoIndirectNotify(rel);
+}
+// 별칭화는 **부르지 않는 파일에서도** 일어난다(거기서 만들어 넘기면 된다). 전 소스에 건다.
+for (const rel of all) {
+    if (!notifiers.includes(rel)) assertNoIndirectNotify(rel);
+}
 assertMarkerIsIdentity();
 
 // **관할이 비었는데 초록**은 이 레포의 반복 실패 형상이다. 세어서 보인다.

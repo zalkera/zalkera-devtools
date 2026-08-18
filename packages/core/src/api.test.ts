@@ -92,3 +92,62 @@ test("경로가 있는 베이스 주소도 잘리지 않는다", async () => {
     await client.listRevisions();
     ok(seenUrl.startsWith("https://gateway.example.com/"), `베이스 보존 실패: ${seenUrl}`);
 });
+
+// ── 응답 파싱 ────────────────────────────────────────────────────────────────
+// 200 이어도 본문이 우리 형식이라는 보장이 없다. 캡티브 포털·사내망 프록시는 HTML 을 준다.
+// 종전에는 raw `SyntaxError`/`TypeError` 가 고객 대화상자로 그대로 나갔다.
+
+test("200 이지만 JSON 이 아니면 — 사람 말로 끊는다", async () => {
+    const client = api(() => new Response("<html>로그인이 필요합니다</html>", {status: 200}));
+    await rejects(
+        () => client.listRevisions(),
+        (error: unknown) => {
+            ok(error instanceof DevtoolsError, "DevtoolsError 가 아니면 raw SyntaxError 가 나간 것이다");
+            strictEqual(error.code, "SERVER_UNREACHABLE");
+            ok(!/SyntaxError|JSON/i.test(error.humanMessage), "파서 용어가 사용자에게 나갔다");
+            return true;
+        },
+    );
+});
+
+test("200 이고 JSON 이지만 data 가 없으면 — 여기서 끊는다", async () => {
+    // 통과시키면 `undefined` 가 호출부까지 흘러가 원인에서 먼 곳에서 raw TypeError 가 된다.
+    const client = api(() => Response.json({status: 200}));
+    await rejects(
+        () => client.listRevisions(),
+        (error: unknown) => {
+            ok(error instanceof DevtoolsError);
+            strictEqual(error.code, "SERVER_UNREACHABLE");
+            return true;
+        },
+    );
+});
+
+test("본문이 JSON null 이어도 끊는다", async () => {
+    const client = api(() => new Response("null", {status: 200, headers: {"content-type": "application/json"}}));
+    await rejects(
+        () => client.listRevisions(),
+        (error: unknown) => error instanceof DevtoolsError && error.code === "SERVER_UNREACHABLE",
+    );
+});
+
+test("양성 통제군 — 정상 봉투는 그대로 통과한다", async () => {
+    // 위 셋은 "언제나 던지는" 파서로도 통과한다. 정상 응답이 살아 있는 것을 따로 못 박는다.
+    const client = api(() => Response.json({status: 200, data: []}));
+    const revisions = await client.listRevisions();
+    ok(Array.isArray(revisions));
+});
+
+test("오류 응답의 errorCode 도 소독을 지난다", async () => {
+    // `message` 만 막고 `errorCode` 를 열어 두면 같은 서버가 같은 알림으로 링크를 밀어 넣는다.
+    const evil = "X](command:workbench.action.terminal.new)";
+    const client = api(() => Response.json({message: "거절", errorCode: evil}, {status: 400}));
+    await rejects(
+        () => client.listRevisions(),
+        (error: unknown) => {
+            ok(error instanceof DevtoolsError);
+            ok(!/\]\(command:/.test(error.humanMessage), "errorCode 가 링크로 살아 있다");
+            return true;
+        },
+    );
+});

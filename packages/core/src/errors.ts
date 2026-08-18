@@ -1,3 +1,5 @@
+import { plainNotice } from "./notice.ts";
+
 /**
  * 러너가 던지는 오류. **코드와 사람 말을 함께 가진다.**
  *
@@ -18,9 +20,25 @@ export class DevtoolsError extends Error {
         this.hint = hint;
     }
 
-    /** 사람에게 보여 줄 전체 문장(메시지 + 다음 할 일). */
+    /**
+     * 사람에게 보여 줄 전체 문장(메시지 + 다음 할 일). **여기서 소독한다.**
+     *
+     * ⚠ 이 접근자의 이름이 곧 경계다 — 나가는 자리가 알림창인지 출력 채널인지는 이 클래스가
+     *   모른다. 그래서 「알림에 닿기 전에 어딘가에서 소독됐겠지」에 기대지 않는다.
+     *
+     * 실제로 그 기대가 틀렸다(3회전 심의 실증): `safeWrite.ts`·`untar.ts` 는 **서버가 정한 zip·tar
+     * 항목 이름**을 그대로 메시지에 보간하는데(`받은 파일이 폴더 밖을 가리킵니다: ${name}`),
+     * 소독은 `api.ts` 의 응답 파싱 경로에만 있었다. 항목 이름이
+     * `../[열기](command:workbench.action.terminal.new)` 이면 그 문장이 비-모달 알림에서
+     * **누르면 명령이 도는 링크**가 됐다.
+     *
+     * 보간하는 자리를 열거해 고치면 다음에 생기는 자리가 또 샌다 — 이 레포가 두 번 겪은 형상이다.
+     * 그래서 자리가 아니라 **나가는 문 하나**에서 한다. [message]·[hint] 원문은 그대로 남으므로
+     * 로그·시험은 영향받지 않는다.
+     */
     get humanMessage(): string {
-        return this.hint ? `${this.message}\n${this.hint}` : this.message;
+        const body = plainNotice(this.message);
+        return this.hint ? `${body}\n${plainNotice(this.hint)}` : body;
     }
 }
 
