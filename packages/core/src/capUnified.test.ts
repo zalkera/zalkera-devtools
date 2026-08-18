@@ -9,11 +9,12 @@
  * 「호출부가 건 값이 두 경로에서 같은 답을 낸다」가 지켜야 할 성질이고, 그것은 크기와 무관하다.
  */
 import { rejects, strictEqual } from "node:assert/strict";
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { test } from "node:test";
+import { after, test } from "node:test";
 import { gzipSync } from "node:zlib";
+import { MAX_EXTRACT_BYTES } from "./limits.ts";
 import { extractTarGz, extractTarGzFile } from "./untar.ts";
 
 function header(name: string, size: number): Buffer {
@@ -42,12 +43,25 @@ function tarGz(bytes: number): Buffer {
 
 const SIZE = 256 * 1024;
 
+/** ⚠ **지우고 끝낸다.** 임시 디렉터리가 tmpfs 인 환경이 흔하고, 이 파일 자신이 「가드를 재는
+ *  시험이 가드가 막으려는 손해를 내면 안 된다」고 적는다. 실행마다 6개씩 새는 것을 심의가 셌다. */
+const made: string[] = [];
+after(async () => {
+    for (const dir of made) await rm(dir, { recursive: true, force: true }).catch(() => {});
+});
+
+async function scratch(prefix: string): Promise<string> {
+    const dir = await mkdtemp(join(tmpdir(), prefix));
+    made.push(dir);
+    return dir;
+}
+
 async function bufferRun(gz: Buffer, maxBytes: number): Promise<number> {
-    return extractTarGz(gz, await mkdtemp(join(tmpdir(), "cap-b-")), { maxBytes });
+    return extractTarGz(gz, await scratch("cap-b-"), { maxBytes });
 }
 
 async function streamRun(gz: Buffer, maxBytes: number): Promise<number> {
-    const dir = await mkdtemp(join(tmpdir(), "cap-s-"));
+    const dir = await scratch("cap-s-");
     const gzPath = join(dir, "in.tar.gz");
     await writeFile(gzPath, gz);
     return extractTarGzFile(gzPath, dir, join(dir, ".scratch"), { maxBytes });
@@ -65,9 +79,15 @@ test("상한 아래 — 두 경로가 **함께** 거부한다", async () => {
     await rejects(() => streamRun(gz, 1024));
 });
 
-test("상한을 안 주면 기본값이 서고, 그 기본값은 두 경로가 같다", async () => {
-    // 종전에는 버퍼 200MB · 스트리밍 무제한이었다. 작은 정상 입력이 둘 다 통과하는 것으로 확인한다.
-    const gz = tarGz(SIZE);
-    strictEqual(await bufferRun(gz, Number.POSITIVE_INFINITY), 1);
-    strictEqual(await streamRun(gz, Number.POSITIVE_INFINITY), 1);
+test("호출부가 준 상한을 **되죄지 않는다** — 페이로드는 자기 입력에서 유도한다", async () => {
+    // 마감 심의 차단: 소스 천장(450MB)으로 모든 호출부를 되죄자, 실측 158MB 페이로드가 요구하는
+    // 1264MB 가 450MB 로 깎여 **정상 페이로드 해제가 항상 실패**했다. 조용한 고장이었다 —
+    // `tryFetchPayload` 가 `null` 로 수렴해 「가속기가 영영 안 켜지는」 모습으로만 나타난다.
+    //
+    // 천장을 넘는 실물 입력으로는 못 잰다(수백 MB 픽스처). `resolveCap` 의 **계약**을 직접 잰다.
+    const { resolveCap } = await import("./untar.ts");
+    const asks = 158 * 1024 * 1024 * 8;
+    strictEqual(resolveCap(asks), asks, "호출부가 준 상한을 되죄면 안 된다");
+    strictEqual(resolveCap(undefined), MAX_EXTRACT_BYTES, "안 주면 소스 기본값이 선다");
+    strictEqual(resolveCap(1024), 1024, "좁게 주면 그대로 선다");
 });

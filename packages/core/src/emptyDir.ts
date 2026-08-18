@@ -28,6 +28,37 @@ const IGNORED = new Set([
     "desktop.ini", // Windows
 ]);
 
+/**
+ * **우리가 만들다 만 임시 자리.** 소스 받기가 `mkdtemp(targetDir, ".zalkera-fetch-")` 로 만든다.
+ *
+ * ⚠ **무시가 아니라 청소다.** 다운로드는 최대 15분이고 그 사이에 확장 호스트가 죽으면(창 닫기·
+ *   크래시·절전) 잔해가 남는다. 그것은 점으로 시작해 `ls` 에 **안 보이는데**, 그 폴더는 그 뒤
+ *   모든 「소스 받기」에서 「비어 있지 않습니다」로 막힌다 — 고객 눈에 그 폴더는 비어 있다.
+ *   안내문은 "빈 폴더를 고르세요"인데 이미 빈 폴더다. 되돌아갈 길이 없는 형상이다(마감 심의 차단).
+ *
+ *   [IGNORED] 에 넣어 **무시**하면 그 잔해가 소스 트리에 영원히 남는다. 우리가 만든 것이니
+ *   우리가 지운다.
+ */
+const OUR_SCRATCH_PREFIX = ".zalkera-fetch-";
+
+/** 우리가 남긴 임시 자리를 걷어낸다. 없으면 아무 일도 안 한다. */
+export async function sweepOurScratch(dir: string): Promise<number> {
+    let entries;
+    try {
+        entries = await readdir(dir, { withFileTypes: true });
+    } catch {
+        return 0; // 폴더가 없거나 못 읽는다 — 부르는 쪽이 판정한다
+    }
+    let swept = 0;
+    for (const entry of entries) {
+        // 심링크는 안 따라간다 — 이름만 흉내 낸 링크가 우리 지우개를 밖으로 끌고 갈 수 있다.
+        if (!entry.name.startsWith(OUR_SCRATCH_PREFIX) || entry.isSymbolicLink()) continue;
+        await rm(join(dir, entry.name), { recursive: true, force: true }).catch(() => {});
+        swept += 1;
+    }
+    return swept;
+}
+
 /** 무시 대상을 뺀 실제 항목. 비어 있으면 받아도 안전하다. */
 export async function meaningfulEntries(dir: string): Promise<string[]> {
     const entries = await readdir(dir, { withFileTypes: true });

@@ -18,6 +18,14 @@
  *  ⑴ `resolveCap` 이 [MAX_EXTRACT_BYTES] 로 죈다 — 파일 안 리터럴로 죄면 `limits.ts` 와 갈린다.
  *  ⑵ 두 해제 경로가 **둘 다** `resolveCap(` 을 지난다.
  *  ⑶ `untar.ts` 안에 크기 리터럴이 없다 — 상한은 `limits.ts` 에서 온다.
+ *
+ * ## 이 검사기가 못 하는 것 — 적어 둔다
+ *
+ * **형태만 봅니다.** 값을 딴 이름으로 계산해 끼워 넣거나(`const c2 = options.maxBytes ?? limit`),
+ * `limits.ts` 쪽 유도식을 바꾸는 우회는 못 잡습니다. 이 검사기가 막는 것은 **되돌아가는 편집**
+ * (되죄기 부활 · 한쪽 경로만 날값 · 리터럴 재도입)이지 작정한 우회가 아닙니다. 그 선을 넘는
+ * 것은 시험이 해야 하는데, 천장을 관찰하려면 수백 MB 픽스처가 필요해 이 자리에서는 못 합니다 —
+ * 대신 `resolveCap` 을 노출해 **그 함수의 계약**을 `limits.test.ts` 가 직접 잽니다.
  */
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -26,9 +34,23 @@ const SRC = fileURLToPath(new URL("../packages/core/src/untar.ts", import.meta.u
 const text = readFileSync(SRC, "utf8");
 const fail = [];
 
-// ⑴ 죄는 상대가 공용 상수인가
-if (!/return Math\.min\(maxBytes \?\? MAX_EXTRACT_BYTES, MAX_EXTRACT_BYTES\);/.test(text)) {
-    fail.push("`resolveCap` 이 MAX_EXTRACT_BYTES 로 죄지 않습니다 — 파일 안 리터럴로 죄면 limits.ts 와 갈립니다.");
+// ⑴ 기본값이 공용 상수인가 — 그리고 **되죄지 않는가**
+//
+// ⚠ 이 검사기의 첫 판이 `Math.min(…)` 문자열을 **요구**했다. 그 되죄기가 바로 뒤에 차단으로
+//   드러났는데(페이로드 경로가 통째로 막혔다), 검사기는 그것을 요구사항으로 굳혀 두어 고치려는
+//   손을 빨간불로 막았다. **검사기도 심의 대상이다.**
+if (!/return maxBytes \?\? MAX_EXTRACT_BYTES;/.test(text)) {
+    fail.push("`resolveCap` 이 `maxBytes ?? MAX_EXTRACT_BYTES` 가 아닙니다 — 기본값은 공용 상수여야 합니다.");
+}
+if (/resolveCap[\s\S]{0,200}?Math\.min/.test(text)) {
+    fail.push("`resolveCap` 이 호출부 값을 되죕니다 — 호출부는 자기 입력에서 자기 상한을 유도합니다(마감 심의 차단).");
+}
+// ⑴-b 상수를 이 파일에서 가려 놓지 않았는가(별칭 import 로 이름만 남기는 우회)
+if (!/import \{[^}]*\bMAX_EXTRACT_BYTES\b[^}]*\} from "\.\/limits\.ts";/.test(text)) {
+    fail.push("`MAX_EXTRACT_BYTES` 를 limits.ts 에서 **그 이름 그대로** 들여오지 않았습니다.");
+}
+if (/\b(?:const|let|var|function)\s+MAX_EXTRACT_BYTES\b/.test(text)) {
+    fail.push("`MAX_EXTRACT_BYTES` 를 이 파일에서 다시 선언했습니다 — 이름은 같고 값만 다른 우회입니다.");
 }
 
 // ⑵ 두 경로가 모두 그 문을 지나는가
@@ -39,8 +61,20 @@ if (!streamed) fail.push("스트리밍 경로(extractTarGzFile)가 `resolveCap` 
 
 // ⑶ 크기 리터럴이 남아 있지 않은가 — 주석은 뺀다(주석은 값이 아니다)
 const code = text.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:])\/\/[^\n]*/g, "$1 ");
-for (const m of code.matchAll(/\b\d+\s*\*\s*1024\s*\*\s*1024\b/g)) {
-    fail.push(`크기 리터럴이 남아 있습니다: \`${m[0]}\` — 상한은 limits.ts 가 유도합니다.`);
+// 표기를 가리지 않는다 — `200 * 1024 * 1024` 도 `0x8000_0000` 도 `209715200` 도 같은 것이다.
+//
+// ⚠ **바이트 규모만 본다.** 이 파일에는 개수 상한(`MAX_ENTRIES = 200_000`)도 산다. 그것은 크기가
+//   아니라 **셈**이고 `limits.ts` 의 관할이 아니다 — 규모로 가른다(1,000,000 미만은 셈으로 본다).
+for (const m of code.matchAll(/\b0[xX][0-9a-fA-F_]+\b|\b\d[\d_]*\b|\b\d+\s*\*\s*1024\b/g)) {
+    const token = m[0];
+    if (/\*/.test(token)) {
+        fail.push(`크기 리터럴이 남아 있습니다: \`${token}\` — 상한은 limits.ts 가 유도합니다.`);
+        continue;
+    }
+    const value = Number(token.replace(/_/g, ""));
+    if (Number.isFinite(value) && value >= 1_000_000) {
+        fail.push(`크기 리터럴이 남아 있습니다: \`${token}\` — 상한은 limits.ts 가 유도합니다.`);
+    }
 }
 
 if (fail.length > 0) {

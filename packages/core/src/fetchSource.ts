@@ -1,7 +1,6 @@
-import { createHash } from "node:crypto";
 import { createWriteStream } from "node:fs";
 import { mkdir, mkdtemp, readdir, rm } from "node:fs/promises";
-import { meaningfulEntries, removeAdded, snapshotEntries } from "./emptyDir.ts";
+import { meaningfulEntries, removeAdded, snapshotEntries, sweepOurScratch } from "./emptyDir.ts";
 import { join } from "node:path";
 import { createGunzip } from "node:zlib";
 import { pipeline } from "node:stream/promises";
@@ -68,6 +67,13 @@ export async function fetchSiteSource(options: FetchSourceOptions): Promise<Fetc
     report(`버전 ${revisionNo} 소스를 받는 중…`);
     const source = await options.api.sourceUrl(revisionNo);
     await mkdir(options.targetDir, { recursive: true });
+    // ⚠ **우리가 남긴 임시 자리를 먼저 걷어낸다.** 다운로드는 최대 15분이고 그 사이에 확장 호스트가
+    //    죽으면 `.zalkera-fetch-*` 가 남는다. 그것은 점으로 시작해 `ls` 에 **안 보이는데**, 그
+    //    폴더는 그 뒤 모든 「소스 받기」에서 막힌다 — 고객 눈에 그 폴더는 비어 있고, 안내문은
+    //    "빈 폴더를 고르세요"다. 우리가 만든 것이니 우리가 지운다(마감 심의 차단).
+    const swept = await sweepOurScratch(options.targetDir);
+    if (swept > 0) report(`이전에 받다 만 임시 파일 ${swept}건을 정리했습니다.`);
+
     // **편집기가 만든 것 때문에 막히지 않는다**(emptyDir.ts) — `.vscode` 는 우리가 만드는 쪽이다.
     const existing = await meaningfulEntries(options.targetDir);
     if (existing.length > 0) {
@@ -143,9 +149,12 @@ export async function fetchSiteSource(options: FetchSourceOptions): Promise<Fetc
     } catch (cause) {
         await removeAdded(options.targetDir, before);
         throw cause;
+    } finally {
+        // ⚠ **`finally` 다.** `try` 밖에 두면 여기서 던질 때 소스는 다 풀렸는데 명령은 실패로 끝나고,
+        //    롤백도 안 돌며, 재시도는 「비어 있지 않습니다」에 막힌다. 그리고 **삼킨다** — 임시물을
+        //    못 지운 것이 다 받은 일을 무를 이유는 아니다(다음 회차의 `sweepOurScratch` 가 걷는다).
+        await rm(scratchDir, { recursive: true, force: true }).catch(() => {});
     }
-    // 성공 경로에서도 임시물은 남기지 않는다 — 남으면 그것이 곧 소스 트리의 쓰레기다.
-    await rm(scratchDir, { recursive: true, force: true });
 
     report(`${fileCount}개 파일을 받았습니다.`);
     return { revisionNo, fileCount };

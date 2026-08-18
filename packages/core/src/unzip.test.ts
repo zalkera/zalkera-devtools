@@ -195,7 +195,7 @@ async function target(): Promise<string> {
 }
 
 test("작은 zip 이 총량 상한을 넘기면 끊는다 — 이름 여럿이 스트림 하나를 공유한다", async () => {
-    // 10MB 짜리 0 바이트열은 잘 압축된다. 이름 60개면 600MB 로 풀려 상한(400MB)을 넘는다.
+    // 10MB 짜리 0 바이트열은 잘 압축된다. 이름 60개면 600MB 로 풀려 상한을 넘는다.
     const names = Array.from({ length: 60 }, (_, i) => `f${i}.bin`);
     const zip = sharedPayloadZip(names, Buffer.alloc(10 * 1024 * 1024));
     ok(zip.length < 200 * 1024, `zip 이 작아야 이 시험이 뜻이 있다: ${zip.length}B`);

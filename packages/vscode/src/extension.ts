@@ -821,8 +821,25 @@ function scheduleRenewal(expiresAt: string, ttlSeconds: number): void {
                         ? `프리뷰 자격증명을 갱신합니다 — 프리뷰는 시작할 때의 사이트(${plainNotice(pinned, 64)})로 다시 섭니다.`
                         : "프리뷰 자격증명을 갱신하려고 프리뷰를 다시 시작합니다.",
                 );
-                await stopPreview();
-                await startPreviewCommand(pinned);
+                try {
+                    await stopPreview();
+                    await startPreviewCommand(pinned);
+                } catch (error) {
+                    // ⚠ **여기는 `register()` 의 오류 깔때기 밖이다.** 종전에는
+                    //    `executeCommand("zalkera.preview.restart")` 라 실패가 그 깔때기를 지나
+                    //    빨간창 + 출력채널로 나왔다. 핀 고정을 위해 직접 호출로 바꾸면서 그 길이
+                    //    끊겼고, 프리뷰는 이미 `stopPreview()` 로 꺼진 뒤라 **사용자는 몇 시간 뒤
+                    //    프리뷰가 말없이 사라진 것만 본다**(마감 심의 차단). 12시간 뒤 오프라인이면
+                    //    실제로 밟는다. 같은 자리의 KDoc 이 「재기동은 알린다 — 말없이 재시작되면
+                    //    그것도 고장으로 읽힌다」고 적어 둔 그 규율이다.
+                    const message = error instanceof DevtoolsError ? error.humanMessage : String(error);
+                    log(`프리뷰 자격증명 갱신 실패: ${message}`);
+                    if (!(error instanceof DevtoolsError && error.code === "CANCELLED")) {
+                        void vscode.window.showErrorMessage(
+                            `프리뷰 자격증명을 갱신하지 못해 프리뷰가 멈췄습니다 — ${plainNotice(message)}`,
+                        );
+                    }
+                }
             })();
         },
         delay,

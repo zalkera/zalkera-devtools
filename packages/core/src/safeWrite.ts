@@ -13,7 +13,7 @@ import { DevtoolsError } from "./errors.ts";
  *
  * `ENOENT`·`ENOTDIR` 만 삼킨다(그건 진짜 부재다). 나머지는 던진다.
  *
- * ⚠ **경계 판정에만 쓴다.** 형제 [writeOwnedFile] 의 `lstat` 는 일부러 그대로 둔다 — 그 자리의
+ * ⚠ **경계 판정에만 쓴다.** 형제 [writeOwnFile] 의 `lstat` 는 일부러 그대로 둔다 — 그 자리의
  *   경계는 `rename` 이고 `lstat` 는 **예의**라고 그쪽 KDoc 이 적는다. 예의를 경계로 승격하면
  *   `rename` 이 처리했을 상황에서 정상 쓰기가 막힌다.
  */

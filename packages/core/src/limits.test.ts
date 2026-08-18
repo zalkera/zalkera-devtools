@@ -11,14 +11,27 @@
  */
 import { ok, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
-import { MAX_DOWNLOAD_BYTES, MAX_ENTRY_BYTES, MAX_EXTRACT_BYTES, MEASURED_EXPANSION } from "./limits.ts";
+import { MAX_DOWNLOAD_BYTES, MAX_ENTRY_BYTES, MAX_EXTRACT_BYTES, SOURCE_EXPANSION } from "./limits.ts";
 
-test("해제 상한은 전선 상한에서 **계산된다** — 적어 두는 것이 아니다", () => {
-    strictEqual(MAX_EXTRACT_BYTES, MAX_DOWNLOAD_BYTES * MEASURED_EXPANSION);
+test("소스 해제 상한은 전선 상한에서 **계산된다** — 적어 두는 것이 아니다", () => {
+    strictEqual(MAX_EXTRACT_BYTES, MAX_DOWNLOAD_BYTES * SOURCE_EXPANSION);
 });
 
-test("팽창비는 실측 범위(2.5~3배) 안이다", () => {
-    ok(MEASURED_EXPANSION >= 2.5 && MEASURED_EXPANSION <= 3, `${MEASURED_EXPANSION}`);
+test("소스 팽창비는 프리셋 실측(2.5~3배) 안이다", () => {
+    // ⚠ **이 범위는 소스 코퍼스의 것이다.** 의존성 페이로드는 실측 3.6~3.7배라 자기
+    //   `EXTRACT_RATIO_CAP`(8) 을 따로 갖는다. 한때 이 값을 「모든 해제의 천장」으로 쓰다가
+    //   페이로드 해제가 통째로 막혔다 — 그 뒤 이 시험이 **틀린 범위를 잠그는 쪽**으로 작동했다.
+    ok(SOURCE_EXPANSION >= 2.5 && SOURCE_EXPANSION <= 3, `${SOURCE_EXPANSION}`);
+});
+
+test("소스 상한은 **다른 경로를 되죄지 않는다** — 페이로드는 자기 입력에서 유도한다", async () => {
+    // 마감 심의 차단: 실측 158MB 페이로드가 요구하는 1264MB 를 450MB 로 되죄어, 정상 페이로드
+    // 해제(산출물 586MB)가 **항상** 실패했다. 가속기가 영구히 안 켜지는 형태라 조용했다.
+    const { resolveCap } = await import("./untar.ts");
+    const payloadAsks = 158 * 1024 * 1024 * 8;
+    strictEqual(resolveCap(payloadAsks), payloadAsks, "호출부가 준 상한을 되죄면 안 된다");
+    strictEqual(resolveCap(undefined), MAX_EXTRACT_BYTES, "안 주면 소스 기본값이 선다");
+    strictEqual(resolveCap(1024), 1024, "좁게 주면 그대로 선다");
 });
 
 test("항목 하나가 트리 전체보다 클 수 없다", () => {

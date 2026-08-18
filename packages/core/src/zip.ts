@@ -260,11 +260,11 @@ export async function packProject(options: PackOptions): Promise<PackResult> {
                 //    취소 단추가 없다. 상한은 업로드 상한(`publish.ts` 100MB)과 **같은 값**이다:
                 //    어차피 거절될 것을 끝까지 담을 이유가 없다.
                 totalBytes += info.size;
-                if (totalBytes > MAX_TOTAL_BYTES) {
+                if (totalBytes > MAX_RAW_BYTES) {
                     throw new DevtoolsError(
                         "PACK_FAILED",
-                        `묶을 파일이 너무 큽니다(${Math.round(totalBytes / 1024 / 1024)}MB 이상 · 상한 ${Math.round(MAX_TOTAL_BYTES / 1024 / 1024)}MB).`,
-                        "빌드 산출물·큰 이미지·동영상이 폴더에 들어 있지 않은지 확인해 주세요. 다 담기 전에 멈췄습니다.",
+                        `폴더가 너무 큽니다(원본 ${Math.round(totalBytes / 1024 / 1024)}MB 이상 · 한 번에 다룰 수 있는 양은 ${Math.round(MAX_RAW_BYTES / 1024 / 1024)}MB).`,
+                        "동영상·원본 이미지·빌드 산출물이 폴더에 들어 있지 않은지 확인해 주세요. 다 담기 전에 멈췄습니다.",
                     );
                 }
                 entries.push({
@@ -307,10 +307,19 @@ export async function writeZip(path: string, buffer: Buffer): Promise<void> {
 const MAX_FILE_BYTES = 100 * 1024 * 1024;
 
 /**
- * 묶는 **총량** 상한. 업로드 상한(`publish.ts`)과 같은 값이다 — 어차피 거절될 것을 끝까지 담아
- * 메모리에 쌓을 이유가 없다. 걷는 동안 누적을 보므로 **다 담기 전에** 멈춘다.
+ * 걷는 동안 **메모리에 쌓는** 원본 바이트의 상한.
+ *
+ * ⚠ **업로드 상한(100MB)과 같은 값을 쓰면 안 된다.** 그 값은 **압축된 아카이브** 기준인데 여기서
+ *   재는 것은 **압축 전 원본**이다. 한때 둘을 같은 100MB 로 겹쳐 놓았더니, 원본 111MB 짜리
+ *   텍스트 트리(zip 으로는 0.5MB)가 발행 거부됐다 — 어제까지 올라가던 사이트가 오늘 못 올라가는
+ *   형상이다(마감 심의 차단). 커머스 카탈로그·i18n·콘텐츠 JSON 은 실제로 그 규모가 된다.
+ *   게다가 처방이 "빌드 산출물·큰 이미지·동영상을 빼세요"라 **없는 것을 찾으라**고 시켰다.
+ *
+ * 그래서 이 상한이 재는 것은 **메모리 예산**이다(발행 가부는 묶은 뒤 `publish.ts` 가 아카이브
+ * 크기로 판정한다 — 그쪽이 서버가 보는 값이다). 실측으로 원본의 약 3배가 최고 상주였으므로
+ * (150MB → VmHWM 445MB), 확장 호스트를 1GB 아래로 두려면 원본 300MB 언저리가 선이다.
  */
-const MAX_TOTAL_BYTES = 100 * 1024 * 1024;
+const MAX_RAW_BYTES = 300 * 1024 * 1024;
 const MAX_ENTRIES = 65_535;
 
 let crcTable: Uint32Array | null = null;
