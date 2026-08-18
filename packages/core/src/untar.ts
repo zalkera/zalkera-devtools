@@ -434,6 +434,3 @@ async function gunzipBuffer(input: Buffer, maxBytes?: number): Promise<Buffer> {
         );
     }
 }
-
-/** 항목 수 상한(zip 의 65,535 와 같은 목적). 실측 의존성 트리가 14,229 파일이라 두 자릿수 여유를 둔다. */
-

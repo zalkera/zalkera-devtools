@@ -40,7 +40,7 @@ export interface DownloadOptions {
     maxBytes?: number;
 }
 
-/** 주소 검사 + 응답 열기. 두 형제(버퍼·파일)가 **같은 문**을 지난다. */
+/** 주소 검사 + 응답 열기. 받는 자리는 이 문을 지난다. */
 async function openBounded(url: string, options: DownloadOptions): Promise<ReadableStream<Uint8Array>> {
     if (apiBaseUrl(url) === null) {
         // 주소를 서버가 정하므로, 우리가 아는 형태가 아니면 **받지 않는다.**
@@ -61,7 +61,7 @@ async function openBounded(url: string, options: DownloadOptions): Promise<Reada
     return response.body as ReadableStream<Uint8Array>;
 }
 
-/** 상한 초과 — 두 형제가 **같은 문장**을 낸다. */
+/** 상한 초과 — 문장을 한 곳에서 만든다. */
 function tooBig(what: string, limit: number): DevtoolsError {
     return new DevtoolsError(
         "SERVER_REJECTED",

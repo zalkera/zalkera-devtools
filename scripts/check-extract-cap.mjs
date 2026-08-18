@@ -22,9 +22,15 @@
  *   · 상한 변수를 `let` 으로 두고 비교 **전에 재대입**(`if (limit > N) limit = MAX_SAFE_INTEGER`)
  *   · 값을 딴 이름으로 옮겨 계산한 뒤 그것으로 비교
  *   · 함수 본문 절단이 틀리는 형태(중첩 함수·화살표 전환)
+ *   · 값을 딴 이름으로 옮겨 계산한 뒤 그것으로 비교
+ *
+ * 이번에 뚫린 둘은 막았다 — `resolveCap(...)` 뒤에 산술을 붙이는 것, `fetchSource.ts` 안에서
+ * `MAX_EXTRACT_BYTES` 를 같은 이름으로 재선언해 가리는 것. **막았다는 것이 «이제 다 막는다»는
+ * 뜻은 아니다.** 다음 우회가 무엇일지 나는 모른다.
  *
  * 즉 이것은 **되돌아가는 편집**(되죄기 부활 · 한쪽 경로만 날값 · 리터럴 재도입)을 잡는 자리이지
- * 우회 방지 장치가 아니다. 상한이 실제로 서는지는 `limits.test.ts`·`capUnified.test.ts` 가 잰다 —
+ * 우회 방지 장치가 아니다. 이 자리에 「무엇을 끼워 넣었든 걸린다」고 적었던 적이 있는데, 그 뒤
+ * 다섯 번 반증됐다. 정규식으로 소스 글자를 보는 검사기는 그런 말을 할 수 없다. 상한이 실제로 서는지는 `limits.test.ts`·`capUnified.test.ts` 가 잰다 —
  * 다만 그 시험의 상한은 1024B·1MB 라 **상용 크기(450MB)의 가드는 어느 것도 밟지 않는다.**
  * 그 사실을 아는 채로 쓰는 것이 이 자리의 정직한 상태다.
  */
@@ -85,6 +91,10 @@ const sourceCode = readFileSync(SOURCE_SRC, "utf8")
 if (!/const\s+MAX_SOURCE_EXTRACT_BYTES\s*=\s*MAX_EXTRACT_BYTES\s*;/.test(sourceCode)) {
     fail.push("`fetchSource.ts` 의 소스 상한이 `MAX_EXTRACT_BYTES` 그대로가 아닙니다 — 실제 천장이 검사기 밖에 삽니다.");
 }
+// 이름은 그대로 두고 **값만** 가리는 우회 — `untar.ts` 에만 걸어 뒀더니 이쪽으로 샜다(실측).
+if (/\b(?:const|let|var|function)\s+MAX_EXTRACT_BYTES\b/.test(sourceCode)) {
+    fail.push("`fetchSource.ts` 가 `MAX_EXTRACT_BYTES` 를 다시 선언했습니다 — 이름은 같고 값만 다른 우회입니다.");
+}
 
 // ⑷ **가드가 «해결된 상한 그 자체»와 비교하는가** — 표기를 열거하지 않는다
 //
@@ -101,7 +111,13 @@ if (!/const\s+MAX_SOURCE_EXTRACT_BYTES\s*=\s*MAX_EXTRACT_BYTES\s*;/.test(sourceC
 //   숫자 표기를 더 찾는 것은 **열거**다 — 이 레포가 반복해 밟은 병이고, 다음 표기에서 또 샌다.
 //   뒤집는다: 가드는 **해결된 상한 변수 하나와 직접** 비교해야 한다. 그 형태가 아니면 무엇을 끼워
 //   넣었든(리터럴이든 함수 호출이든) 걸린다. 덤으로 무관한 상수에 대한 오탐이 사라진다.
-const capVars = new Set([...code.matchAll(/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*resolveCap\s*\(/g)].map((m) => m[1]));
+// 초기화식이 `resolveCap(...)` **그 자체**여야 한다 — 뒤에 산술을 붙이면(`* 10`) 상한이 커지는데
+// 접두만 보면 그것도 「해결된 상한 변수」로 등록된다(실측으로 뚫렸다).
+const capVars = new Set(
+    [...code.matchAll(/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(resolveCap\s*\([^;\n]*)[;\n]/g)]
+        .filter((m) => /^resolveCap\s*\([^()]*\)\s*$/.test(m[2].trim()))
+        .map((m) => m[1]),
+);
 
 // ⚠ **모든 매치를 본다 — 첫 것만 보면 미끼 한 줄로 뚫린다.**
 //   첫 판이 `.exec()` 로 첫 매치만 봤다. 그래서 앞에 죽은 미끼(`if (written > limit) { void 0; }`)를

@@ -8,10 +8,6 @@ import { MAX_ENTRIES, MAX_ENTRY_BYTES, MAX_EXTRACT_BYTES } from "./limits.ts";
 
 const inflate = promisify(inflateRaw);
 
-/**
- * 해제 산출물 상한. 업로드 상한(100MB)의 배수로 넉넉히 잡되 **무제한은 아니다** — 실측으로 408KB zip 이
- * 400MB 를 뱉었고, 확장 호스트가 OOM 으로 죽으면 **다른 확장까지 함께** 죽는다.
- */
 
 /**
  * **해제 총량 상한.** 항목당 상한만으로는 못 막는다 — zip 의 중앙 디렉터리 항목 여럿이 **같은
@@ -28,7 +24,6 @@ const inflate = promisify(inflateRaw);
  */
 const MAX_TOTAL_BYTES = MAX_EXTRACT_BYTES;
 
-/** 항목 수 상한. 형제 `untar.ts` 와 같은 값 — 두 형식이 다른 기준을 쓸 이유가 없다. */
 
 /**
  * zip 해제기 — **의존성 0**(내장 zlib). 시작 소스 팩(B1)이 zip 으로 오기 때문에 필요하다
