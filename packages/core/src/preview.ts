@@ -98,10 +98,21 @@ async function startDevServerWithEnv(
     const { pickPort } = await import("./dev.ts");
     const port = await pickPort(options.port);
 
-    // 서버가 알려 준 칸 이름을 **실제로 쓴다**(심의 경고 — 주석은 "하드코딩하지 않는다"인데 실물은 리터럴이었다).
-    // 서버가 이름을 바꾸면 확장을 안 고쳐도 따라간다. 모르는 이름이면 계약의 기본값으로 떨어진다.
+    // ⚠ **칸 이름은 우리가 소유한다.** 소스가 읽는 이름은 시작 소스 팩 안에 박혀 있고
+    //   (`ZALKERA_STOREFRONT_KEY`), 서버가 그 이름을 정하게 두면 `.env.local` 의 키 이름을 서버가
+    //   고르는 셈이 된다. 그래서 값은 **리터럴로 쓴다.**
+    //
+    //   종전 주석은 「서버가 알려 준 이름을 실제로 쓴다 · 서버가 바꾸면 따라간다」였는데 셋 다
+    //   거짓이었다 — `envName` 은 이 진행 문구에만 쓰였다. 그래서 사용자에게 「서버가 알려 준 칸
+    //   이름을 씁니다: X」라는 **거짓 문장**이 나갔다. 코드가 옳고 말이 틀렸으므로 말을 고친다.
+    //
+    //   다르면 조용히 넘기지 않고 알린다 — 계약이 갈리기 시작했다는 신호이고, 그때 고칠 것은
+    //   확장이 아니라 팩이다.
     if (envName !== "ZALKERA_STOREFRONT_KEY") {
-        options.onProgress?.(`서버가 알려 준 자격증명 칸 이름을 씁니다: ${envName}`);
+        options.onProgress?.(
+            `서버가 다른 자격증명 칸 이름(${envName})을 알려 왔습니다 — ` +
+                `소스가 읽는 이름은 ZALKERA_STOREFRONT_KEY 라 그것으로 씁니다.`,
+        );
     }
     await writePreviewEnv(options.projectDir, {
         ZALKERA_API_BASE: options.apiBase,
@@ -115,6 +126,8 @@ async function startDevServerWithEnv(
         projectDir: options.projectDir,
         nodePath: options.nodePath,
         port,
+        // 취소가 **첫 컴파일 구간까지** 닿아야 한다. 위의 점 검사는 그 앞까지만 덮는다.
+        ...(options.signal ? { signal: options.signal } : {}),
         ...(options.onLog ? { onLog: options.onLog } : {}),
         ...(options.extraEnv ? { extraEnv: options.extraEnv } : {}),
     });

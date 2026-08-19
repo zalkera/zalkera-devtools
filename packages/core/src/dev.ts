@@ -25,6 +25,15 @@ export interface DevServerOptions {
     onReady?: (url: string) => void;
     /** VS Code 동봉 Node 를 쓰려면 `ELECTRON_RUN_AS_NODE=1` 이 필요하다. */
     extraEnv?: Record<string, string>;
+    /**
+     * 취소. **첫 컴파일 대기가 이 함수에서 제일 긴 구간**이라 여기까지 와야 취소가 뜻을 갖는다.
+     *
+     * 종전에는 호출부(`preview.ts`)가 설치 뒤에 점 검사 한 번만 했다. 그래서 사각이
+     * 「설치 직후」에서 **「Next 첫 컴파일(최대 2분)」으로 옮겨갔을 뿐**이었다 — 사용자가 취소를
+     * 누를 확률이 가장 높은 바로 그 구간이다. 취소가 무시되면 예외가 안 나므로 호출부의
+     * 정리(발급한 프리뷰 키 폐기)도 안 돌고, 세션이 서고 브라우저 탭이 열린다.
+     */
+    signal?: AbortSignal;
 }
 
 export interface DevServer {
@@ -83,7 +92,7 @@ export async function startDevServer(options: DevServerOptions): Promise<DevServ
         for (const listener of exitListeners) listener(code);
     });
 
-    await waitForReady(child, () => ready);
+    await waitForReady(child, () => ready, options.signal);
 
     return {
         url,
@@ -124,7 +133,7 @@ async function isFree(port: number): Promise<boolean> {
  * "안 떴습니다"를 보는데 서버는 뒤에서 계속 떠서 **프리뷰 키를 든 채 UI 밖에 남았다.**
  * 안 떴다고 말했으면 실제로 없어야 한다 — 거짓 실패는 거짓 성공만큼 나쁘다.
  */
-async function waitForReady(child: ChildProcess, isReady: () => boolean): Promise<void> {
+async function waitForReady(child: ChildProcess, isReady: () => boolean, signal?: AbortSignal): Promise<void> {
     await new Promise<void>((resolve, reject) => {
         const timer = setTimeout(() => {
             clearInterval(poll);
@@ -151,9 +160,25 @@ async function waitForReady(child: ChildProcess, isReady: () => boolean): Promis
             if (!isReady()) return;
             clearInterval(poll);
             clearTimeout(timer);
+            signal?.removeEventListener("abort", onAbort);
             resolve();
         }, 100);
         poll.unref?.();
+
+        // ⚠ **취소는 자식을 죽이고 나서 던진다** — 타임아웃 갈래와 같은 순서다. 뒤에 두면 호출부가
+        //   먼저 정리를 시도하고 뜨다 만 서버가 남는다. Ready 와 취소가 겹쳐도 사용자의 뜻을 따른다:
+        //   이미 「취소」를 눌렀으므로 다 뜬 서버라도 세우지 않는다.
+        function onAbort(): void {
+            clearInterval(poll);
+            clearTimeout(timer);
+            void stopChild(child);
+            reject(new DevtoolsError("CANCELLED", "준비를 취소했습니다."));
+        }
+        if (signal?.aborted) {
+            onAbort();
+            return;
+        }
+        signal?.addEventListener("abort", onAbort, {once: true});
 
         child.once("exit", (code) => {
             if (isReady()) return;

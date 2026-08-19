@@ -18,7 +18,7 @@
  */
 
 /** 링크로 렌더될 수 있는 형태. 스킴 목록이 아니라 **콜론이 있는 것 전부**를 본다 — 목록은 늘어난다. */
-const LINK_SHAPE = /\]\s*\(\s*([A-Za-z][A-Za-z0-9+.-]*:[^)]*)\)/g;
+const LINK_SHAPE = /\]\s*\(\s*([A-Za-z][A-Za-z0-9+.-]*:[^)]{0,2048})\)/g;
 
 /**
  * 각괄호 오토링크(`<command:…>`) — 마크다운의 **두 번째** 링크 문법이다.
@@ -30,12 +30,27 @@ const LINK_SHAPE = /\]\s*\(\s*([A-Za-z][A-Za-z0-9+.-]*:[^)]*)\)/g;
  *
  * ⚠ **스킴이 있는 것만 본다.** `<010-1234>`·`a < b` 같은 평범한 글자를 건드리면 우리 문장이 망가진다.
  */
-const AUTOLINK_SHAPE = /<\s*([A-Za-z][A-Za-z0-9+.-]*:[^>\s]*)\s*>/g;
+const AUTOLINK_SHAPE = /<\s*([A-Za-z][A-Za-z0-9+.-]*:[^>\s]{0,2048})\s*>/g;
 
-/** 알림·대화상자에 들어가는 모든 글자가 지난다. */
+/**
+ * 알림·대화상자에 들어가는 모든 글자가 지난다.
+ *
+ * ⚠ **자르는 것이 먼저다.** 종전에는 길이 절단이 정규식 **뒤**에 있어서, 300자만 남길 글자라도
+ *   전체를 먼저 씹었다. 링크 형태의 안쪽 반복이 닫는 괄호를 못 찾으면 시작 위치마다 끝까지
+ *   훑으므로 비용이 길이의 제곱이 된다 — 그리고 이 함수가 받는 글자는 **서버와 아카이브 항목
+ *   이름**이다(tar GNU 긴이름 헤더는 상한이 200MB다). 즉 이 소독기가 막으려던 「적대적 서버가
+ *   한 줄로 우리 알림을 조종한다」가, 같은 한 줄로 **편집기를 세우는** 길이 됐다.
+ *
+ *   앞에서 자르면 남는 것이 상한의 몇 배로 유계라 그 경로가 닫힌다. 판정은 안 바뀐다 — 잘린
+ *   자리에서 링크가 끊기면 닫는 괄호가 사라져 애초에 링크가 되지 않는다.
+ *
+ *   여유를 `limit * 4` 로 두는 이유: 제어문자 제거와 공백 접기가 길이를 줄이므로, 딱 `limit` 만
+ *   남기면 잘라도 될 것이 미리 잘려 문장이 짧아진다.
+ */
 export function plainNotice(text: unknown, limit = 300): string {
     if (typeof text !== "string") return "";
-    const stripped = text.replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028\u2029]+/g, " ");
+    const head = text.length > limit * 4 ? text.slice(0, limit * 4) : text;
+    const stripped = head.replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028\u2029]+/g, " ");
     // `](스킴:...)` 만 전각으로 바꾼다. 링크가 아니게 되고 글자는 남는다.
     const defanged = stripped.replace(LINK_SHAPE, (_m, inner: string) => `\uFF3D\uFF08${inner}\uFF09`);
     const plain = defanged.replace(AUTOLINK_SHAPE, (_m, inner: string) => `\uFF1C${inner}\uFF1E`);

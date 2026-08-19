@@ -28,7 +28,14 @@ export function diagnose(filePath: string, content: string): Diagnostic[] {
         // ① 브라우저에서 백엔드로 직접 fetch — memo61 이 실측으로 "브라우저→백엔드 fetch 0" 을 확인하고
         //    동적 CORS 를 DON'T-BUILD 로 못박은 축이다. 이것을 쓰면 배포 후 CORS 로 죽고, 원인이 안 보인다.
         if (isClientComponent) {
-            const direct = /\b(?:fetch|axios)\s*\(\s*[`"']?\$?\{?\s*(?:process\.env\.)?(?:NEXT_PUBLIC_)?ZALKERA_API_BASE/.exec(line);
+            // ⚠ **모호한 반복을 두지 않는다.** 종전 형태는 `\s*` 둘 사이에 선택 문자만 있어서,
+            //   공백이 길고 뒤의 `ZALKERA_API_BASE` 가 없을 때 공백을 두 반복에 나누는 경우의 수만큼
+            //   되돌아왔다 — 비용이 줄 길이의 제곱이다. 이 함수는 **문서를 열 때와 저장할 때마다**
+            //   확장 호스트 스레드에서 동기로 돌고, 그 스레드는 다른 확장과 공유한다. 받은 소스 팩에
+            //   그런 줄 하나가 있으면 편집기가 선다.
+            //   한 벌의 유계 문자류로 합친다. 종전이 받던 형태(`(`, 따옴표, `$`, `{`, 공백)의
+            //   상위집합이라 잡던 것을 놓치지 않는다.
+            const direct = /\b(?:fetch|axios)\s*\([\s`"'${]{0,32}(?:process\.env\.)?(?:NEXT_PUBLIC_)?ZALKERA_API_BASE/.exec(line);
             if (direct) {
                 found.push({
                     line: index,

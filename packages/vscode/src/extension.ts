@@ -71,6 +71,40 @@ let session: { server: DevServer; projectDir: string; keyId: number; tenant: Cap
 /** 프리뷰 시작 재진입 가드 — 첫 실행은 수 분짜리 설치라 사용자가 반드시 두 번 누른다(심의 경고). */
 let previewStarting = false;
 /**
+ * **소스 받기 재진입 가드.** 「사이트 소스 받기」와 「예제로 시작」이 함께 쓴다 — 둘 다 같은 폴더에
+ * 아카이브를 푸는 일이라, 어느 조합이든 겹치면 안 된다.
+ *
+ * 겹치면 두 가지가 난다(심의 실증):
+ *   ⑴ 둘 다 성공하면 같은 이름의 파일에 두 꾸러미가 번갈아 쓰여 **바이트가 찢어진다** —
+ *      `package.json` 이 `{"name":"예약팩"}<NUL>"}` 이 됐고, `app/page.tsx` 에는 다른 팩의 내용이 들어갔다.
+ *   ⑵ 한쪽이 해제 중에 실패하면 그쪽 롤백(`removeAdded`)이 **자기 스냅샷 이후 생긴 것 전부**를
+ *      지우므로, 다른 쪽이 「받았습니다」라고 알린 파일까지 함께 날아간다. 거짓 성공 + 전량 유실이다.
+ *
+ * 최대 15분짜리 다운로드에 멈출 방법이 없으니 **다시 누르는 것이 자연스러운 반응**이다 — 그래서
+ * 가드가 필요하다. 취소 단추는 별건이다: `fetchSiteSource`·`startFromPreset` 이 아직 취소 신호를
+ * 안 받으므로, 단추만 달면 눌러도 아무 일이 없는 **거짓 단추**가 된다.
+ */
+let receivingSource = false;
+
+/**
+ * 소스 받기 두 입구의 공통 문. **대화상자보다 앞**에서 잡는다 — 폴더를 고르게 해 놓고 거절하면
+ * 사용자는 자기가 무엇을 잘못했는지 모른다.
+ */
+async function withReceiveGuard(run: () => Promise<void>): Promise<void> {
+    if (receivingSource) {
+        void vscode.window.showInformationMessage("소스를 받는 중입니다. 끝나면 다시 시도해 주세요.");
+        return;
+    }
+    receivingSource = true;
+    try {
+        await run();
+    } finally {
+        // ⚠ **반드시 finally 다.** 성공 경로에서만 풀면 폴더 선택 ESC·네트워크 오류 한 번에
+        //   가드가 영영 잠겨, 창을 새로 열 때까지 「받는 중입니다」만 반복한다(프리뷰 가드가 겪은 사고).
+        receivingSource = false;
+    }
+}
+/**
  * **마지막으로 발급받은 프리뷰 키.** `session` 이 아니라 여기 사는 이유(심의 경고 · 2026-08-10):
  * 종전에는 keyId 가 `session` 에만 있어서, 「프리뷰 중지」 뒤 로그아웃하면 **서버 키를 못 지웠다.**
  * 프로세스는 죽었지만 키는 TTL(최대 12시간)까지 살아 있었고, 도움말은 "서버에서도 폐기됩니다"라고
@@ -155,8 +189,8 @@ export function activate(context: vscode.ExtensionContext): void {
         register("zalkera.signOut", async () => {
             await signOut();
         }),
-        register("zalkera.site.create", startFromExample),
-        register("zalkera.site.open", openSite),
+        register("zalkera.site.create", () => withReceiveGuard(startFromExample)),
+        register("zalkera.site.open", () => withReceiveGuard(openSite)),
         register("zalkera.site.link", linkFolder),
         register("zalkera.preview.start", startPreviewCommand),
         register("zalkera.preview.stop", stopPreview),

@@ -44,3 +44,48 @@ test("F1 — 되돌리기 어려운 자리만 경고한다", () => {
     strictEqual(protectedPathWarning("src/app/page.tsx"), null, "평범한 소스는 조용해야 한다");
     strictEqual(protectedPathWarning("src/lib/env.ts"), null, "이름이 비슷하다고 경고하지 않는다");
 });
+
+/**
+ * **저장할 때마다 도는 판정이 줄 길이에 선형이어야 한다.**
+ *
+ * 종전 형태는 `\s*` 둘 사이에 선택 문자만 있어서, 공백이 길고 뒤의 이름이 없을 때 공백을 두
+ * 반복에 나누는 경우의 수만큼 되돌아왔다. `refreshDiagnostics` 는 문서를 **열 때와 저장할 때마다**
+ * 확장 호스트 스레드에서 동기로 돌고, 그 스레드는 다른 확장과 공유한다 — 받은 소스 팩에 그런 줄
+ * 하나가 있으면 편집기가 선다.
+ *
+ * 재현: `npm run test -w @zalkera/devtools-core`
+ */
+test("공백이 긴 줄에서도 선형이다 — 창을 뜨면 여기서 터진다", () => {
+    const started = Date.now();
+    for (const n of [8_000, 16_000, 32_000, 64_000]) {
+        diagnose("a.tsx", `"use client"\nfetch(${" ".repeat(n)}Z\n`);
+    }
+    const elapsed = Date.now() - started;
+    ok(elapsed < 1_500, `${elapsed}ms — 모호한 반복이 되돌아오고 있다(종전 64,000자만 3,262ms)`);
+});
+
+test("양성 통제군 — 잡던 형상은 그대로 잡는다", () => {
+    const shapes = [
+        'fetch(process.env.NEXT_PUBLIC_ZALKERA_API_BASE + "/x")',
+        "fetch(`${process.env.ZALKERA_API_BASE}/x`)",
+        'axios(  "  ZALKERA_API_BASE")',
+        "fetch(ZALKERA_API_BASE)",
+    ];
+    for (const shape of shapes) {
+        const found = diagnose("a.tsx", `"use client"\n${shape}\n`);
+        ok(
+            found.some((d) => d.rule === "zalkera/no-browser-direct-fetch"),
+            `놓쳤다: ${shape}`,
+        );
+    }
+});
+
+test("음성 통제군 — 평범한 fetch 는 안 잡는다", () => {
+    for (const shape of ['fetch("/api/products")', "fetch(url)", "await fetch(`/api/${id}`)"]) {
+        const found = diagnose("a.tsx", `"use client"\n${shape}\n`);
+        ok(
+            !found.some((d) => d.rule === "zalkera/no-browser-direct-fetch"),
+            `거짓 양성: ${shape}`,
+        );
+    }
+});
