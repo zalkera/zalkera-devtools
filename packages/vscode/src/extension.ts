@@ -768,9 +768,13 @@ async function startPreviewInner(pinned?: CapturedTenant): Promise<void> {
     status.command = "zalkera.preview.stop";
 
     if (started.revokedPrevious > 0) {
-        // 말 없이 끊기면 다른 기계의 사용자는 그것을 고장으로 읽는다.
+        // 말 없이 끊기면 저쪽 사용자는 그것을 고장으로 읽는다. 저쪽에는 우리가 말할 수 없으므로
+        // `dev.ts` 의 `translateLog` 가 그 자리에서 안내한다 — 이 알림은 **이긴 쪽** 몫이다.
+        //
+        // ⚠ 「다른 기계」라고 단정하지 않는다. 폐기 사유는 셋인데 서버는 셋을 구분해 주지 않는다:
+        //   다른 기계 · 같은 기계의 다른 창 · 확장이 비정상 종료돼 서버에 남아 있던 키.
         void vscode.window.showWarningMessage(
-            `다른 기계에서 켜 둔 프리뷰 ${count(started.revokedPrevious)}개가 해제되었습니다(프리뷰 자격증명은 한 번에 하나입니다).`,
+            `다른 곳에서 켜 둔 프리뷰 ${count(started.revokedPrevious)}개가 해제되었습니다 — 프리뷰 자격증명은 한 번에 하나입니다.`,
         );
     }
     if (started.expiresAt) {

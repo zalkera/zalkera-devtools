@@ -196,8 +196,28 @@ export function translateLog(line: string): string {
     if (/ECONNREFUSED|ENOTFOUND|ETIMEDOUT/.test(line)) {
         return `⚠ 서버에 연결하지 못했습니다. 인터넷·사내망 프록시를 확인해 주세요.\n${line}`;
     }
-    if (/401|403/.test(line) && /storefront|zalkera/i.test(line)) {
-        return `⚠ 데이터 접속이 거절되었습니다. 프리뷰 키가 만료됐을 수 있습니다 — 프리뷰를 다시 켜 주세요.\n${line}`;
+    // ⚠ **이 줄은 한 번도 발화하지 않았다**(실측). `@zalkera/client` 가 키 거절에서 내는 것은
+    //    HTTP 숫자가 아니라 **사람용 한국어 문면**이고(`STOREFRONT_KEY_MESSAGES`), 그 문장에는
+    //    `401`·`403` 이 없다. 실측한 네 형태 전부 종전 조건(`/401|403/` ∧ `/storefront|zalkera/i`)에
+    //    안 걸렸다:
+    //
+    //      ZalkeraError: 스토어프론트 시크릿 키가 필요합니다. …ZALKERA_STOREFRONT_KEY…
+    //      ZalkeraError: secretKey 가 tenant 옵션과 다른 테넌트의 키입니다. …
+    //      at async getSiteConfig (…/@zalkera/client/dist/index.js:…)
+    //      Error: Failed to fetch site config (401)
+    //
+    //    그래서 **두 갈래로 본다** — 우리 클라이언트가 내는 키 문면, 그리고 남이 만든 숫자 형태.
+    //    문자열 매칭이라 문면이 바뀌면 다시 죽는다. 틀려도 해는 없다(원문이 그대로 나간다).
+    //    `dev.translateLog.test.ts` 가 실제 클라이언트 문면으로 이 두 갈래를 못 박는다.
+    if (
+        (/ZalkeraError/.test(line) && /시크릿 키|secretKey|ZALKERA_STOREFRONT_KEY|테넌트의 키/.test(line)) ||
+        (/\b(401|403)\b/.test(line) && /storefront|zalkera/i.test(line))
+    ) {
+        return (
+            `⚠ 데이터 접속이 거절되었습니다 — 프리뷰 자격증명이 해제됐거나 만료됐습니다.\n` +
+            `   자격증명은 **한 번에 하나**라, 다른 기계(또는 다른 창)에서 프리뷰를 켜면 이쪽이 끊깁니다.\n` +
+            `   프리뷰를 다시 켜 주세요.\n${line}`
+        );
     }
     return line;
 }
