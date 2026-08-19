@@ -7,85 +7,153 @@
 export { DevtoolsError, type DevtoolsErrorCode } from "./errors.ts";
 export { fetchHandshake, type Handshake } from "./handshake.ts";
 export { createPkce, createState, type Pkce } from "./auth/pkce.ts";
-export { startLoopbackReceiver, type LoopbackReceiver } from "./auth/loopback.ts";
-export { getAccessToken, login, logout, type AuthConfig, type LoginOptions } from "./auth/oauth.ts";
-export { MemoryTokenStore, type StoredTokens, type TokenStore } from "./auth/store.ts";
 export {
-    ZalkeraApi,
-    type ApiOptions,
-    type IssuedPreviewKey,
-    type PresetSource,
-    type PresignedUpload,
-    type RevisionSource,
-    type SitePreset,
-    type SiteRevision,
-    type TenantSummary,
+  startLoopbackReceiver,
+  type LoopbackReceiver,
+} from "./auth/loopback.ts";
+export {
+  getAccessToken,
+  login,
+  logout,
+  type AuthConfig,
+  type LoginOptions,
+} from "./auth/oauth.ts";
+export {
+  MemoryTokenStore,
+  type StoredTokens,
+  type TokenStore,
+} from "./auth/store.ts";
+export {
+  ZalkeraApi,
+  type ApiOptions,
+  type IssuedPreviewKey,
+  type PresetSource,
+  type PresignedUpload,
+  type RevisionSource,
+  type SitePreset,
+  type SiteRevision,
+  type TenantSummary,
 } from "./api.ts";
-export { MANAGED_KEYS, mergeEnv, stripCredentials, writePreviewEnv, type PreviewEnv } from "./env.ts";
-export { ensureEnvIgnored, inspectProject, type ProjectInfo } from "./project.ts";
-export { computeCacheKey, ensureDependencies, type DepsOptions, type DepsResult } from "./deps.ts";
 export {
-    computePayloadKey,
-    currentPlatform,
-    evictOldCaches,
-    tryFetchPayload,
-    type PayloadOptions,
-    type PayloadResult,
+  MANAGED_KEYS,
+  mergeEnv,
+  stripCredentials,
+  writePreviewEnv,
+  type PreviewEnv,
+} from "./env.ts";
+export {
+  ensureEnvIgnored,
+  inspectProject,
+  type ProjectInfo,
+} from "./project.ts";
+export {
+  computeCacheKey,
+  ensureDependencies,
+  type DepsOptions,
+  type DepsResult,
+} from "./deps.ts";
+export {
+  computePayloadKey,
+  currentPlatform,
+  evictOldCaches,
+  tryFetchPayload,
+  type PayloadOptions,
+  type PayloadResult,
 } from "./payload.ts";
 export { extractTarGz, extractTarGzFile, type UntarOptions } from "./untar.ts";
-export { pickPort, startDevServer, translateLog, type DevServer, type DevServerOptions } from "./dev.ts";
-export { createZip, packProject, writeZip, type PackResult, type ZipEntry } from "./zip.ts";
+export {
+  pickPort,
+  startDevServer,
+  translateLog,
+  type DevServer,
+  type DevServerOptions,
+} from "./dev.ts";
+export {
+  createZip,
+  packProject,
+  writeZip,
+  type PackResult,
+  type ZipEntry,
+} from "./zip.ts";
 export { publish, type PublishOptions, type PublishResult } from "./publish.ts";
-export { startPreview, type PreviewOptions, type PreviewSession } from "./preview.ts";
+export {
+  startPreview,
+  type PreviewOptions,
+  type PreviewSession,
+} from "./preview.ts";
 export { runDoctor, type DoctorCheck, type DoctorOptions } from "./doctor.ts";
-export { fetchSiteSource, findProjectRoot, type FetchSourceOptions, type FetchSourceResult } from "./fetchSource.ts";
+export {
+  fetchSiteSource,
+  findProjectRoot,
+  type FetchSourceOptions,
+  type FetchSourceResult,
+} from "./fetchSource.ts";
 export { extractZip, type UnzipResult } from "./unzip.ts";
 export { isReceivable, meaningfulEntries } from "./emptyDir.ts";
 
 export { waitForBuild, type BuildOutcome, type WaitOptions } from "./build.ts";
 
 export {
-    captureTenant,
-    decideReadyPrompt,
-    decideSwitch,
-    resolveHelpUrl,
+  captureTenant,
+  decideReadyPrompt,
+  decideSwitch,
+  resolveHelpUrl,
 } from "./tenantScope.ts";
-export { httpUrl, isLoopback, apiBaseUrl, mcpServerName, type McpServerName } from "./serverUrl.ts";
+export {
+  httpUrl,
+  isLoopback,
+  apiBaseUrl,
+  mcpServerName,
+  type McpServerName,
+} from "./serverUrl.ts";
 export { writeOwnFile } from "./safeWrite.ts";
 export {
-    chooseNpm,
-    describeNpm,
-    npmArgvOf,
-    acceptsResolvedNpmCli,
-    systemNpmSearchSteps,
-    type NpmSearchStep,
-    type PathOps,
-    majorOf,
-    MIN_SYSTEM_NPM_MAJOR,
-    type NpmChoice,
-    type NpmPreference,
-    type NpmProbe,
+  chooseNpm,
+  describeNpm,
+  npmArgvOf,
+  acceptsResolvedNpmCli,
+  systemNpmSearchSteps,
+  type NpmSearchStep,
+  type PathOps,
+  majorOf,
+  MIN_SYSTEM_NPM_MAJOR,
+  type NpmChoice,
+  type NpmPreference,
+  type NpmProbe,
 } from "./npmChoice.ts";
 export {
-    isUsableVersion,
-    shouldShowUpgradeNotice,
-    UPGRADE_NOTICE_INTERVAL_MS,
-    type UpgradeNoticeState,
+  isUsableVersion,
+  shouldShowUpgradeNotice,
+  UPGRADE_NOTICE_INTERVAL_MS,
+  type UpgradeNoticeState,
 } from "./upgradeNotice.ts";
-export { plainNotice, ours, count} from "./notice.ts";
+export { plainNotice, ours, count } from "./notice.ts";
 export {
-    say,
-    type CapturedTenant,
-    type ReadyPrompt,
-    type SwitchDecision,
+  say,
+  type CapturedTenant,
+  type ReadyPrompt,
+  type SwitchDecision,
 } from "./tenantScope.ts";
-export { startFromPreset, type StartFromPresetOptions, type StartFromPresetResult } from "./presets.ts";
-export { precheck, type PrecheckFinding, type PrecheckOptions } from "./precheck.ts";
-export { registerMcpServer, type McpRegistration, type RegisterMcpResult } from "./mcp.ts";
+export {
+  startFromPreset,
+  type StartFromPresetOptions,
+  type StartFromPresetResult,
+} from "./presets.ts";
+export {
+  precheck,
+  type PrecheckFinding,
+  type PrecheckOptions,
+} from "./precheck.ts";
+export {
+  registerMcpServer,
+  type McpRegistration,
+  type RegisterMcpResult,
+} from "./mcp.ts";
 export { ensureAgentDocs, type AgentDocsResult } from "./agents.ts";
 export {
-    diagnose,
-    diagnoseClientUsage,
-    protectedPathWarning,
-    type Diagnostic,
+  diagnose,
+  diagnoseClientUsage,
+  protectedPathWarning,
+  type Diagnostic,
 } from "./diagnostics.ts";
+export { BUSY, createReentrancyGuard } from "./reentrancy.ts";

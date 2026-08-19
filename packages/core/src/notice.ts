@@ -17,8 +17,21 @@
  *   괄호를 쓴다). ⑶ 길이를 자른다.
  */
 
+/**
+ * **안쪽 반복의 상한.** 이것을 넘는 링크는 정규식에 **안 잡힌다** — 즉 소독이 새는 자리다.
+ * 그래서 [MAX_CAP] 과 한 쌍이다: `MAX_CAP * 4 <= INNER_BOUND` 여야 자른 뒤 길이가 이 상한을
+ * 넘을 수 없다. 두 정규식이 이 상수에서 **유도**되므로 둘이 따로 갈릴 수 없다.
+ */
+const INNER_BOUND = 2048;
+
+/** 자른 뒤 남는 길이의 상한. `INNER_BOUND` 와의 산술이 소독의 전제다 — `notice.test.ts` 가 잰다. */
+export const MAX_CAP = 512;
+
 /** 링크로 렌더될 수 있는 형태. 스킴 목록이 아니라 **콜론이 있는 것 전부**를 본다 — 목록은 늘어난다. */
-const LINK_SHAPE = /\]\s*\(\s*([A-Za-z][A-Za-z0-9+.-]*:[^)]{0,2048})\)/g;
+const LINK_SHAPE = new RegExp(
+  `\\]\\s*\\(\\s*([A-Za-z][A-Za-z0-9+.-]*:[^)]{0,${INNER_BOUND}})\\)`,
+  "g",
+);
 
 /**
  * 각괄호 오토링크(`<command:…>`) — 마크다운의 **두 번째** 링크 문법이다.
@@ -30,7 +43,10 @@ const LINK_SHAPE = /\]\s*\(\s*([A-Za-z][A-Za-z0-9+.-]*:[^)]{0,2048})\)/g;
  *
  * ⚠ **스킴이 있는 것만 본다.** `<010-1234>`·`a < b` 같은 평범한 글자를 건드리면 우리 문장이 망가진다.
  */
-const AUTOLINK_SHAPE = /<\s*([A-Za-z][A-Za-z0-9+.-]*:[^>\s]{0,2048})\s*>/g;
+const AUTOLINK_SHAPE = new RegExp(
+  `<\\s*([A-Za-z][A-Za-z0-9+.-]*:[^>\\s]{0,${INNER_BOUND}})\\s*>`,
+  "g",
+);
 
 /**
  * 알림·대화상자에 들어가는 모든 글자가 지난다.
@@ -41,21 +57,40 @@ const AUTOLINK_SHAPE = /<\s*([A-Za-z][A-Za-z0-9+.-]*:[^>\s]{0,2048})\s*>/g;
  *   이름**이다(tar GNU 긴이름 헤더는 상한이 200MB다). 즉 이 소독기가 막으려던 「적대적 서버가
  *   한 줄로 우리 알림을 조종한다」가, 같은 한 줄로 **편집기를 세우는** 길이 됐다.
  *
- *   앞에서 자르면 남는 것이 상한의 몇 배로 유계라 그 경로가 닫힌다. 판정은 안 바뀐다 — 잘린
- *   자리에서 링크가 끊기면 닫는 괄호가 사라져 애초에 링크가 되지 않는다.
+ *   앞에서 자르면 남는 것이 유계라 그 경로가 닫힌다. 여유를 `cap * 4` 로 두는 이유: 제어문자
+ *   제거와 공백 접기가 길이를 줄이므로, 딱 `cap` 만 남기면 잘라도 될 것이 미리 잘려 문장이 짧아진다.
  *
- *   여유를 `limit * 4` 로 두는 이유: 제어문자 제거와 공백 접기가 길이를 줄이므로, 딱 `limit` 만
- *   남기면 잘라도 될 것이 미리 잘려 문장이 짧아진다.
+ *   ⚠ **판정이 바뀌는 자리가 하나 있다.** 자르기가 링크 **안쪽**에 떨어지면 닫는 괄호가 사라져
+ *     `LINK_SHAPE` 가 안 물고, 결과에 `](스킴:` 이 살아남는다. 마크다운은 닫는 괄호가 없으면
+ *     링크로 안 그리므로 실해는 없지만, 이 레포의 시험이 쓰는 오라클(`RENDERS_AS_LINK`)은
+ *     「남았다」로 본다 — 「판정은 안 바뀐다」로 적으면 거짓이다.
+ *
+ * ■ 상한을 `limit` 에서 **유도**한다
+ *   `LINK_SHAPE`·`AUTOLINK_SHAPE` 의 안쪽 반복에는 상한이 있고(`{0,2048}`), 그것을 넘는 링크는
+ *   **정규식에 안 잡힌다.** 즉 「자르기가 그보다 먼저 온다」가 소독의 전제다. 그 전제를 호출부
+ *   규율로만 두면 언젠가 깨진다 — 실제로 이 레포의 시험 하나가 `limit` 을 천만으로 준다.
+ *   그래서 `cap` 을 512 로 죈다: `cap * 4 = 2048` 이라 자른 뒤 길이가 안쪽 상한을 **넘을 수 없다.**
+ *   상용 최대 호출값이 300 이라 실제 문장은 짧아지지 않는다.
  */
 export function plainNotice(text: unknown, limit = 300): string {
-    if (typeof text !== "string") return "";
-    const head = text.length > limit * 4 ? text.slice(0, limit * 4) : text;
-    const stripped = head.replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028\u2029]+/g, " ");
-    // `](스킴:...)` 만 전각으로 바꾼다. 링크가 아니게 되고 글자는 남는다.
-    const defanged = stripped.replace(LINK_SHAPE, (_m, inner: string) => `\uFF3D\uFF08${inner}\uFF09`);
-    const plain = defanged.replace(AUTOLINK_SHAPE, (_m, inner: string) => `\uFF1C${inner}\uFF1E`);
-    const tidy = plain.replace(/\s+/g, " ").trim();
-    return tidy.length > limit ? `${tidy.slice(0, limit)}\u2026` : tidy;
+  if (typeof text !== "string") return "";
+  const cap = Math.min(limit, MAX_CAP);
+  const head = text.length > cap * 4 ? text.slice(0, cap * 4) : text;
+  const stripped = head.replace(
+    /[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028\u2029]+/g,
+    " ",
+  );
+  // `](스킴:...)` 만 전각으로 바꾼다. 링크가 아니게 되고 글자는 남는다.
+  const defanged = stripped.replace(
+    LINK_SHAPE,
+    (_m, inner: string) => `\uFF3D\uFF08${inner}\uFF09`,
+  );
+  const plain = defanged.replace(
+    AUTOLINK_SHAPE,
+    (_m, inner: string) => `\uFF1C${inner}\uFF1E`,
+  );
+  const tidy = plain.replace(/\s+/g, " ").trim();
+  return tidy.length > cap ? `${tidy.slice(0, cap)}\u2026` : tidy;
 }
 
 /**
@@ -69,8 +104,8 @@ export function plainNotice(text: unknown, limit = 300): string {
  * 숫자로 읽히면 숫자를, 아니면 `?` 를 돌려준다. **모르면 보여 주지 않는 쪽**이다.
  */
 export const count = (value: unknown): string => {
-    const n = typeof value === "bigint" ? Number(value) : Number(value);
-    return Number.isFinite(n) ? String(n) : "?";
+  const n = typeof value === "bigint" ? Number(value) : Number(value);
+  return Number.isFinite(n) ? String(n) : "?";
 };
 
 /**

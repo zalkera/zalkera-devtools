@@ -22,7 +22,11 @@ export interface Diagnostic {
 export function diagnose(filePath: string, content: string): Diagnostic[] {
     const found: Diagnostic[] = [];
     const lines = content.split("\n");
-    const isClientComponent = /^\s*["']use client["']/m.test(content);
+    // ⚠ **`^` 가 이미 줄머리를 준다 — `\s*` 가 개행을 넘을 이유가 없다.** 넘게 두면 빈 줄이 이어질
+    //   때 줄머리마다 끝까지 훑고 되돌아와 비용이 제곱이 된다(실측: 빈 줄 100KB `.tsx` 하나로
+    //   `refreshDiagnostics` 가 6.4초). 이 판정은 **여는 모든 파일에 무조건** 돌므로, 아래 규칙들보다
+    //   전제조건이 적다 — 받은 소스 팩에 그런 파일 하나면 편집기가 선다.
+    const isClientComponent = /^[^\S\n]*["']use client["']/m.test(content);
 
     lines.forEach((line, index) => {
         // ① 브라우저에서 백엔드로 직접 fetch — memo61 이 실측으로 "브라우저→백엔드 fetch 0" 을 확인하고
@@ -33,9 +37,16 @@ export function diagnose(filePath: string, content: string): Diagnostic[] {
             //   되돌아왔다 — 비용이 줄 길이의 제곱이다. 이 함수는 **문서를 열 때와 저장할 때마다**
             //   확장 호스트 스레드에서 동기로 돌고, 그 스레드는 다른 확장과 공유한다. 받은 소스 팩에
             //   그런 줄 하나가 있으면 편집기가 선다.
-            //   한 벌의 유계 문자류로 합친다. 종전이 받던 형태(`(`, 따옴표, `$`, `{`, 공백)의
-            //   상위집합이라 잡던 것을 놓치지 않는다.
-            const direct = /\b(?:fetch|axios)\s*\([\s`"'${]{0,32}(?:process\.env\.)?(?:NEXT_PUBLIC_)?ZALKERA_API_BASE/.exec(line);
+            //
+            //   ⚠ **상한으로 막지 않는다.** `{0,32}` 를 쓴 판을 냈다가 잡혔다 — 유계는 문자 종류로는
+            //     상위집합이어도 **길이로는 부분집합**이라, 공백 33자를 낀 줄을 종전은 잡고 이 판은
+            //     놓쳤다(탐지 회귀). 대신 **각 반복이 반드시 1자 이상을 소비하게** 만든다:
+            //     `(?:[`"'${]\s*)*` 의 안쪽은 첫 글자가 반드시 소비되므로 공백을 나눠 가질 경우의
+            //     수가 생기지 않는다. 길이는 무계로 두고 모호성만 없앤다.
+            const direct =
+                /\b(?:fetch|axios)\s*\(\s*(?:[`"'${]\s*)*(?:process\.env\.)?(?:NEXT_PUBLIC_)?ZALKERA_API_BASE/.exec(
+                    line,
+                );
             if (direct) {
                 found.push({
                     line: index,

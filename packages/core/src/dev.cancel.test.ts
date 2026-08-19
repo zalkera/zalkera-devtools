@@ -15,6 +15,7 @@ import {
   chmodSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -28,10 +29,19 @@ const roots: string[] = [];
 const started: DevServer[] = [];
 after(async () => {
   // ⚠ **치운다.** 가드를 재는 시험이 가드가 막으려는 손해(디스크·메모리 잠식)를 내면 안 된다.
-  //   실제로 한 번 흘렸다: 변이 실행이 외부에서 강제 종료되자 대역 `next` 가 고아로 남아
-  //   **다른 세션의 성능 측정에 부하로 잡혔다.** 러너가 죽어도 남지 않게 두 겹으로 막는다 —
-  //   여기서 세우고, 대역 자신도 부모가 사라지면 스스로 끝낸다.
+  //   실제로 두 번 흘렸다 — 변이 실행이 강제 종료됐을 때, 그리고 **회귀가 났을 때**. 후자가
+  //   더 나쁘다: 취소가 안 들으면 시험이 2분을 기다리다 죽고 대역이 남는데, 그때 러너는
+  //   **살아 있으므로** 부모 감시가 안 뛴다. 세 겹으로 막는다.
   for (const s of started) await s.stop().catch(() => {});
+  // ② 핸들이 없는 실패 경로까지 — 대역이 자기 pid 를 남긴다.
+  for (const r of roots) {
+    try {
+      const pid = Number(readFileSync(join(r, "band.pid"), "utf8").trim());
+      if (Number.isInteger(pid) && pid > 0) process.kill(pid, "SIGKILL");
+    } catch {
+      // 안 떴거나 이미 죽었다 — 둘 다 정상이다.
+    }
+  }
   for (const r of roots) rmSync(r, { recursive: true, force: true });
 });
 
@@ -48,10 +58,14 @@ function project(readyAfterMs: number): string {
   writeFileSync(join(root, "package.json"), '{"name":"c","private":true}');
   writeFileSync(
     join(binDir, "next"),
-    `setTimeout(() => console.log("✓ Ready in ${readyAfterMs}ms"), ${readyAfterMs});\n` +
-      // 부모(시험 러너)가 사라지면 스스로 끝낸다 — 러너가 강제 종료돼도 고아가 남지 않는다.
+    `require("fs").writeFileSync(${JSON.stringify(join(root, "band.pid"))}, String(process.pid));\n` +
+      `setTimeout(() => console.log("✓ Ready in ${readyAfterMs}ms"), ${readyAfterMs});\n` +
+      // ③ **절대 자멸 타이머** — `unref` 하지 않는다. 부모가 살아서 매달리는 경우(회귀가 실제로
+      //    만드는 형상)에는 부모 감시가 안 뛰므로, 대역이 스스로 끝나야 부모의 이벤트 루프도 풀린다.
+      `setTimeout(() => process.exit(0), 20000);\n` +
+      // ① 부모가 사라지면 즉시 끝낸다 — 러너가 강제 종료된 경우.
       `const ppid = process.ppid;\n` +
-      `setInterval(() => { if (process.ppid !== ppid) process.exit(0); }, 500);\n`,
+      `setInterval(() => { if (process.ppid !== ppid) process.exit(0); }, 500).unref();\n`,
   );
   chmodSync(join(binDir, "next"), 0o755);
   return root;
