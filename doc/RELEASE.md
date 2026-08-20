@@ -86,12 +86,44 @@ git push origin v<version>
 
 ---
 
-## 4. 체크리스트
+## 4. 설치 경로가 갱신을 정한다
+
+발행이 끝나도 **파일로 깐 사용자에게는 안 갑니다.**
+
+| 설치 경로                                                 | 자동 갱신     |
+| --------------------------------------------------------- | ------------- |
+| `code --install-extension zalkera.zalkera-devtools`(마켓) | 받는다        |
+| `code --install-extension <파일>.vsix`                    | **안 받는다** |
+
+VS Code 가 파일 설치본을 마켓 항목과 연결하지 않아 갱신 확인 대상에서 빠진다. 확장 화면에
+「Update」 단추도 안 뜬다. 고치려면 **지웠다 다시** 깐다 — `--force` 덮어쓰기로는 안 바뀐다.
+
+```bash
+code --list-extensions --show-versions | grep zalkera   # 어느 쪽인지
+code --uninstall-extension zalkera.zalkera-devtools
+code --install-extension zalkera.zalkera-devtools
+```
+
+⚠ **포장 스크립트가 찍는 `shared/*.vsix` 설치 명령은 임시 경로다**(마켓 검증 대기 중에 쓰는 것).
+발행이 끝난 뒤에는 마켓 경로가 정본이다. 그 사실을 안 적어 뒀더니, 그 줄만 보고 깐 사람이 다음
+판이 나와도 계속 옛 판을 썼다.
+
+⚠ 이 표는 **이 박스에서 재현해 확인한 것이 아니다** — 여기 VS Code Server 에는 확장이 안 깔려
+있다. 진단 명령으로 어느 쪽인지 먼저 보고 처방하라.
+
+강제로 올려야 하면 `minExtensionVersion`(백엔드 설정)을 올리는 길이 있다. 그러면 그 미만 판은
+알림이 아니라 **하던 일이 멈춘다** — 사용자 작업을 끊는 것이라 오너 판단이다.
+
+---
+
+## 5. 체크리스트
 
 ```
 [ ] packages/vscode/package.json 의 version 을 올렸다
+[ ] packages/vscode/CHANGELOG.md 에 이번 판 항목을 적었다 (VSIX 안에 실려 마켓에 그대로 뜬다)
 [ ] npm run package  (verify 통과 + vsix 생성)
 [ ] 번들에 이번 변경이 들어갔는지 ASCII 패턴으로 확인
 [ ] npx vsce publish --packagePath dist/…vsix   (오너)
 [ ] v<version> 태그를 sha256 과 함께 찍고 push
+[ ] 파일로 깔아 둔 사람이 있으면 마켓 경로로 다시 깔라고 안내 (§4)
 ```

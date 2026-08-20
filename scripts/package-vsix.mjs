@@ -157,5 +157,9 @@ cpSync(made, join(shared, `${manifest.name}-${manifest.version}.vsix`));
 
 console.log(`\n✅ ${made}\n   항목 ${listed.length - 1}개 · 필수 ${must.length}종 확인`);
 console.log(`   사본: shared/${manifest.name}-${manifest.version}.vsix`);
-console.log(`\n   설치: code --install-extension shared/${manifest.name}-${manifest.version}.vsix --force`);
+console.log(`\n   설치(임시·검증 대기 중일 때): code --install-extension shared/${manifest.name}-${manifest.version}.vsix --force`);
+// ⚠ **파일로 깐 확장은 마켓 갱신을 안 받는다.** VS Code 가 마켓 신원 없이 기록하므로 갱신 확인
+//    대상에서 빠진다 — 이 줄만 보고 깐 사람은 다음 판이 나와도 계속 옛 판을 쓴다. 그래서 마켓
+//    경로를 함께 찍는다(발행이 끝난 뒤에는 이쪽이 정본이다).
+console.log(`   설치(정본): code --install-extension ${manifest.publisher}.${manifest.name}`);
 rmSync(stage, { recursive: true, force: true });

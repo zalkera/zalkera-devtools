@@ -1,6 +1,6 @@
 {
   "name": "zalkera-devtools",
-  "version": "0.1.42",
+  "version": "0.1.43",
   "private": true,
   "license": "MIT",
   "type": "module",
@@ -20,6 +20,7 @@
     "ecommerce"
   ],
   "categories": [
+    "Linters",
     "Other"
   ],
   "main": "./dist/extension.cjs",
@@ -189,5 +190,14 @@
     "type": "git",
     "url": "https://github.com/zalkera/zalkera-devtools.git"
   },
-  "icon": "media/icon.png"
+  "icon": "media/icon.png",
+  "bugs": {
+    "url": "https://github.com/zalkera/zalkera-devtools/issues"
+  },
+  "homepage": "https://zalkera.com",
+  "galleryBanner": {
+    "color": "#0B1220",
+    "theme": "dark"
+  },
+  "qna": "https://github.com/zalkera/zalkera-devtools/issues"
 }
