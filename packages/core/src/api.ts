@@ -127,7 +127,7 @@ export class ZalkeraApi {
     }
 
     /**
-     * 프리뷰 키 발급(memo146 §3.4). **재발급하면 이 테넌트의 이전 프리뷰 키는 즉시 끊긴다** —
+     * 미리보기 키 발급(memo146 §3.4). **재발급하면 이 테넌트의 이전 미리보기 키는 즉시 끊긴다** —
      * `revokedPrevious` 가 0 이 아니면 호출부는 그 사실을 사람에게 말해야 한다(말 없이 끊기면 고장으로 읽힌다).
      */
     issuePreviewKey(label?: string): Promise<IssuedPreviewKey> {
@@ -139,7 +139,7 @@ export class ZalkeraApi {
     /**
      * 스토어프론트 키 폐기 — **로그아웃이 진짜 로그아웃이 되게 하는 조각**(심의 경고).
      *
-     * 이것이 없으면 로그아웃해도 이미 발급된 프리뷰 키가 TTL(기본 12시간)까지 살아 있고, 그 키를 들고 있는
+     * 이것이 없으면 로그아웃해도 이미 발급된 미리보기 키가 TTL(기본 12시간)까지 살아 있고, 그 키를 들고 있는
      * dev 서버는 계속 상용 데이터를 읽는다. "로그아웃했다"는 화면과 실제가 어긋나는 자리다.
      */
     revokeStorefrontKey(keyId: number): Promise<unknown> {
@@ -233,7 +233,7 @@ export class ZalkeraApi {
         //
         //    형제 `handshake.ts` 는 같은 파싱을 이미 감싸고 있고, 그 주석이 "초판은 곧장 읽어
         //    SyntaxError 가 그대로 사용자에게 갔다"고 적었다 — **그 수정이 한쪽에만 적용돼 있었다.**
-        //    이 경로는 발행·리비전 목록·프리뷰 키 발급 등 **인증된 모든 호출**이 지난다.
+        //    이 경로는 발행·리비전 목록·미리보기 키 발급 등 **인증된 모든 호출**이 지난다.
         let envelope: Envelope<T>;
         try {
             envelope = (await response.json()) as Envelope<T>;
@@ -260,7 +260,7 @@ export class ZalkeraApi {
 
 /**
  * 서버 오류를 **사람이 읽을 말**로 옮긴다. 상태코드만 던지면 사용자는 무엇을 해야 할지 모른다 —
- * 특히 403 은 이 도구에서 흔한 진짜 원인이 하나 있다: 순수 STAFF 계정은 프리뷰 키를 발급할 수 없다.
+ * 특히 403 은 이 도구에서 흔한 진짜 원인이 하나 있다: 순수 STAFF 계정은 미리보기 키를 발급할 수 없다.
  */
 async function toError(response: Response): Promise<DevtoolsError> {
     let serverMessage = "";

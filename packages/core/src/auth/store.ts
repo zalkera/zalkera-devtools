@@ -13,7 +13,7 @@ export interface TokenStore {
 export interface StoredTokens {
     /** 짧다(현행 정책 2분). 항상 만료 직전으로 가정하고 쓴다. */
     accessToken: string;
-    /** 갱신 축. 이것이 없으면 프리뷰 한 세션도 못 넘긴다. */
+    /** 갱신 축. 이것이 없으면 미리보기 한 세션도 못 넘긴다. */
     refreshToken: string;
     /** access 만료 시각(epoch ms). 서버 시계와 다를 수 있어 여유를 두고 갱신한다. */
     expiresAt: number;

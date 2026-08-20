@@ -60,7 +60,7 @@ export async function inspectProject(dir: string): Promise<ProjectInfo> {
 }
 
 /**
- * `.gitignore` 에 `.env.local` 을 보장한다(F4). 프리뷰 키가 **레포에 커밋되는 사고**를 막는 마지막 자리다.
+ * `.gitignore` 에 `.env.local` 을 보장한다(F4). 미리보기 키가 **레포에 커밋되는 사고**를 막는 마지막 자리다.
  *
  * 이미 무시되고 있으면 아무것도 하지 않는다(중복 줄을 만들지 않는다). `.gitignore` 가 없으면 만들지 않는다 —
  * git 을 쓰지 않는 고객에게 git 파일을 만들어 주는 것은 우리 일이 아니다(업로드 경로는 git 이 안 보인다).
@@ -71,7 +71,7 @@ export async function ensureEnvIgnored(dir: string): Promise<"already" | "added"
     if (!existsSync(path)) {
         // ⚠ **판정 축이 틀렸었다**(심의 차단 · 2026-08-03): 초판은 "`.gitignore` 파일이 있는가"로 물었다.
         // `git init` 만 한 폴더(신규 레포의 기본 상태)에서는 그 파일이 없으므로 아무것도 안 했고,
-        // 프리뷰가 쓴 `.env.local` 이 `git add -A` 에 그대로 걸려 **프리뷰 키가 커밋된다**(실측).
+        // 미리보기가 쓴 `.env.local` 이 `git add -A` 에 그대로 걸려 **미리보기 키가 커밋된다**(실측).
         // 물어야 할 것은 "git 을 쓰는가"이고, 그 답은 `.git/` 존재다.
         if (!existsSync(join(dir, ".git"))) return "not-git";
         await writeOwnFile(path, "# 로컬 자격증명 — 절대 커밋하지 않습니다(zalkera).\n.env.local\n");

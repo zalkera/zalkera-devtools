@@ -40,7 +40,7 @@ test("F2 — NEXT_PUBLIC 시크릿과 소스에 박힌 키를 잡는다", () => 
   ok(found.some((f) => f.rule === "zalkera/no-literal-key"));
 });
 
-test("F2 — 프리뷰 플래그는 시크릿이 아니다(설계가 그 이름을 쓰라고 정했다)", () => {
+test("F2 — 미리보기 플래그는 시크릿이 아니다(설계가 그 이름을 쓰라고 정했다)", () => {
   deepStrictEqual(
     diagnose(
       "src/lib/preview.ts",

@@ -55,7 +55,7 @@ test("401 은 재로그인, 403 은 권한 안내로 옮긴다", async () => {
         (error: unknown) =>
             error instanceof DevtoolsError &&
             error.code === "FORBIDDEN" &&
-            // 순수 STAFF 계정이 프리뷰 키를 못 받는 것이 이 403 의 진짜 원인이다 — 그 사실을 사람에게 말한다.
+            // 순수 STAFF 계정이 미리보기 키를 못 받는 것이 이 403 의 진짜 원인이다 — 그 사실을 사람에게 말한다.
             (error.hint ?? "").includes("관리자 권한"),
     );
 });

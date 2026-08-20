@@ -49,7 +49,7 @@ export type DevtoolsErrorCode =
     | "SERVER_UNREACHABLE"
     /** 로그인이 필요하거나 만료됐다. */
     | "NOT_AUTHENTICATED"
-    /** 로그인은 됐지만 이 작업을 할 권한이 없다(예: 순수 STAFF 계정의 프리뷰 키 발급). */
+    /** 로그인은 됐지만 이 작업을 할 권한이 없다(예: 순수 STAFF 계정의 미리보기 키 발급). */
     | "FORBIDDEN"
     /** 서버가 거절했다(4xx·5xx 일반). */
     | "SERVER_REJECTED"

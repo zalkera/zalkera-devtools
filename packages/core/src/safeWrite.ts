@@ -119,7 +119,7 @@ export async function assertNotSymlink(path: string, name: string): Promise<void
  * **우리가 소유하는 파일을 쓴다.** 같은 폴더에 임시 파일을 새로 만들고 `rename` 으로 갈아 끼운다.
  *
  * ■ 왜 `writeFile` 이 아닌가
- *   그 자리가 링크면 내용이 링크 대상으로 간다 — `.env.local` 이면 **방금 발급한 프리뷰 키가
+ *   그 자리가 링크면 내용이 링크 대상으로 간다 — `.env.local` 이면 **방금 발급한 미리보기 키가
  *   프로젝트 밖으로** 나가고, 도구가 `.env*` 를 zip 에서 빼고 `.gitignore` 에 넣어 세운
  *   "자격증명은 안 샌다" 가 그 한 번으로 거짓이 된다.
  *

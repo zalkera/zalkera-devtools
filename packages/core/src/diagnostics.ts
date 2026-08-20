@@ -132,7 +132,7 @@ export function protectedPathWarning(relativePath: string): string | null {
     // `zip.ts` 의 제외와 **같은 가정을 써야 한다**(클로징 심의) — 종전에는 `.env~` 를 열어도
     // 아무 말이 없었다. 빼는 규칙과 알리는 규칙이 갈리면, 빠진 줄 모르고 고치게 된다.
     if (/^\.env/.test(normalized)) {
-        return "이 파일에는 자격증명이 들어 있습니다. 값을 손으로 고치면 프리뷰가 끊길 수 있고, 커밋하면 키가 새 나갑니다.";
+        return "이 파일에는 자격증명이 들어 있습니다. 값을 손으로 고치면 미리보기가 끊길 수 있고, 커밋하면 키가 새 나갑니다.";
     }
     if (normalized.startsWith("node_modules/")) {
         return "의존성 폴더는 캐시와 하드링크로 묶여 있어, 여기서 고치면 이 기계의 다른 프로젝트까지 함께 바뀝니다.";

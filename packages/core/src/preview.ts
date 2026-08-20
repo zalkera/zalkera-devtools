@@ -6,11 +6,11 @@ import { ensureEnvIgnored, inspectProject } from "./project.ts";
 import { DevtoolsError } from "./errors.ts";
 
 /**
- * 프리뷰 한 판(C1) — **이 트랜치의 존재 이유**를 한 함수로 묶는다.
+ * 미리보기 한 판(C1) — **이 트랜치의 존재 이유**를 한 함수로 묶는다.
  *
  * 순서에 뜻이 있다: 프로젝트 확인 → `.gitignore` 보정 → **키 발급** → `.env.local` 조립 → 의존성 →
  * 개발 서버. 키 발급을 의존성보다 **먼저** 하는 이유는, 권한이 없어 못 받을 사람에게 5분짜리 설치를
- * 시킨 뒤에 거절을 통보하지 않기 위해서다(순수 STAFF 계정은 프리뷰 키를 못 받는다).
+ * 시킨 뒤에 거절을 통보하지 않기 위해서다(순수 STAFF 계정은 미리보기 키를 못 받는다).
  */
 export interface PreviewOptions {
     /** 취소 신호. 의존성 설치(수 분)를 사용자가 멈출 수 있게 한다. */
@@ -30,7 +30,7 @@ export interface PreviewOptions {
     onProgress?: (message: string) => void;
     onLog?: (line: string) => void;
     /**
-     * 프리뷰 키가 **발급된 순간** 호출된다. 성공을 기다리지 않는 이유는, 이 뒤의 의존성 설치와 dev 기동이
+     * 미리보기 키가 **발급된 순간** 호출된다. 성공을 기다리지 않는 이유는, 이 뒤의 의존성 설치와 dev 기동이
      * 던질 수 있고 그때도 키는 이미 서버에 나 있기 때문이다 — 호출부가 폐기할 수 있어야 한다.
      */
     onKeyIssued?: (keyId: number) => void;
@@ -38,9 +38,9 @@ export interface PreviewOptions {
 
 export interface PreviewSession {
     server: DevServer;
-    /** 이 세션이 쓰는 프리뷰 키 id — 로그아웃·중지에서 **폐기**하려면 필요하다. */
+    /** 이 세션이 쓰는 미리보기 키 id — 로그아웃·중지에서 **폐기**하려면 필요하다. */
     keyId: number;
-    /** 이 발급으로 끊긴 다른 기계의 프리뷰 수 — 0 이 아니면 사람에게 알려야 한다. */
+    /** 이 발급으로 끊긴 다른 기계의 미리보기 수 — 0 이 아니면 사람에게 알려야 한다. */
     revokedPrevious: number;
     /** 키 만료 시각(ISO). 확장은 이 시각 전에 재발급한다(C6). */
     expiresAt: string | null;
@@ -57,7 +57,7 @@ export async function startPreview(options: PreviewOptions): Promise<PreviewSess
     if (ignored === "added") report(".gitignore 에 .env.local 을 추가했습니다(자격증명 커밋 방지).");
     if (ignored === "created") report(".gitignore 를 만들어 .env.local 을 제외했습니다(자격증명 커밋 방지).");
 
-    report("프리뷰 자격증명을 발급받는 중…");
+    report("미리보기 자격증명을 발급받는 중…");
     const key = await options.api.issuePreviewKey(options.label);
     // ⚠ **발급 즉시 알린다**(심의 차단 · 2026-08-10). 키는 여기서 나고, 그 뒤의 의존성 설치와 dev 기동은
     // 둘 다 던질 수 있다. 종전에는 성공해서 반환될 때만 keyId 가 호출부에 닿아, **실패하면 아무도 폐기할 수
@@ -78,10 +78,10 @@ export async function startPreview(options: PreviewOptions): Promise<PreviewSess
     // ⚠ **취소를 여기서도 본다.** `signal` 이 `ensureDependencies` 에만 걸려 있어서, 설치가 끝난
     //    뒤에 취소를 눌러도 dev 서버가 그대로 떴다(실증: abort 뒤에도 세션이 성립). 확장에서는
     //    「취소」를 누르고 알림이 사라진 다음 **잠시 뒤 브라우저가 열린다** — 취소가 먹은 줄 알았는데
-    //    안 먹은 것이라, 사용자는 「프리뷰 중지」를 따로 찾아야 한다. 취소 단추가 있는 구간과 없는
+    //    안 먹은 것이라, 사용자는 「미리보기 중지」를 따로 찾아야 한다. 취소 단추가 있는 구간과 없는
     //    구간이 문면 없이 갈리던 자리다.
     if (options.signal?.aborted) {
-        throw new DevtoolsError("CANCELLED", "프리뷰 시작을 취소했습니다.");
+        throw new DevtoolsError("CANCELLED", "미리보기 시작을 취소했습니다.");
     }
 
     // 포트를 먼저 정한다 — `ZALKERA_SITE_URL` 이 실제 주소와 달라지면 링크·정규 URL 이 어긋난다.

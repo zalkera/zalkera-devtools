@@ -40,7 +40,7 @@ export function mergeEnv(existing: string, values: PreviewEnv): string {
     const lines = existing.length === 0 ? [] : existing.split("\n");
 
     // ⚠ **중복 선언은 뒤엣것이 이긴다**(dotenv 규칙 · 심의 경고). 초판은 첫 줄만 갱신하고 뒤에 남은 옛 줄을
-    // 그대로 뒀다 — 폐기된 키가 채택돼 **영구 401** 이 되고, 우리가 안내하는 "프리뷰를 다시 켜세요"를 따라도
+    // 그대로 뒀다 — 폐기된 키가 채택돼 **영구 401** 이 되고, 우리가 안내하는 "미리보기를 다시 켜세요"를 따라도
     // 같은 결과가 반복됐다(사용자가 못 빠져나오는 왕복). 먼저 갱신할 키의 **중복 줄을 걷어낸다**.
     const seen = new Set<string>();
     const deduped = lines.filter((line) => {
@@ -61,7 +61,7 @@ export function mergeEnv(existing: string, values: PreviewEnv): string {
 
     if (pending.size > 0) {
         if (merged.length > 0 && merged[merged.length - 1]?.trim() !== "") merged.push("");
-        merged.push("# zalkera 확장이 관리하는 칸 — 프리뷰를 켤 때마다 갱신됩니다(다른 줄은 건드리지 않습니다).");
+        merged.push("# zalkera 확장이 관리하는 칸 — 미리보기를 켤 때마다 갱신됩니다(다른 줄은 건드리지 않습니다).");
         for (const key of MANAGED_KEYS) {
             const value = pending.get(key);
             if (value !== undefined) merged.push(`${key}=${quoteIfNeeded(value)}`);
@@ -76,11 +76,11 @@ export async function writePreviewEnv(projectDir: string, values: PreviewEnv): P
     const path = join(projectDir, ".env.local");
     const existing = existsSync(path) ? await readFile(path, "utf8") : "";
     const merged = mergeEnv(existing, values);
-    // ⚠ 이 파일에는 방금 발급한 프리뷰 키가 들어간다. 자리가 심링크면 **프로젝트 밖으로** 나가고,
+    // ⚠ 이 파일에는 방금 발급한 미리보기 키가 들어간다. 자리가 심링크면 **프로젝트 밖으로** 나가고,
     //   `.env*` 를 zip 에서 빼고 `.gitignore` 에 넣어 세운 "자격증명은 안 샌다" 가 그 한 번으로 거짓이 된다.
     await writeOwnFile(path, merged, 0o600);
     // `mode` 는 **생성 시에만** 적용된다 — 이미 644 로 있던 파일은 그대로였다(심의 실측).
-    // 공용 기계의 다른 로컬 사용자가 프리뷰 키를 읽는 자리라 매번 조인다. 윈도우에서는 무의미하나 무해하다.
+    // 공용 기계의 다른 로컬 사용자가 미리보기 키를 읽는 자리라 매번 조인다. 윈도우에서는 무의미하나 무해하다.
     await chmod(path, 0o600).catch(() => {});
     return path;
 }

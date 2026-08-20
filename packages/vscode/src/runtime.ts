@@ -32,7 +32,7 @@ import {
  * 만족하는 시스템 npm 이 골라지므로, 동봉 경로가 실제로 돌았는지는 구분되지 않는다. 확인하려면
  * **PATH 에서 node·npm 을 가린 채** 켜야 한다. 그것이 비개발자 기계의 실제 형상이다.
  *
- * 재현: `env -i HOME=$HOME PATH=/usr/bin:/bin <VS Code 실행>` 뒤 프리뷰를 켠다.
+ * 재현: `env -i HOME=$HOME PATH=/usr/bin:/bin <VS Code 실행>` 뒤 미리보기를 켠다.
  */
 export interface NodeRuntime {
     nodePath: string;

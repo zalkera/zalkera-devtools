@@ -91,13 +91,13 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorCheck[]> 
                 name: "의존성",
                 ok: project.hasNodeModules,
                 detail: project.hasNodeModules ? "설치됨" : "미설치",
-                ...(project.hasNodeModules ? {} : { hint: "프리뷰를 켜면 자동으로 준비합니다." }),
+                ...(project.hasNodeModules ? {} : { hint: "미리보기를 켜면 자동으로 준비합니다." }),
             });
             const envPath = join(options.projectDir, ".env.local");
             checks.push({
                 name: "로컬 설정 파일",
                 ok: true,
-                detail: existsSync(envPath) ? ".env.local 있음" : ".env.local 없음(프리뷰를 켜면 만듭니다)",
+                detail: existsSync(envPath) ? ".env.local 있음" : ".env.local 없음(미리보기를 켜면 만듭니다)",
             });
         } catch (error) {
             checks.push({

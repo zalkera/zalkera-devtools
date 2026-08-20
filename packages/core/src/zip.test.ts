@@ -63,7 +63,7 @@ print("\\n".join(zipfile.ZipFile(sys.argv[1]).namelist()))`,
     ok(names.includes("src/page.tsx"), "중첩 소스도 담긴다");
     ok(!names.some((n) => n.startsWith("node_modules/")), "의존성 제외");
     ok(!names.some((n) => n.startsWith(".next/")), "빌드 산출물 제외");
-    ok(!names.includes(".env.local"), "자격증명 제외 — 여기서 새면 프리뷰 키가 서버로 올라간다");
+    ok(!names.includes(".env.local"), "자격증명 제외 — 여기서 새면 미리보기 키가 서버로 올라간다");
     strictEqual(result.fileCount, names.length);
 });
 

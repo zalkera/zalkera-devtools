@@ -3,7 +3,7 @@ import * as vscode from "vscode";
 /**
  * 사이드바 뷰 하나(T5 · §5 「UI 표면 — 넷뿐」).
  *
- * **트리 하나로 끝낸다.** 웹뷰를 쓰지 않는 이유는 프리뷰와 같다: 우리가 화면을 그리기 시작하면 그 화면이
+ * **트리 하나로 끝낸다.** 웹뷰를 쓰지 않는 이유는 미리보기와 같다: 우리가 화면을 그리기 시작하면 그 화면이
  * 곧 제품이 되고, 확장이 두꺼워져 CLI·데스크톱이 같은 것을 재사용하지 못한다(§W-5). 여기 있는 것은
  * **상태 표시와 명령 바로가기**뿐이고, 로직은 한 줄도 없다.
  *
@@ -80,7 +80,7 @@ export class ZalkeraSidebar implements vscode.TreeDataProvider<Node> {
         ];
 
         if (!site) {
-            // 소스가 없는 사람에게 프리뷰·발행을 먼저 보여 주면 할 수 없는 일을 권하는 것이 된다.
+            // 소스가 없는 사람에게 미리보기·발행을 먼저 보여 주면 할 수 없는 일을 권하는 것이 된다.
             //
             // 셋은 **택일**이다. 번호(①②③)를 붙이지 않는 이유가 그것이다 — 번호는 "1번 하고 2번 하라"로
             // 읽혀 정반대 뜻이 된다. 그룹 이름과 설명이 택일임을 말한다.
@@ -94,17 +94,17 @@ export class ZalkeraSidebar implements vscode.TreeDataProvider<Node> {
         } else {
             const making: Node[] = [
                 previewUrl
-                    ? action(`프리뷰 열기 — ${previewUrl}`, "zalkera.preview.start", "browser", "실행 중")
-                    : action("프리뷰 시작", "zalkera.preview.start", "play", "로컬에서 확인합니다"),
+                    ? action(`미리보기 열기 — ${previewUrl}`, "zalkera.preview.start", "browser", "실행 중")
+                    : action("미리보기 시작", "zalkera.preview.start", "play", "로컬에서 확인합니다"),
             ];
-            if (previewUrl) making.push(action("프리뷰 중지", "zalkera.preview.stop", "debug-stop"));
-            // **프리뷰와 한 묶음이다.** 보는 것과 고치는 것이 같은 단계이므로 붙어 있어야 한다.
+            if (previewUrl) making.push(action("미리보기 중지", "zalkera.preview.stop", "debug-stop"));
+            // **미리보기와 한 묶음이다.** 보는 것과 고치는 것이 같은 단계이므로 붙어 있어야 한다.
             // 종전에는 팔레트에만 있어 비개발자가 찾지 못했다 — "말로 고치기"의 입구인데.
             making.push(
                 action("에이전트 연결(MCP)", "zalkera.agent.connect", "plug", "쓰시는 AI 가 이 사이트를 다루게 합니다"),
             );
             if (keyExpiresAt) {
-                making.push(info(`프리뷰 자격증명 만료: ${new Date(keyExpiresAt).toLocaleString("ko-KR")}`, "key"));
+                making.push(info(`미리보기 자격증명 만료: ${new Date(keyExpiresAt).toLocaleString("ko-KR")}`, "key"));
             }
 
             nodes.push(
@@ -167,7 +167,7 @@ function group(
 ): Node {
     const item: Node = new vscode.TreeItem(label, vscode.TreeItemCollapsibleState.Expanded);
     // **안정적인 id 가 있어야 접힘이 유지된다.** 없으면 VS Code 가 라벨로 추정하는데, 새로고침마다
-    // 새 객체를 만드는 이 구조에서는 사용자가 접어 둔 것이 상태 변화(프리뷰 시작 등)마다 도로 펼쳐진다.
+    // 새 객체를 만드는 이 구조에서는 사용자가 접어 둔 것이 상태 변화(미리보기 시작 등)마다 도로 펼쳐진다.
     item.id = `zalkera.group.${label}`;
     item.iconPath = new vscode.ThemeIcon(icon);
     if (tooltip) item.tooltip = tooltip;

@@ -1,11 +1,11 @@
 {
   "name": "zalkera-devtools",
-  "version": "0.1.45",
+  "version": "0.1.46",
   "private": true,
   "license": "MIT",
   "type": "module",
   "displayName": "잘커라(zalkera)",
-  "description": "잘커라 사이트를 내 컴퓨터에서 열고, 프리뷰로 확인하고, 올립니다.",
+  "description": "잘커라 사이트를 내 컴퓨터에서 열고, 미리보기로 확인하고, 올립니다.",
   "publisher": "zalkera",
   "engines": {
     "vscode": "^1.90.0"
@@ -51,17 +51,17 @@
       },
       {
         "command": "zalkera.preview.start",
-        "title": "프리뷰 시작",
+        "title": "미리보기 시작",
         "category": "잘커라"
       },
       {
         "command": "zalkera.preview.stop",
-        "title": "프리뷰 중지",
+        "title": "미리보기 중지",
         "category": "잘커라"
       },
       {
         "command": "zalkera.preview.restart",
-        "title": "프리뷰 다시 시작",
+        "title": "미리보기 다시 시작",
         "category": "잘커라"
       },
       {

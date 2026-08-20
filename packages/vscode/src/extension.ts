@@ -71,8 +71,8 @@ import { ZalkeraSidebar } from "./sidebar.ts";
 let output: vscode.OutputChannel;
 let status: vscode.StatusBarItem;
 /**
- * 도는 프리뷰. **`tenant` 를 함께 든다** — 자동 갱신 재기동이 「그 시점의」 선택을 다시 읽으면,
- * 사이드바에서 사이트를 바꿔 둔 사이에 프리뷰가 **말없이 다른 사이트로** 다시 선다(심의 지적).
+ * 도는 미리보기. **`tenant` 를 함께 든다** — 자동 갱신 재기동이 「그 시점의」 선택을 다시 읽으면,
+ * 사이드바에서 사이트를 바꿔 둔 사이에 미리보기가 **말없이 다른 사이트로** 다시 선다(심의 지적).
  */
 let session: {
   server: DevServer;
@@ -80,7 +80,7 @@ let session: {
   keyId: number;
   tenant: CapturedTenant;
 } | null = null;
-/** 프리뷰 시작 재진입 가드 — 첫 실행은 수 분짜리 설치라 사용자가 반드시 두 번 누른다(심의 경고). */
+/** 미리보기 시작 재진입 가드 — 첫 실행은 수 분짜리 설치라 사용자가 반드시 두 번 누른다(심의 경고). */
 let previewStarting = false;
 /**
  * **소스 받기 재진입 가드.** 판정은 `createReentrancyGuard`(core)가 하고 여기서는 **문면만** 정한다 —
@@ -105,8 +105,8 @@ async function withReceiveGuard(run: () => Promise<void>): Promise<void> {
 }
 
 /**
- * **마지막으로 발급받은 프리뷰 키.** `session` 이 아니라 여기 사는 이유(심의 경고 · 2026-08-10):
- * 종전에는 keyId 가 `session` 에만 있어서, 「프리뷰 중지」 뒤 로그아웃하면 **서버 키를 못 지웠다.**
+ * **마지막으로 발급받은 미리보기 키.** `session` 이 아니라 여기 사는 이유(심의 경고 · 2026-08-10):
+ * 종전에는 keyId 가 `session` 에만 있어서, 「미리보기 중지」 뒤 로그아웃하면 **서버 키를 못 지웠다.**
  * 프로세스는 죽었지만 키는 TTL(최대 12시간)까지 살아 있었고, 도움말은 "서버에서도 폐기됩니다"라고
  * 적혀 있었다 — 문서가 하지 않는 일을 했다고 말하는 자리였다.
  */
@@ -218,7 +218,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
 export async function deactivate(): Promise<void> {
   clearRenewal();
-  // 프리뷰를 켜 둔 채 창을 닫으면 dev 서버가 고아로 남는다 — 사용자는 그것을 볼 수도 끌 수도 없다.
+  // 미리보기를 켜 둔 채 창을 닫으면 dev 서버가 고아로 남는다 — 사용자는 그것을 볼 수도 끌 수도 없다.
   await session?.server.stop();
 }
 
@@ -316,7 +316,7 @@ function register(
     } catch (error) {
       // ⚠ **취소는 오류가 아니다.** 사용자가 스스로 그만둔 것을 빨간 창으로 알리면, 자기가
       //    뭘 잘못했나 싶게 만든다. 출력 채널에는 남긴다 — 무슨 일이 있었는지는 보여야 한다.
-      //    (`signIn`·사이트 선택은 각자 삼키고 있었는데, 프리뷰 취소가 이 자리까지 올라와
+      //    (`signIn`·사이트 선택은 각자 삼키고 있었는데, 미리보기 취소가 이 자리까지 올라와
       //    "인터넷을 확인하세요"로 떴다 — 재심의 지적. 한 자리에서 가른다.)
       if (error instanceof DevtoolsError && error.code === "CANCELLED") {
         log(`취소: ${error.humanMessage}`);
@@ -396,19 +396,19 @@ async function signIn(): Promise<boolean> {
 /** 로그아웃했으면 `true`, 준비 중이라 거절했으면 `false`. **호출부는 이 값을 봐야 한다.** */
 async function signOut(options: { quiet?: boolean } = {}): Promise<boolean> {
   // 준비 중(수 분짜리 첫 설치)에 로그아웃하면, 이미 발급된 키로 진행 중인 시작이 **로그아웃 뒤에
-  // 완주해** 프리뷰가 선다 — 사이드바는 로그아웃 화면인데 상태바는 "프리뷰 N"이 된다(심의 경고).
+  // 완주해** 미리보기가 선다 — 사이드바는 로그아웃 화면인데 상태바는 "미리보기 N"이 된다(심의 경고).
   // 지금은 준비를 중간에 끊을 수단이 없으므로 **거절하고 말한다.** 조용히 어긋나게 두지 않는다.
   if (previewStarting) {
     void vscode.window.showWarningMessage(
-      "프리뷰를 준비하는 중입니다. 끝난 뒤 다시 시도해 주세요.",
+      "미리보기를 준비하는 중입니다. 끝난 뒤 다시 시도해 주세요.",
     );
     return false;
   }
-  // ⚠ **로그아웃이 반쪽이었다**(심의 경고): 도는 프리뷰를 안 끄고 서버 키도 안 지웠다. 이미 뜬 dev 서버는
+  // ⚠ **로그아웃이 반쪽이었다**(심의 경고): 도는 미리보기를 안 끄고 서버 키도 안 지웠다. 이미 뜬 dev 서버는
   // 부팅 때 읽은 키로 **최대 12시간 상용 데이터를 계속 읽는다** — "로그아웃했다"는 화면과 실제가 어긋난다.
   // 순서가 중요하다: 서버를 먼저 멈추고(그 키를 쓰는 프로세스를 없앤 뒤) 키를 지운다.
   //
-  // 프리뷰가 돌던 폴더를 **멈추기 전에** 잡는다. `stopPreview()` 뒤엔 `session` 이 사라져서,
+  // 미리보기가 돌던 폴더를 **멈추기 전에** 잡는다. `stopPreview()` 뒤엔 `session` 이 사라져서,
   // 아래 `.env.local` 정리가 지금 창의 폴더를 지우게 된다 — 키가 있는 곳은 저쪽인데(클로징 심의).
   const previewDir = session?.projectDir ?? null;
   await stopPreview();
@@ -430,7 +430,7 @@ async function signOut(options: { quiet?: boolean } = {}): Promise<boolean> {
         stripCredentials(await readFile(envPath, "utf8")),
         0o600,
       );
-      log(".env.local 의 프리뷰 키를 지웠습니다(다른 설정은 그대로).");
+      log(".env.local 의 미리보기 키를 지웠습니다(다른 설정은 그대로).");
     }
   }
   await refreshSidebar();
@@ -451,26 +451,26 @@ async function signOut(options: { quiet?: boolean } = {}): Promise<boolean> {
  */
 async function resetAll(): Promise<void> {
   // signOut 과 **같은 이유로** 거절한다. 여기서 막지 않으면 signOut 이 조용히 되돌아온 뒤 설정만
-  // 지워져서 — 로그인은 살아 있고 프리뷰는 뒤늦게 뜨는데 사이트 설정만 사라진 — 최악의 중간 상태가 된다.
+  // 지워져서 — 로그인은 살아 있고 미리보기는 뒤늦게 뜨는데 사이트 설정만 사라진 — 최악의 중간 상태가 된다.
   const dir = workspaceDir();
   const confirmed = await vscode.window.showWarningMessage(
     "잘커라를 처음 상태로 되돌릴까요?",
     {
       modal: true,
       detail:
-        "지웁니다: 로그인 · 작업 사이트 설정 · 프리뷰 자격증명(서버에서도 폐기)\n" +
+        "지웁니다: 로그인 · 작업 사이트 설정 · 미리보기 자격증명(서버에서도 폐기)\n" +
         "남깁니다: 받은 소스 폴더와 그 안의 내 설정",
     },
     "초기화",
   );
   if (confirmed !== "초기화") return;
 
-  // 로그아웃이 이미 하는 일(프리뷰 중지 → 서버 키 폐기 → 토큰 삭제 → .env.local 키 줄 제거)을
+  // 로그아웃이 이미 하는 일(미리보기 중지 → 서버 키 폐기 → 토큰 삭제 → .env.local 키 줄 제거)을
   // 그대로 쓴다. 두 벌로 만들면 한쪽만 고쳐진다.
   //
   // ⚠ **거절을 반드시 전달받는다**(심의 경고). 반환값을 안 보면, 확인창을 띄워 둔 사이에 갱신 타이머가
-  // 프리뷰를 다시 세워 signOut 이 거절하고 — 그런데 여기는 그대로 진행해 **설정만 지운다.** 로그인은
-  // 살아 있고 프리뷰는 뒤늦게 뜨는데 사이트 설정만 사라진, 주석이 스스로 최악이라 부른 그 상태다.
+  // 미리보기를 다시 세워 signOut 이 거절하고 — 그런데 여기는 그대로 진행해 **설정만 지운다.** 로그인은
+  // 살아 있고 미리보기는 뒤늦게 뜨는데 사이트 설정만 사라진, 주석이 스스로 최악이라 부른 그 상태다.
   if (!(await signOut({ quiet: true }))) return;
 
   // 사이트 설정은 **두 범위 모두** 지운다 — 한쪽만 지우면 남은 쪽이 되살아난다.
@@ -484,7 +484,7 @@ async function resetAll(): Promise<void> {
     );
   }
 
-  log("초기화했습니다 — 로그인·사이트 설정·프리뷰 자격증명을 지웠습니다.");
+  log("초기화했습니다 — 로그인·사이트 설정·미리보기 자격증명을 지웠습니다.");
   await refreshSidebar();
 
   if (dir) {
@@ -519,10 +519,10 @@ async function revokeKeyQuietly(keyId: number, tenant: string): Promise<void> {
       tenantCode: () => tenant,
     });
     await api.revokeStorefrontKey(keyId);
-    log("프리뷰 자격증명을 서버에서 폐기했습니다.");
+    log("미리보기 자격증명을 서버에서 폐기했습니다.");
   } catch (error) {
     log(
-      `프리뷰 자격증명 폐기 실패(만료까지 유효할 수 있습니다): ${error instanceof Error ? error.message : error}`,
+      `미리보기 자격증명 폐기 실패(만료까지 유효할 수 있습니다): ${error instanceof Error ? error.message : error}`,
     );
   }
 }
@@ -554,7 +554,7 @@ async function openSite(): Promise<void> {
     `버전 ${count(result.revisionNo)} · 파일 ${count(result.fileCount)}개를 받았습니다.`,
   );
   // ⚠ 받은 폴더가 **지금 열린 폴더**일 수 있다. 그때 갱신하지 않으면 사이드바가 계속 「소스」에
-  //    머물러 프리뷰·발행으로 가는 길이 화면에서 끊긴다.
+  //    머물러 미리보기·발행으로 가는 길이 화면에서 끊긴다.
   await refreshSidebar();
   const open = await vscode.window.showInformationMessage(
     `사이트 소스를 받았습니다(버전 ${count(result.revisionNo)}).`,
@@ -798,7 +798,7 @@ async function linkFolder(): Promise<void> {
   );
 }
 
-// ── 프리뷰 ──────────────────────────────────────────────────────────────
+// ── 미리보기 ──────────────────────────────────────────────────────────────
 
 async function startPreviewCommand(pinned?: CapturedTenant): Promise<void> {
   if (session) {
@@ -809,13 +809,13 @@ async function startPreviewCommand(pinned?: CapturedTenant): Promise<void> {
   // 끌 수 없는 고아가 된다(심의 경고). 첫 실행이 수 분짜리 설치라 실제로 자주 밟힌다.
   if (previewStarting) {
     void vscode.window.showInformationMessage(
-      "프리뷰를 준비하는 중입니다. 잠시만 기다려 주세요.",
+      "미리보기를 준비하는 중입니다. 잠시만 기다려 주세요.",
     );
     return;
   }
   // ⚠ **가드는 반드시 finally 로 푼다**(심의 차단 · 2026-08-10). 종전에는 성공 경로에서만 풀어서,
   // 바로 아래 세 호출 중 하나만 던져도(폴더 미개방·사이트 선택 ESC·네트워크 오류) 가드가 영영 잠겼다.
-  // 그 뒤로는 「프리뷰 시작」이 창을 새로 열 때까지 "준비하는 중입니다"만 반복했다 — 준비 중인 것이
+  // 그 뒤로는 「미리보기 시작」이 창을 새로 열 때까지 "준비하는 중입니다"만 반복했다 — 준비 중인 것이
   // 없는데 준비 중이라고 말하는 막다른 길이었다.
   previewStarting = true;
   try {
@@ -859,7 +859,7 @@ async function startPreviewInner(pinned?: CapturedTenant): Promise<void> {
     );
   }
 
-  setStatus("$(sync~spin) 프리뷰 준비 중");
+  setStatus("$(sync~spin) 미리보기 준비 중");
   // ⚠ **취소 단추를 준다.** 첫 실행은 수 분짜리 설치이고, 사내망 프록시에 물리면 자식 프로세스가
   //   **끝나지 않는다** — 그러면 이 알림은 영원히 돈다. 이 파일이 이미 적어 둔 "사용자가 반드시 두 번
   //   누른다"는 실측에 재진입 가드는 만들었으면서 **멈출 방법은 안 만들었다**(심의 지적).
@@ -869,7 +869,7 @@ async function startPreviewInner(pinned?: CapturedTenant): Promise<void> {
     vscode.window.withProgress<PreviewSession>(
       {
         location: vscode.ProgressLocation.Notification,
-        title: "프리뷰를 준비하는 중",
+        title: "미리보기를 준비하는 중",
         cancellable: true,
       },
       (_progress, token) => {
@@ -914,17 +914,17 @@ async function startPreviewInner(pinned?: CapturedTenant): Promise<void> {
   started.server.onExit((code) => {
     session = null;
     clearRenewal();
-    // 만료 표시도 함께 걷는다 — 프리뷰가 없는데 "자격증명 만료: …"가 남으면 낡은 화면이다.
+    // 만료 표시도 함께 걷는다 — 미리보기가 없는데 "자격증명 만료: …"가 남으면 낡은 화면이다.
     sidebar.update({ previewUrl: null, keyExpiresAt: null });
     setStatus("$(zap) 잘커라");
     // **상태바를 되돌린다.** 종전에는 텍스트만 바꾸고 command 를 stop 에 둬서, 크래시 뒤 상태바를
     // 누르면 session 이 없어 아무 일도 안 하는 죽은 버튼이 됐다(심의 경고).
     status.command = "zalkera.preview.start";
     if (code !== 0 && code !== null)
-      log(`프리뷰가 종료되었습니다(코드 ${code}).`);
+      log(`미리보기가 종료되었습니다(코드 ${code}).`);
   });
 
-  setStatus(`$(browser) 프리뷰 ${new URL(started.server.url).port}`);
+  setStatus(`$(browser) 미리보기 ${new URL(started.server.url).port}`);
   status.command = "zalkera.preview.stop";
 
   if (started.revokedPrevious > 0) {
@@ -934,12 +934,12 @@ async function startPreviewInner(pinned?: CapturedTenant): Promise<void> {
     // ⚠ 「다른 기계」라고 단정하지 않는다. 폐기 사유는 셋인데 서버는 셋을 구분해 주지 않는다:
     //   다른 기계 · 같은 기계의 다른 창 · 확장이 비정상 종료돼 서버에 남아 있던 키.
     void vscode.window.showWarningMessage(
-      `다른 곳에서 켜 둔 프리뷰 ${count(started.revokedPrevious)}개가 해제되었습니다 — 프리뷰 자격증명은 한 번에 하나입니다.`,
+      `다른 곳에서 켜 둔 미리보기 ${count(started.revokedPrevious)}개가 해제되었습니다 — 미리보기 자격증명은 한 번에 하나입니다.`,
     );
   }
   if (started.expiresAt) {
     log(
-      `프리뷰 자격증명 만료: ${new Date(started.expiresAt).toLocaleString("ko-KR")}`,
+      `미리보기 자격증명 만료: ${new Date(started.expiresAt).toLocaleString("ko-KR")}`,
     );
     scheduleRenewal(started.expiresAt, config.previewKeyTtlSeconds);
   }
@@ -947,10 +947,10 @@ async function startPreviewInner(pinned?: CapturedTenant): Promise<void> {
   // **웹뷰가 아니라 실제 브라우저로 연다**(§3.5) — 웹뷰는 쿠키·CSP 가 실제 탭과 달라
   // "로컬에선 됐는데 배포하니 다르다"를 만드는 정확한 자리다.
   //
-  // ⚠ **여기서 실패해도 프리뷰 시작은 성공이다.** 이 줄은 **마지막 await** 이고, 그 앞에서 키
+  // ⚠ **여기서 실패해도 미리보기 시작은 성공이다.** 이 줄은 **마지막 await** 이고, 그 앞에서 키
   //    발급·`session` 설정·사이드바·갱신 예약이 전부 끝나 있다. 그런데 던지면 위쪽 호출부까지
-  //    올라가 「프리뷰를 시작하지 못했습니다」 계열 문면이 뜬다 — 갱신 경로에서는 「갱신하지 못해
-  //    프리뷰가 멈췄습니다」가 됐다(마감 3회전 차단). **둘 다 거짓이다**: 프리뷰는 돌고 있고
+  //    올라가 「미리보기를 시작하지 못했습니다」 계열 문면이 뜬다 — 갱신 경로에서는 「갱신하지 못해
+  //    미리보기가 멈췄습니다」가 됐다(마감 3회전 차단). **둘 다 거짓이다**: 미리보기는 돌고 있고
   //    브라우저만 안 열렸다. 원격 호스트·오프너 부재에서 실제로 거부된다.
   //
   //    주소는 말해 준다 — 사용자가 직접 열 수 있어야 한다.
@@ -965,13 +965,13 @@ async function startPreviewInner(pinned?: CapturedTenant): Promise<void> {
       `브라우저를 열지 못했습니다 — 주소를 직접 여세요: ${started.server.url}`,
     );
     void vscode.window.showInformationMessage(
-      `프리뷰가 시작됐습니다. 브라우저를 자동으로 열지 못했으니 주소를 직접 열어 주세요 — ${plainNotice(started.server.url)}`,
+      `미리보기가 시작됐습니다. 브라우저를 자동으로 열지 못했으니 주소를 직접 열어 주세요 — ${plainNotice(started.server.url)}`,
     );
   }
 }
 
 /**
- * C6「키 만료 자동 갱신」 — 만료 5분 전에 프리뷰를 스스로 다시 세운다(재발급 → env 갱신 → dev 재기동).
+ * C6「키 만료 자동 갱신」 — 만료 5분 전에 미리보기를 스스로 다시 세운다(재발급 → env 갱신 → dev 재기동).
  *
  * **왜 자동인가**: 만료는 12시간마다 반드시 온다. 그때 사용자가 보는 것은 "갑자기 데이터가 안 나온다"이고,
  * 원인이 자격증명이라는 것을 알 방법이 없다. 조용한 실패를 예약해 두는 셈이라 자동 갱신이 기본이어야 한다.
@@ -992,7 +992,7 @@ function scheduleRenewal(expiresAt: string, ttlSeconds: number): void {
   if (delay < MIN_RENEW_DELAY_MS) {
     // 시계 오차나 아주 짧은 TTL 이면 즉시 재기동으로 달려들지 않는다 — 사람에게 말하고 멈춘다.
     log(
-      "프리뷰 자격증명 만료가 임박했습니다. 필요하면 프리뷰를 다시 시작해 주세요.",
+      "미리보기 자격증명 만료가 임박했습니다. 필요하면 미리보기를 다시 시작해 주세요.",
     );
     return;
   }
@@ -1003,14 +1003,14 @@ function scheduleRenewal(expiresAt: string, ttlSeconds: number): void {
       // ⚠ **그때 그 사이트로 다시 세운다.** `zalkera.preview.restart` 는 사람이 누르는 자리라
       //    **지금 고른** 사이트를 쓰는 것이 맞지만, 이 갱신은 사람이 아무것도 안 했는데 도는
       //    타이머다. 여기서 라이브 선택을 다시 읽으면, 사이드바에서 사이트를 바꿔 둔 사이에
-      //    프리뷰가 **말없이 다른 사이트의 키·env 로** 다시 선다(심의 지적).
+      //    미리보기가 **말없이 다른 사이트의 키·env 로** 다시 선다(심의 지적).
       const pinned = session.tenant;
       const drifted = tenantCode() !== (pinned as string);
-      log(`프리뷰 자격증명이 곧 만료되어 다시 세웁니다… (사이트 ${pinned})`);
+      log(`미리보기 자격증명이 곧 만료되어 다시 세웁니다… (사이트 ${pinned})`);
       void vscode.window.showInformationMessage(
         drifted
-          ? `프리뷰 자격증명을 갱신합니다 — 프리뷰는 시작할 때의 사이트(${plainNotice(pinned, 64)})로 다시 섭니다.`
-          : "프리뷰 자격증명을 갱신하려고 프리뷰를 다시 시작합니다.",
+          ? `미리보기 자격증명을 갱신합니다 — 미리보기는 시작할 때의 사이트(${plainNotice(pinned, 64)})로 다시 섭니다.`
+          : "미리보기 자격증명을 갱신하려고 미리보기를 다시 시작합니다.",
       );
       try {
         await stopPreview();
@@ -1019,16 +1019,16 @@ function scheduleRenewal(expiresAt: string, ttlSeconds: number): void {
         // ⚠ **여기는 `register()` 의 오류 깔때기 밖이다.** 종전에는
         //    `executeCommand("zalkera.preview.restart")` 라 실패가 그 깔때기를 지나
         //    빨간창 + 출력채널로 나왔다. 핀 고정을 위해 직접 호출로 바꾸면서 그 길이
-        //    끊겼고, 프리뷰는 이미 `stopPreview()` 로 꺼진 뒤라 **사용자는 몇 시간 뒤
-        //    프리뷰가 말없이 사라진 것만 본다**(마감 심의 차단). 12시간 뒤 오프라인이면
+        //    끊겼고, 미리보기는 이미 `stopPreview()` 로 꺼진 뒤라 **사용자는 몇 시간 뒤
+        //    미리보기가 말없이 사라진 것만 본다**(마감 심의 차단). 12시간 뒤 오프라인이면
         //    실제로 밟는다. 같은 자리의 KDoc 이 「재기동은 알린다 — 말없이 재시작되면
         //    그것도 고장으로 읽힌다」고 적어 둔 그 규율이다.
         const message =
           error instanceof DevtoolsError ? error.humanMessage : String(error);
-        log(`프리뷰 자격증명 갱신 실패: ${message}`);
+        log(`미리보기 자격증명 갱신 실패: ${message}`);
         if (!(error instanceof DevtoolsError && error.code === "CANCELLED")) {
           void vscode.window.showErrorMessage(
-            `프리뷰 자격증명을 갱신하지 못해 프리뷰가 멈췄습니다 — ${plainNotice(message)}`,
+            `미리보기 자격증명을 갱신하지 못해 미리보기가 멈췄습니다 — ${plainNotice(message)}`,
           );
         }
       }
@@ -1041,7 +1041,7 @@ function scheduleRenewal(expiresAt: string, ttlSeconds: number): void {
  * 실패하면 상태바를 되돌린다.
  *
  * ⚠ **여기서 가드를 풀지 않는다**(심의 경고 · 2026-08-10). 종전에는 이 catch 가 `previewStarting = false`
- * 를 했는데, 바깥 catch 가 키를 폐기하는 **수 초 동안 가드가 이미 풀려 있었다.** 그 창에서 다시 「프리뷰
+ * 를 했는데, 바깥 catch 가 키를 폐기하는 **수 초 동안 가드가 이미 풀려 있었다.** 그 창에서 다시 「미리보기
  * 시작」이 통과하면 새 키가 발급되고, 뒤늦게 끝난 첫 번째 정리가 `issuedKeyId` 를 비워 **두 번째 키를
  * 아무도 못 지우게** 만든다 — 이 트랜치가 닫으려던 바로 그 누수가 경합으로 되살아난다.
  *
@@ -1071,7 +1071,7 @@ async function stopPreview(): Promise<void> {
   sidebar.update({ previewUrl: null, keyExpiresAt: null });
   setStatus("$(zap) 잘커라");
   status.command = "zalkera.preview.start";
-  log("프리뷰를 멈췄습니다.");
+  log("미리보기를 멈췄습니다.");
 }
 
 // ── 새 버전 올리기 ────────────────────────────────────────────────────────
@@ -1502,7 +1502,7 @@ async function chooseTenant(force = false): Promise<string> {
     const code = typed.trim();
 
     // **저장 전에 실재를 확인한다.** 형식만 맞으면 통과시키면, 오타 하나가 저장된 뒤
-    // 프리뷰·발행에서 엉뚱한 오류로 튀어나온다 — 그때는 원인이 "설정에 적힌 코드"라는 걸
+    // 미리보기·발행에서 엉뚱한 오류로 튀어나온다 — 그때는 원인이 "설정에 적힌 코드"라는 걸
     // 사용자가 알 방법이 없다. 읽기 전용 호출 하나로 여기서 끝낸다.
     const probe = new ZalkeraApi({
       apiBase: apiBase(),
@@ -1699,8 +1699,8 @@ async function refreshSidebar(): Promise<void> {
 function setStatus(text: string): void {
   status.text = text;
   status.tooltip = session
-    ? `프리뷰 실행 중 — ${session.server.url}`
-    : "잘커라 프리뷰 시작";
+    ? `미리보기 실행 중 — ${session.server.url}`
+    : "잘커라 미리보기 시작";
 }
 
 function log(message: string): void {
