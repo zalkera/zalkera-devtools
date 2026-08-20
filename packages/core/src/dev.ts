@@ -77,7 +77,7 @@ export async function startDevServer(
   const engineArgs = devEngineArgs();
   if (engineArgs.length > 0) {
     log(
-      "이 컴퓨터에는 Node.js 가 없어 webpack 으로 띄웁니다(첫 컴파일이 조금 느립니다).",
+      "프리뷰를 띄웁니다. 이 컴퓨터에 Node.js 가 있으면 더 빠른 엔진을 씁니다 — 없어도 그대로 됩니다.",
     );
   }
   const child = spawn(
