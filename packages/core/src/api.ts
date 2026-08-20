@@ -63,7 +63,11 @@ export interface SiteRevision {
     /** `READY` | `BUILDING` | `FAILED` (backend RevisionStatus). 활성 전환은 READY 만 받는다. */
     status: string;
     isActive: boolean;
-    createdAt: string;
+    /**
+     * 만든 시각(ISO). ⚠ **널이 올 수 있다** — 백엔드가 `Instant?` 로 보낸다. 비널로 적어 두면
+     * `new Date(null)` 이 조용히 1970-01-01 을 그린다. 표시 자리는 [revisionWhen] 을 쓴다.
+     */
+    createdAt: string | null;
     /**
      * 사람이 붙인 버전 이름. 백엔드 `SiteRevisionSummaryResponse.label` 이다.
      *
@@ -187,8 +191,14 @@ export class ZalkeraApi {
     }
 
     /** 업로드 확정 — 서버가 언팩·검사하고 새 버전을 만든다. */
-    confirmArchive(storageKey: string): Promise<ArchiveConfirmed> {
-        return this.request<ArchiveConfirmed>("POST", "/api/partner/site-archive/confirm", { body: { storageKey } });
+    confirmArchive(storageKey: string, discardPendingChanges = false): Promise<ArchiveConfirmed> {
+        // ⚠ **`discardPendingChanges` 를 실을 수 있어야 한다.** 백엔드는 재업로드(confirm)·버전
+        //    전환(activate)·프리셋 재개시 **세 문이 같은 `BaselineShiftGuard` 를 지난다.**
+        //    종전에는 activate 만 동의를 보낼 수 있어서, 올리기는 zip 을 다 올린 뒤 409 를 받고
+        //    「계속하려면 확인해 주세요」만 반복했다 — 확인할 자리가 없는 막다른 길이었다.
+        return this.request<ArchiveConfirmed>("POST", "/api/partner/site-archive/confirm", {
+            body: { storageKey, discardPendingChanges },
+        });
     }
 
     /**
@@ -316,6 +326,20 @@ const PENDING_AI_CHANGES = "PENDING_AI_CHANGES_CONFIRM_REQUIRED";
 /** 이 거절이 **사용자 동의 한 번으로 넘어갈 수 있는가.** */
 export function needsDiscardConsent(error: unknown): boolean {
     return error instanceof DevtoolsError && error.serverCode === PENDING_AI_CHANGES;
+}
+
+/**
+ * 버전 행의 시각을 **사람이 읽을 말**로. 없거나 못 읽으면 「시각 모름」이다.
+ *
+ * ⚠ **`new Date(...)` 를 표시 자리에 두지 않는다.** 널이면 1970-01-01, 이상한 문자열이면
+ *   `Invalid Date` 가 그대로 화면에 나간다 — 둘 다 「그때 만들어졌다」는 거짓말이다.
+ *   서버 값이므로 형을 믿지 않는다(이 파일은 응답 필드 타입을 검증하지 않는다).
+ */
+export function revisionWhen(createdAt: unknown): string {
+    if (typeof createdAt !== "string" || createdAt.trim() === "") return "시각 모름";
+    const at = new Date(createdAt);
+    if (Number.isNaN(at.getTime())) return "시각 모름";
+    return at.toLocaleString("ko-KR");
 }
 
 const MAX_SERVER_MESSAGE = 300;

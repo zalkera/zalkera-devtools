@@ -26,6 +26,7 @@ export {
 export {
   ZalkeraApi,
   needsDiscardConsent,
+  revisionWhen,
   type ApiOptions,
   type IssuedPreviewKey,
   type PresetSource,

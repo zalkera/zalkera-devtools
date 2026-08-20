@@ -1,6 +1,6 @@
 import { ok, rejects, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
-import { ZalkeraApi, needsDiscardConsent } from "./api.ts";
+import { ZalkeraApi, needsDiscardConsent, revisionWhen } from "./api.ts";
 import { DevtoolsError } from "./errors.ts";
 
 function api(handler: (url: string, init: RequestInit) => Response): ZalkeraApi {
@@ -187,4 +187,17 @@ test("동의 판정은 오류 코드만 본다 — 메시지 문면으로 흉내
   strictEqual(needsDiscardConsent(impostor), false);
   strictEqual(needsDiscardConsent(new Error("아무거나")), false);
   strictEqual(needsDiscardConsent(undefined), false);
+});
+
+test("시각이 없거나 이상하면 「시각 모름」 — 1970-01-01 은 거짓말이다", () => {
+  // 백엔드가 `Instant?` 로 보낸다. `new Date(null)` 은 조용히 1970-01-01 을 그린다(계약축 심의).
+  for (const bad of [null, undefined, "", "   ", "어제", "2026-13-45", 0, {}, []]) {
+    strictEqual(revisionWhen(bad), "시각 모름", `통과했다: ${JSON.stringify(bad)}`);
+  }
+});
+
+test("정상 시각은 그대로 그린다", () => {
+  const shown = revisionWhen("2026-08-20T01:23:45Z");
+  ok(shown !== "시각 모름", shown);
+  ok(/2026/.test(shown), shown);
 });

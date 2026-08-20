@@ -1,4 +1,5 @@
-import type { ZalkeraApi } from "./api.ts";
+import type { ArchiveConfirmed, ZalkeraApi } from "./api.ts";
+import { needsDiscardConsent } from "./api.ts";
 import { DevtoolsError } from "./errors.ts";
 import { apiBaseUrl } from "./serverUrl.ts";
 import { packProject } from "./zip.ts";
@@ -14,6 +15,16 @@ export interface PublishOptions {
     api: ZalkeraApi;
     onProgress?: (message: string) => void;
     fetchImpl?: typeof fetch;
+    /**
+     * 서버가 **게시 대기 중인 AI 변경을 버리는 데 동의**를 요구할 때 사람에게 묻는다.
+     * `true` 를 돌려주면 동의로 다시 부르고, `false` 면 취소로 끝난다.
+     *
+     * ⚠ **안 주면 묻지 않고 그대로 던진다.** 조용히 동의한 것으로 치면 이미 정산된 토큰이 실린
+     *   작업이 사람 모르게 사라진다. 화면이 없는 자리(CLI·시험)는 그 문을 안 열면 된다.
+     *
+     * @param serverMessage 서버가 보낸 문장(건수가 들어 있다). 표시 자리에서 소독한다.
+     */
+    onConsent?: (serverMessage: string) => Promise<boolean>;
 }
 
 export interface PublishResult {
@@ -27,6 +38,30 @@ export interface PublishResult {
     siteType: string;
     /** 서버가 보낸 한계·상태 안내. 있으면 **그대로 보여 준다**(memo66 §4). */
     capabilityNote: string;
+}
+
+/**
+ * 업로드 확정. 서버가 **동의를 요구하면** 물어보고 다시 부른다.
+ *
+ * ■ 왜 여기 있나
+ *   백엔드는 재업로드·버전 전환·프리셋 재개시 **세 문이 같은 가드**를 지나고, 셋 다 요청 본문의
+ *   `discardPendingChanges` 로 동의를 받는다. 확장은 전환 쪽만 동의 경로를 갖고 있었다 — 그래서
+ *   올리기는 zip 을 다 올린 뒤 409 를 받고 「계속하려면 확인해 주세요」만 반복했다.
+ *
+ * ■ 물어보는 것은 부르는 쪽이다
+ *   core 는 화면이 없다. `onConsent` 를 안 주면 **묻지 않고 그대로 던진다** — 조용히 동의한 것으로
+ *   치면 게시 대기 중인 AI 변경이 사람 모르게 사라진다(이미 정산된 토큰이 실린 작업이다).
+ */
+async function confirmWithConsent(options: PublishOptions, storageKey: string): Promise<ArchiveConfirmed> {
+    try {
+        return await options.api.confirmArchive(storageKey);
+    } catch (error) {
+        if (!needsDiscardConsent(error) || !options.onConsent) throw error;
+        if (!(await options.onConsent(error instanceof Error ? error.message : String(error)))) {
+            throw new DevtoolsError("CANCELLED", "올리기를 그만두었습니다.");
+        }
+        return await options.api.confirmArchive(storageKey, true);
+    }
 }
 
 /** 업로드 상한(서버 `maxArchiveSize`). 넘으면 **올리기 전에** 끊어 준다 — 5분 올리고 거절당하지 않게. */
@@ -86,7 +121,10 @@ export async function publish(options: PublishOptions): Promise<PublishResult> {
     }
 
     report("서버가 확인하는 중…");
-    const confirmed = await options.api.confirmArchive(presigned.storageKey);
+    // ⚠ **여기서 다시 묶지 않는다.** 동의 뒤 재시도는 **같은 `storageKey`** 를 쓴다 — S3 에 이미
+    //    올라간 그 바이트다. 다시 묶으면 사람이 그 사이 파일을 고쳤을 때 **동의한 것과 다른 것**이
+    //    올라가고, 100MB 를 한 번 더 보내게 된다.
+    const confirmed = await confirmWithConsent(options, presigned.storageKey);
     report(`버전 ${confirmed.revisionNo} 로 올렸습니다.`);
 
     return {

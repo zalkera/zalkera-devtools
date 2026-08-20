@@ -54,6 +54,7 @@ import {
   type IssuedKey,
   noRevisionError,
   needsDiscardConsent,
+  revisionWhen,
   suggestFolderName,
   nextAvailableName,
   writeSourceMarkTo,
@@ -943,8 +944,8 @@ async function switchVersion(
         candidates.map((r, index) => ({
           label: `버전 ${r.revisionNo}`,
           description: r.label
-            ? `${plainNotice(r.label, 60)} · ${new Date(r.createdAt).toLocaleString("ko-KR")}`
-            : new Date(r.createdAt).toLocaleString("ko-KR"),
+            ? `${plainNotice(r.label, 60)} · ${revisionWhen(r.createdAt)}`
+            : revisionWhen(r.createdAt),
           detail:
             index === 0 &&
             (active === undefined || r.revisionNo > active.revisionNo)
@@ -985,13 +986,7 @@ async function switchVersion(
     // 길이다. **여기 하나만 뚫는다** — 다른 거절(게시 진행 중·AI 작업 중)에는 동의로 넘어가는
     // 길이 없고, 넓히면 뚫을 수 없는 거절에도 동의 창을 띄우게 된다.
     if (!needsDiscardConsent(error)) throw error;
-    const ask = say.discardPendingConfirm(tenant, (error as Error).message);
-    const answer = await vscode.window.showWarningMessage(
-      ask.message,
-      { modal: true, detail: ask.detail },
-      ask.action,
-    );
-    if (answer !== ask.action) return;
+    if (!(await askDiscardConsent(tenant, (error as Error).message))) return;
     await activate(true);
   }
   log(`사이트를 버전 ${target.revisionNo} 로 바꿨습니다.`);
@@ -1344,6 +1339,25 @@ async function stopPreview(): Promise<void> {
  * 이름이 거짓이면 사람은 사이트가 바뀐 줄 알고 확인하지 않는다 — 그 오해가 제일 비싸다.
  */
 
+/**
+ * 게시 대기 중인 AI 변경을 **버리는 데 동의**할지 묻는다.
+ *
+ * 백엔드는 재업로드·버전 전환·프리셋 재개시 **세 문이 같은 가드**를 지난다. 그러니 사람이 보는
+ * 문면도 하나여야 한다 — 자리마다 다른 말을 하면 같은 일인 줄 모른다.
+ */
+async function askDiscardConsent(
+  tenant: CapturedTenant,
+  serverMessage: string,
+): Promise<boolean> {
+  const ask = say.discardPendingConfirm(tenant, serverMessage);
+  const answer = await vscode.window.showWarningMessage(
+    ask.message,
+    { modal: true, detail: ask.detail },
+    ask.action,
+  );
+  return answer === ask.action;
+}
+
 async function publishCommand(): Promise<void> {
   const dir = requireWorkspace();
   const { api, tenant } = await ensureApiFor();
@@ -1360,7 +1374,15 @@ async function publishCommand(): Promise<void> {
 
   const result = await vscode.window.withProgress<PublishResult>(
     { location: vscode.ProgressLocation.Notification, title: "올리는 중" },
-    () => publish({ projectDir: dir, api, onProgress: log }),
+    () =>
+      publish({
+        projectDir: dir,
+        api,
+        onProgress: log,
+        // 서버가 「계속하려면 확인해 주세요」라고 말한 자리 — 확인할 곳을 준다. 전환 쪽과
+        // **같은 문면**을 쓴다: 두 문이 같은 가드를 지나므로 사람이 보는 말도 같아야 한다.
+        onConsent: (serverMessage) => askDiscardConsent(tenant, serverMessage),
+      }),
   );
   log(
     `버전 ${count(result.revisionNo)} 로 올렸습니다 — 파일 ${count(result.fileCount)}개 · ${Math.round(result.byteSize / 1024)}KB`,
@@ -1536,7 +1558,7 @@ async function showHistory(): Promise<void> {
   output.show();
   log("── 버전 이력 ──");
   for (const r of revisions) {
-    const when = new Date(r.createdAt).toLocaleString("ko-KR");
+    const when = revisionWhen(r.createdAt);
     log(
       `${r.isActive ? "▶" : " "} 버전 ${r.revisionNo} · ${r.status} · ${when}${
         r.label ? ` · ${plainNotice(r.label, 80)}` : ""

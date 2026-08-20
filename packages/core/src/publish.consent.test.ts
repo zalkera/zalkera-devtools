@@ -1,0 +1,163 @@
+/**
+ * **올리기도 동의를 받을 수 있는가.**
+ *
+ * ■ 왜 생겼나
+ *   백엔드는 재업로드(`confirm`)·버전 전환(`activate`)·프리셋 재개시 **세 문이 같은
+ *   `BaselineShiftGuard`** 를 지나고, 셋 다 요청 본문의 `discardPendingChanges` 로 동의를 받는다.
+ *   확장은 전환 쪽만 동의 경로를 갖고 있었다 — 올리기는 zip 을 다 올린 뒤 409 를 받고
+ *   「계속하려면 확인해 주세요」만 반복하는 **막다른 길**이었다(계약축 심의 차단).
+ *
+ * 재현: `npm test -w @zalkera/devtools-core`
+ */
+import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { test } from "node:test";
+import { ZalkeraApi } from "./api.ts";
+import { DevtoolsError } from "./errors.ts";
+import { publish } from "./publish.ts";
+import { tempDir } from "./testing/tempDir.ts";
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
+
+/** 올릴 것이 있는 최소 프로젝트. */
+async function project(): Promise<string> {
+  const dir = await tempDir("zalkera-consent-");
+  await writeFile(join(dir, "package.json"), '{"name":"t","version":"1.0.0"}');
+  await writeFile(join(dir, "page.tsx"), "export default () => null;\n");
+  return dir;
+}
+
+/**
+ * 서버 대역. presign·PUT 은 통과시키고 `confirm` 은 **동의 전까지 409** 를 낸다.
+ * 받은 confirm 바디를 전부 기록한다 — 「동의를 실제로 보냈는가」가 요점이다.
+ */
+function server() {
+  const confirms: unknown[] = [];
+  const fetchImpl = (async (input: URL | string, init?: RequestInit) => {
+    const url = String(input);
+    if (url.endsWith("/api/partner/site-archive/presign")) {
+      return new Response(
+        JSON.stringify({
+          data: { uploadUrl: "https://s3.example.test/put", storageKey: "k/1.zip", expiresAt: "" },
+        }),
+        { status: 200 },
+      );
+    }
+    if (url.startsWith("https://s3.example.test/")) return new Response("", { status: 200 });
+    if (url.endsWith("/api/partner/site-archive/confirm")) {
+      const body = JSON.parse(String(init?.body ?? "{}"));
+      confirms.push(body);
+      if (body.discardPendingChanges !== true) {
+        return new Response(
+          JSON.stringify({
+            errorCode: "PENDING_AI_CHANGES_CONFIRM_REQUIRED",
+            message: "게시 대기 중인 AI 변경 3건이 취소됩니다. 계속하려면 확인해 주세요.",
+          }),
+          { status: 409 },
+        );
+      }
+      return new Response(
+        JSON.stringify({ data: { revisionNo: 12, siteType: "NEXT_SOURCE", status: "BUILDING" } }),
+        { status: 200 },
+      );
+    }
+    return new Response("{}", { status: 404 });
+  }) as typeof fetch;
+
+  const api = new ZalkeraApi({
+    apiBase: "https://api.example.test",
+    accessToken: async () => "t",
+    tenantCode: () => "bix",
+    fetchImpl,
+  });
+  return { api, confirms, fetchImpl };
+}
+
+test("동의하면 같은 storageKey 로 다시 부른다 — 다시 묶지 않는다", async () => {
+  // 다시 묶으면 사람이 그 사이 파일을 고쳤을 때 **동의한 것과 다른 것**이 올라가고, 100MB 를
+  // 한 번 더 보내게 된다.
+  const { api, confirms, fetchImpl } = server();
+  const asked: string[] = [];
+  const result = await publish({
+    projectDir: await project(),
+    api,
+    fetchImpl,
+    onConsent: async (message) => {
+      asked.push(message);
+      return true;
+    },
+  });
+  strictEqual(result.revisionNo, 12);
+  strictEqual(confirms.length, 2, "동의 뒤 다시 안 불렀다");
+  deepStrictEqual(confirms[0], { storageKey: "k/1.zip", discardPendingChanges: false });
+  deepStrictEqual(confirms[1], { storageKey: "k/1.zip", discardPendingChanges: true });
+  strictEqual(asked.length, 1, "묻지 않았거나 두 번 물었다");
+  ok(/3건/.test(asked[0] ?? ""), `건수가 안 실렸다: ${asked[0]}`);
+});
+
+test("동의하지 않으면 취소로 끝난다 — 오류창을 띄우지 않는다", async () => {
+  const { api, confirms, fetchImpl } = server();
+  const error = await publish({
+    projectDir: await project(),
+    api,
+    fetchImpl,
+    onConsent: async () => false,
+  }).then(
+    () => null,
+    (e: unknown) => e as DevtoolsError,
+  );
+  strictEqual(error?.code, "CANCELLED", `취소가 아니다: ${error?.code}`);
+  strictEqual(confirms.length, 1, "거절했는데 다시 불렀다");
+});
+
+test("물을 자리를 안 주면 **조용히 동의하지 않는다** — 그대로 던진다", async () => {
+  // 이미 정산된 토큰이 실린 작업이 사람 모르게 사라지면 안 된다. 화면 없는 자리(CLI·시험)는
+  // 그 문을 안 열면 되고, 그때는 서버 거절이 그대로 올라온다.
+  const { api, confirms, fetchImpl } = server();
+  const error = await publish({ projectDir: await project(), api, fetchImpl }).then(
+    () => null,
+    (e: unknown) => e as DevtoolsError,
+  );
+  strictEqual(error?.code, "SERVER_REJECTED");
+  strictEqual(confirms.length, 1, "동의 없이 다시 불렀다");
+  deepStrictEqual(confirms[0], { storageKey: "k/1.zip", discardPendingChanges: false });
+});
+
+test("동의로 못 넘어가는 거절에는 묻지 않는다", async () => {
+  // 「409 면 물어본다」로 넓히면 뚫을 수 없는 거절에도 동의 창이 뜨고, 사람은 확인을 누른 뒤
+  // 또 거절당한다.
+  const fetchImpl = (async (input: URL | string) => {
+    const url = String(input);
+    if (url.endsWith("/presign")) {
+      return new Response(
+        JSON.stringify({ data: { uploadUrl: "https://s3.example.test/put", storageKey: "k", expiresAt: "" } }),
+        { status: 200 },
+      );
+    }
+    if (url.startsWith("https://s3.example.test/")) return new Response("", { status: 200 });
+    return new Response(
+      JSON.stringify({ errorCode: "AI_WORK_IN_PROGRESS", message: "AI 작업이 진행 중입니다." }),
+      { status: 409 },
+    );
+  }) as typeof fetch;
+  const api = new ZalkeraApi({
+    apiBase: "https://api.example.test",
+    accessToken: async () => "t",
+    tenantCode: () => "bix",
+    fetchImpl,
+  });
+  let asked = 0;
+  const error = await publish({
+    projectDir: await project(),
+    api,
+    fetchImpl,
+    onConsent: async () => {
+      asked += 1;
+      return true;
+    },
+  }).then(
+    () => null,
+    (e: unknown) => e as DevtoolsError,
+  );
+  strictEqual(asked, 0, "동의로 못 넘어가는 거절에 물었다");
+  strictEqual(error?.code, "SERVER_REJECTED");
+});

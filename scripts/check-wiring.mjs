@@ -126,6 +126,16 @@ const WIRES = [
         3,
     ],
     [
+        "packages/vscode/src/extension.ts",
+        "onConsent: (serverMessage) => askDiscardConsent(tenant, serverMessage),",
+        "새 버전 올리기가 zip 을 다 올린 뒤 409 를 받고 「계속하려면 확인해 주세요」만 반복한다 — 확인할 자리가 없는 막다른 길이 된다",
+    ],
+    [
+        "packages/core/src/publish.ts",
+        "return await options.api.confirmArchive(storageKey, true);",
+        "동의를 받아 놓고 서버에는 전하지 않는다 — 같은 409 가 반복된다",
+    ],
+    [
         "packages/core/src/fetchSource.ts",
         "if (!choice) throw noRevisionError(revisions);",
         "공개 API 로 판을 안 주고 부르면 BUILDING·FAILED 판을 받으러 가고, 「없다」 문면도 옛 사본이 나온다",
@@ -145,6 +155,11 @@ const WIRES = [
  * [파일 glob, 있으면 안 되는 조각, 대신 무엇을 쓰나]
  */
 const BANS = [
+    [
+        "packages/vscode/src/*.ts",
+        /new Date\(r\.createdAt\)/,
+        "core 의 `revisionWhen(r.createdAt)` — 백엔드가 `Instant?` 로 보내므로 널이면 1970-01-01 이 조용히 그려진다",
+    ],
     [
         "packages/vscode/src/*.ts",
         /code === "CANCELLED"/,
