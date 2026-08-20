@@ -65,3 +65,132 @@ test("못 읽으면 쓰지 않는다 — 사람 설정을 날리는 것보다 �
     assert.equal(r.ok, false, `이 내용을 덮어썼다: ${bad}`);
   }
 });
+
+// ── 실제로 파일을 쓰는 자리. 이 경로가 확장 안에 있을 때 **아무 시험도 안 물었다.** ──
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { linkFolderToTenant, writeSourceMarkTo } from "./localMark.ts";
+
+const roots: string[] = [];
+const fresh = () => {
+  const d = mkdtempSync(join(tmpdir(), "zalkera-lm-"));
+  roots.push(d);
+  return d;
+};
+test.after(() => {
+  for (const r of roots) rmSync(r, { recursive: true, force: true });
+});
+
+test("폴더 연결 — 파일이 없으면 만든다", async () => {
+  const root = fresh();
+  const r = await linkFolderToTenant(root, "credium");
+  assert.equal(r.ok, true, r.ok ? "" : r.reason);
+  assert.deepEqual(JSON.parse(readFileSync(join(root, ".vscode", "settings.json"), "utf8")), {
+    "zalkera.tenant": "credium",
+  });
+});
+
+test("폴더 연결 — 남의 키를 지우지 않는다", async () => {
+  const root = fresh();
+  mkdirSync(join(root, ".vscode"));
+  writeFileSync(join(root, ".vscode", "settings.json"), JSON.stringify({ "editor.fontSize": 14 }, null, 2));
+  await linkFolderToTenant(root, "credium");
+  const after = JSON.parse(readFileSync(join(root, ".vscode", "settings.json"), "utf8"));
+  assert.equal(after["editor.fontSize"], 14, "남의 키가 사라졌다");
+  assert.equal(after["zalkera.tenant"], "credium");
+});
+
+test("폴더 연결 — settings.json 이 링크면 쓰지 않는다", async () => {
+  // 링크를 따라가면 **고객 폴더 밖**의 공유 설정을 고쳐 놓고 「연결해 두었습니다」를 찍는다.
+  // dotfiles·모노레포 공유 설정에서 흔한 배치다.
+  const root = fresh();
+  const outside = fresh();
+  const shared = join(outside, "shared.json");
+  writeFileSync(shared, JSON.stringify({ "editor.fontSize": 15 }));
+  mkdirSync(join(root, ".vscode"));
+  symlinkSync(shared, join(root, ".vscode", "settings.json"));
+
+  const r = await linkFolderToTenant(root, "victim");
+  assert.equal(r.ok, false, "링크를 따라가 썼다");
+  assert.deepEqual(JSON.parse(readFileSync(shared, "utf8")), { "editor.fontSize": 15 }, "폴더 밖 파일이 바뀌었다");
+});
+
+test("폴더 연결 — 끊어진 링크에도 쓰지 않는다", async () => {
+  const root = fresh();
+  const outside = fresh();
+  mkdirSync(join(root, ".vscode"));
+  symlinkSync(join(outside, "없는파일.json"), join(root, ".vscode", "settings.json"));
+
+  const r = await linkFolderToTenant(root, "acme");
+  assert.equal(r.ok, false, "끊어진 링크를 따라가 폴더 밖에 만들었다");
+  assert.equal(existsSync(join(outside, "없는파일.json")), false, "폴더 밖에 파일이 생겼다");
+});
+
+test("폴더 연결 — 주석이 섞인 settings.json 은 안 쓴다", async () => {
+  const root = fresh();
+  mkdirSync(join(root, ".vscode"));
+  const jsonc = '{\n  // 주석\n  "editor.fontSize": 14\n}';
+  writeFileSync(join(root, ".vscode", "settings.json"), jsonc);
+  const r = await linkFolderToTenant(root, "credium");
+  assert.equal(r.ok, false, "JSONC 를 덮어썼다");
+  assert.equal(readFileSync(join(root, ".vscode", "settings.json"), "utf8"), jsonc, "내용이 바뀌었다");
+});
+
+test("표식 — 링크면 쓰지 않는다", async () => {
+  const root = fresh();
+  const outside = fresh();
+  const shared = join(outside, "mark.json");
+  writeFileSync(shared, "원본");
+  mkdirSync(join(root, ".zalkera"));
+  symlinkSync(shared, join(root, ".zalkera", "source.json"));
+
+  const r = await writeSourceMarkTo(root, {
+    tenant: "credium",
+    revisionNo: 13,
+    sha256: "abc",
+    fetchedAt: "2026-08-20T00:00:00.000Z",
+  });
+  assert.equal(r.ok, false, "링크를 따라가 썼다");
+  assert.equal(readFileSync(shared, "utf8"), "원본", "폴더 밖 파일이 바뀌었다");
+});
+
+test("표식 — 정상 경로는 읽어 되돌아온다", async () => {
+  const root = fresh();
+  const r = await writeSourceMarkTo(root, {
+    tenant: "credium",
+    revisionNo: 13,
+    sha256: "abc",
+    fetchedAt: "2026-08-20T00:00:00.000Z",
+  });
+  assert.equal(r.ok, true, r.ok ? "" : r.reason);
+  const mark = parseSourceMark(readFileSync(join(root, SOURCE_MARK_PATH), "utf8"));
+  assert.equal(mark?.revisionNo, 13);
+});
+
+test("폴더 연결 — 못 읽으면 안 쓴다. 「없다」와 「못 읽는다」는 다르다", async () => {
+  // 접어 버리면 읽기 실패가 「빈 파일」로 둔갑해 고객 설정을 통째로 날린다.
+  const root = fresh();
+  mkdirSync(join(root, ".vscode"));
+  const path = join(root, ".vscode", "settings.json");
+  const original = JSON.stringify({ "editor.fontSize": 14, "files.autoSave": "off" }, null, 2);
+  writeFileSync(path, original);
+  chmodSync(path, 0o222); // 쓰기만 가능 — 읽기가 EACCES 로 실패한다
+  try {
+    const r = await linkFolderToTenant(root, "credium");
+    assert.equal(r.ok, false, "못 읽었는데 썼다");
+    chmodSync(path, 0o644);
+    assert.equal(readFileSync(path, "utf8"), original, "고객 설정이 날아갔다");
+  } finally {
+    chmodSync(path, 0o644);
+  }
+});

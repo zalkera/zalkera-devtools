@@ -165,6 +165,8 @@ export {
     holdsSameRevision,
     mergeTenantSetting,
     SOURCE_MARK_PATH,
+    writeSourceMarkTo,
+    linkFolderToTenant,
 } from "./localMark.ts";
 export type { SourceMark } from "./localMark.ts";
 export { sidebarPlan } from "./sidebarPlan.ts";

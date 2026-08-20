@@ -107,6 +107,19 @@ export const say = {
     fetchTargetTitle(tenant: CapturedTenant, revisionNo: number): string {
         return `「${shown(tenant)}」 버전 ${count(revisionNo)} 를 받을 새 빈 폴더를 고르세요 — 지금 폴더는 그대로 둡니다`;
     },
+    /**
+     * 옆에 만들 폴더를 **본문에** 적는다.
+     *
+     * ⚠ `detail` 은 **모달에서만 렌더된다**(`@types/vscode`). 비-모달 알림에 넣으면 화면에 안 뜨고,
+     *   그러면 사람이 어디에 폴더가 생기는지 못 본 채 「옆에 새 폴더로 받기」를 누른다.
+     */
+    fetchTargetHere(tenant: CapturedTenant, revisionNo: number, path: string): string {
+        return `「${shown(tenant)}」 버전 ${count(revisionNo)} 를 ${ours(path)} 로 받습니다 — 지금 폴더는 그대로 둡니다.`;
+    },
+    /** 같은 판을 담은 폴더가 **어디인지**까지 말한다. */
+    alreadyFetchedAt(tenant: CapturedTenant, revisionNo: number, path: string): string {
+        return `「${shown(tenant)}」 버전 ${count(revisionNo)} 는 이미 ${ours(path)} 에 받아 두셨습니다.`;
+    },
     fetchProgress(tenant: CapturedTenant, revisionNo: number): string {
         return `「${shown(tenant)}」 버전 ${count(revisionNo)} 를 받는 중`;
     },

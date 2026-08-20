@@ -20,14 +20,26 @@ export interface SidebarState {
     keyExpiresAt: string | null;
 }
 
-export interface PlanItem {
-    kind: "action" | "info";
-    label: string;
-    /** `kind: "action"` 이면 팔레트 명령 id. `info` 면 없다. */
-    command?: string;
-    icon: string;
-    tooltip?: string;
-}
+/**
+ * 항목. **판별 유니온이다** — `command` 를 선택 값으로 두면 렌더러가 `?? ""` 로 흘려보내고,
+ * 그러면 「누를 수 없는 항목」이 타입으로도 시험으로도 안 걸린다. 「받기 진입점이 사라졌다」
+ * 사건의 본질이 *누를 수 없다* 였는데, 목록에 있기만 하면 통과하는 판정은 그것을 못 잡는다.
+ */
+export type PlanItem =
+    | {
+          kind: "action";
+          label: string;
+          command: string;
+          icon: string;
+          tooltip?: string;
+          /**
+           * 라벨이 **지금 상태를 담는다**(사이트 이름·미리보기 주소). 팔레트 제목과 같을 수 없으므로
+           * 라벨 일치 검사에서 뺀다 — 그 사실을 **판정이 말한다.** 종전에는 소스의 백틱 여부로
+           * 짐작했는데, 그러면 표기를 바꾸는 순간 검사기가 조용히 눈이 먼다.
+           */
+          dynamic?: true;
+      }
+    | {kind: "info"; label: string; icon: string};
 
 export interface PlanGroup {
     /** **라벨과 무관한 상수 id.** 문면을 다듬을 때마다 사람이 접어 둔 것이 초기화되면 안 된다. */
@@ -45,6 +57,16 @@ const act = (label: string, command: string, icon: string, tooltip?: string): Pl
     command,
     icon,
     tooltip,
+});
+
+/** 라벨이 상태를 담는 항목. 라벨 일치 검사에서 빠진다. */
+const live = (label: string, command: string, icon: string, tooltip?: string): PlanItem => ({
+    kind: "action",
+    label,
+    command,
+    icon,
+    tooltip,
+    dynamic: true,
 });
 
 /**
@@ -79,7 +101,7 @@ export function sidebarPlan(state: SidebarState): PlanGroup[] {
             description: tenant,
             items: [
                 tenant
-                    ? act(tenant, "zalkera.site.choose", "circle-filled", "다른 사이트로 바꿉니다")
+                    ? live(tenant, "zalkera.site.choose", "circle-filled", "다른 사이트로 바꿉니다")
                     : act("사이트 선택", "zalkera.site.choose", "circle-outline", "작업할 사이트를 고릅니다"),
                 act("로그아웃", "zalkera.signOut", "sign-out"),
             ],
@@ -89,7 +111,7 @@ export function sidebarPlan(state: SidebarState): PlanGroup[] {
     if (site) {
         const making: PlanItem[] = [
             previewUrl
-                ? act(`미리보기 열기 — ${previewUrl}`, "zalkera.preview.start", "browser", "실행 중")
+                ? live(`미리보기 열기 — ${previewUrl}`, "zalkera.preview.start", "browser", "실행 중")
                 : act("미리보기 시작", "zalkera.preview.start", "play", "로컬에서 확인합니다"),
         ];
         if (previewUrl) making.push(act("미리보기 중지", "zalkera.preview.stop", "debug-stop"));

@@ -21,31 +21,68 @@ import { dirname, join } from "node:path";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const pkg = JSON.parse(readFileSync(join(root, "packages/vscode/package.json"), "utf8"));
-// ⚠ **라벨은 `sidebarPlan.ts`(core)에 있다.** 그리기는 `vscode/sidebar.ts` 가 하지만 무엇이
-//    보일지는 core 가 정한다 — 확장 안 판정은 시험도 검사기도 못 닿아서 내렸다. 검사기도 따라간다.
-const source = readFileSync(join(root, "packages/core/src/sidebarPlan.ts"), "utf8");
+// ⚠ **정규식이 아니라 `sidebarPlan()` 을 불러 결과를 훑는다.** 소스를 문자열로 훑으면 항목을
+//    객체 리터럴로 쓰는 순간 눈이 먼다 — 실측으로, 없는 명령을 리터럴로 넣어도 전 게이트가
+//    초록이었다. 판정을 부르면 표기 방식과 무관하게 다 걸린다.
+const { sidebarPlan } = await import(join(root, "packages/core/dist/sidebarPlan.js"));
 
 const titles = new Map(pkg.contributes.commands.map((c) => [c.command, c.title.replace(/^잘커라:\s*/, "")]));
 const problems = [];
 let checked = 0;
 
-// action("라벨", "명령", …) 또는 action(`동적 ${라벨}`, "명령", …)
-for (const [, raw, command] of source.matchAll(/\bact\(\s*(`[^`]*`|"[^"]*"|[A-Za-z][A-Za-z0-9_]*)\s*,\s*"([^"]+)"/g)) {
-    checked += 1;
-    if (!titles.has(command)) {
-        problems.push(`팔레트에 없는 명령: ${command} — package.json contributes.commands 에 추가하라`);
-        continue;
+/** 상태마다 보이는 것이 다르다 — 한 상태만 보면 나머지 분기의 라벨이 무검사로 남는다. */
+const STATES = [
+    { signedIn: false, tenant: "", site: null, previewUrl: null, keyExpiresAt: null },
+    { signedIn: true, tenant: "t", site: null, previewUrl: null, keyExpiresAt: null },
+    { signedIn: true, tenant: "t", site: "/x", previewUrl: null, keyExpiresAt: null },
+    { signedIn: true, tenant: "t", site: "/x", previewUrl: "http://localhost:3000", keyExpiresAt: "2026-01-01" },
+];
+/** 라벨이 상태를 담아도 되는 명령. 사이트 이름과 미리보기 주소 둘뿐이다. */
+const DYNAMIC_ALLOWED = new Set(["zalkera.site.choose", "zalkera.preview.start"]);
+const groupIds = new Set();
+for (const state of STATES) {
+    for (const group of sidebarPlan(state)) {
+        if (group.label !== "") groupIds.add(group.id);
+        for (const item of group.items) {
+            if (item.kind !== "action") continue;
+            checked += 1;
+            if (!titles.has(item.command)) {
+                problems.push(`팔레트에 없는 명령: ${item.command} — package.json contributes.commands 에 추가하라`);
+                continue;
+            }
+            // 상태를 담는 **동적 라벨**은 명령 존재만 본다 — 판정이 스스로 그렇게 표시한다.
+            //
+            // ⚠ **면제는 구멍이다.** 아무 항목에나 `dynamic` 을 붙이면 라벨 검사를 통째로 비킬 수
+            //   있으므로, 그 표시를 쓸 수 있는 명령을 **닫힌 목록**으로 둔다. 늘려야 하면 여기도
+            //   같이 고쳐야 한다 — 그 마찰이 이 면제를 값싸게 쓰지 못하게 한다.
+            if (item.dynamic) {
+                if (!DYNAMIC_ALLOWED.has(item.command)) {
+                    problems.push(
+                        `동적 라벨 표시를 함부로 붙였다: ${item.command} — 허용 목록은 ${[...DYNAMIC_ALLOWED].join("·")}`,
+                    );
+                }
+                continue;
+            }
+            if (item.label !== titles.get(item.command)) {
+                problems.push(
+                    `라벨이 갈렸다: 사이드바 "${item.label}" ↔ 팔레트 "${titles.get(item.command)}" (${item.command})`,
+                );
+            }
+        }
     }
-    if (!raw.startsWith('"')) continue; // 동적 라벨·변수 — 명령 존재만 본다
-    const label = raw.slice(1, -1);
-    if (label !== titles.get(command)) {
-        problems.push(`라벨이 갈렸다: 사이드바 "${label}" ↔ 팔레트 "${titles.get(command)}" (${command})`);
+}
+// **묶음 라벨도 본다.** 지금까지 어느 검사도 안 봤고, 그 구멍으로 낡은 이름이 배송 문서에 남았다.
+const HELP = readFileSync(join(root, "packages/vscode/media/help.md"), "utf8");
+const LABELS = new Set();
+for (const state of STATES) for (const g of sidebarPlan(state)) if (g.label !== "") LABELS.add(g.label);
+for (const [, quoted] of HELP.matchAll(/「([^」]{2,12})」\s*→/g)) {
+    if (!LABELS.has(quoted)) {
+        problems.push(`도움말이 없는 묶음을 가리킨다: 「${quoted}」 — 지금 묶음은 ${[...LABELS].join("·")}`);
     }
 }
 
 if (checked === 0) {
-    // 정규식이 소스 형태 변화로 아무것도 못 잡으면 **조용히 통과**한다 — 그게 제일 나쁘다.
-    console.error("✗ sidebarPlan 에서 act() 호출을 하나도 찾지 못했다 — 검사기가 눈이 먼 것이다.");
+    console.error("✗ sidebarPlan 에서 실행 항목을 하나도 찾지 못했다 — 검사기가 눈이 먼 것이다.");
     process.exit(1);
 }
 if (problems.length > 0) {

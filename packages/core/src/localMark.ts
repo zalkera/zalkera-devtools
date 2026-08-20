@@ -16,6 +16,10 @@
  */
 
 /** 프로젝트 루트 기준 상대 경로. 조회는 이 상수 하나로 한다. */
+import {mkdir, readFile} from "node:fs/promises";
+import {join} from "node:path";
+import {writeOwnFile} from "./safeWrite.ts";
+
 export const SOURCE_MARK_PATH = ".zalkera/source.json";
 
 export interface SourceMark {
@@ -89,4 +93,57 @@ export function mergeTenantSetting(existing: string | null, tenant: string): Mer
     }
     const merged = {...(parsed as Record<string, unknown>), "zalkera.tenant": tenant};
     return {ok: true, text: `${JSON.stringify(merged, null, 2)}\n`};
+}
+
+/**
+ * 출처 표식을 남긴다. **`writeOwnFile` 을 지난다** — 심링크를 따라가 폴더 밖에 쓰지 않고,
+ * 임시 파일 + `rename` 으로 원자적이다.
+ *
+ * 실패는 던지지 않고 사유로 돌려준다 — 표식은 편의지 받기의 조건이 아니다.
+ */
+export async function writeSourceMarkTo(root: string, mark: Omit<SourceMark, "format">): Promise<MergeResult> {
+    try {
+        await mkdir(join(root, ".zalkera"), {recursive: true});
+        await writeOwnFile(join(root, SOURCE_MARK_PATH), buildSourceMark(mark));
+        return {ok: true, text: ""};
+    } catch (error) {
+        return {ok: false, reason: error instanceof Error ? error.message : String(error)};
+    }
+}
+
+/**
+ * 새 폴더가 그 사이트를 바라보게 한다 — 「폴더 연결」이 하는 쓰기의 선행 수행.
+ *
+ * ■ 세 가지를 지킨다
+ *   ⑴ **남의 키를 안 지운다**(병합) ⑵ **못 읽으면 안 쓴다**(「없다」와 구분한다)
+ *   ⑶ **심링크를 안 따라간다**(`writeOwnFile`) — `.vscode/settings.json` 을 링크로 두는 것이
+ *      흔해서, 생 쓰기는 고객 폴더 **밖**의 공유 설정을 고쳐 놓고 성공했다고 말한다.
+ */
+export async function linkFolderToTenant(root: string, tenant: string): Promise<MergeResult> {
+    const path = join(root, ".vscode", "settings.json");
+    let existing: string | null = null;
+    try {
+        existing = await readFile(path, "utf8");
+    } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code !== "ENOENT" && code !== "ENOTDIR") {
+            return {ok: false, reason: `설정 파일을 읽지 못했습니다(${code ?? "알 수 없음"})`};
+        }
+    }
+    let merged: MergeResult;
+    try {
+        merged = mergeTenantSetting(existing, tenant);
+    } catch (error) {
+        // 아주 깊게 중첩된 설정에서 `JSON.parse` 가 스택을 넘길 수 있다. 던지면 받기가 실패한
+        // 것처럼 보인다 — 여기서 잡아 받기는 살린다.
+        return {ok: false, reason: error instanceof Error ? error.message : String(error)};
+    }
+    if (!merged.ok) return merged;
+    try {
+        await mkdir(join(root, ".vscode"), {recursive: true});
+        await writeOwnFile(path, merged.text);
+        return {ok: true, text: merged.text};
+    } catch (error) {
+        return {ok: false, reason: error instanceof Error ? error.message : String(error)};
+    }
 }

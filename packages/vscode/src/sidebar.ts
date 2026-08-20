@@ -50,10 +50,10 @@ export class ZalkeraSidebar implements vscode.TreeDataProvider<Node> {
         // **무엇이 보일지는 `sidebarPlan`(core)이 정한다.** 여기서는 그리기만 한다 — 판정이 이
         // 파일에 있을 때 「사이트가 붙으면 받기 진입점이 사라진다」가 아무 시험에도 안 걸렸다.
         return sidebarPlan(this.state).flatMap((g) => {
+            // `?? ""` 폴백을 두지 않는다 — 명령 없는 항목이 조용히 안 눌리게 되는 자리다.
+            // 타입(판별 유니온)이 그것을 막는다.
             const items = g.items.map((i) =>
-                i.kind === "info"
-                    ? info(i.label, i.icon)
-                    : action(i.label, i.command ?? "", i.icon, i.tooltip),
+                i.kind === "info" ? info(i.label, i.icon) : action(i.label, i.command, i.icon, i.tooltip),
             );
             // 로그인 전 묶음은 라벨이 없다 — 두 줄에 그룹을 씌우면 형식만 남는다.
             return g.label === "" ? items : [group(g.id, g.label, g.icon, g.tooltip, items, g.description)];

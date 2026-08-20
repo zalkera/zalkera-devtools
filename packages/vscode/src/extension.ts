@@ -47,7 +47,8 @@ import {
   pickRevision,
   suggestFolderName,
   nextAvailableName,
-  buildSourceMark,
+  writeSourceMarkTo,
+  linkFolderToTenant,
   parseSourceMark,
   holdsSameRevision,
   mergeTenantSetting,
@@ -641,8 +642,7 @@ async function chooseFetchTarget(
     // **막지는 않는다** — 사본이 망가져서 다시 받는 경우가 있다.
     if (holdsSameRevision(readSourceMarkAt(suggestion.preferred), tenant, revisionNo)) {
       const answer = await vscode.window.showInformationMessage(
-        say.alreadyFetched(tenant, revisionNo),
-        { modal: false, detail: suggestion.preferred },
+        ours(say.alreadyFetchedAt(tenant, revisionNo, suggestion.preferred)),
         "그 폴더 열기",
         "그래도 새로 받기",
       );
@@ -660,8 +660,11 @@ async function chooseFetchTarget(
       ? ["옆에 새 폴더로 받기", "다른 폴더 고르기…"]
       : ["다른 폴더 고르기…"];
     const pick = await vscode.window.showInformationMessage(
-      say.fetchTargetTitle(tenant, revisionNo),
-      { modal: false, detail: suggestion.free ?? "옆에 만들 이름을 못 정했습니다 — 직접 골라 주세요." },
+      ours(
+        suggestion.free
+          ? say.fetchTargetHere(tenant, revisionNo, suggestion.free)
+          : `${say.fetchTargetTitle(tenant, revisionNo)} (옆에 만들 이름을 못 정했습니다 — 직접 골라 주세요.)`,
+      ),
       ...choices,
     );
     if (pick === undefined) return undefined;
@@ -711,66 +714,39 @@ function readSourceMarkAt(dir: string): SourceMark | null {
 }
 
 /**
- * 출처 표식을 남긴다. **해제가 끝난 뒤에만** 쓴다 — 실패 롤백 경로에 표식이 남으면 안 된다.
- * 쓰기 실패는 받기를 실패로 만들지 않는다(표식은 편의지 조건이 아니다).
+ * 출처 표식을 남긴다. **판정과 쓰기는 core 에 있다** — 확장 안에 두면 시험도 검사기도 못 닿아,
+ * 심링크를 따라가거나 반쪽 파일을 남겨도 전건 초록이 된다(실제로 그 상태였다).
+ * 쓰기 실패는 받기를 실패로 만들지 않는다.
  */
 async function writeSourceMark(
   root: string,
   tenant: CapturedTenant,
   result: FetchSourceResult,
 ): Promise<void> {
-  try {
-    await mkdir(join(root, ".zalkera"), { recursive: true });
-    await writeFile(
-      join(root, SOURCE_MARK_PATH),
-      buildSourceMark({
-        tenant: String(tenant),
-        revisionNo: result.revisionNo,
-        sha256: result.sha256,
-        fetchedAt: new Date().toISOString(),
-      }),
-      "utf8",
-    );
-  } catch (error) {
-    log(
-      `출처 표식을 남기지 못했습니다(${error instanceof Error ? error.message : error}) — 받기 자체는 끝났습니다.`,
-    );
+  const done = await writeSourceMarkTo(root, {
+    tenant: String(tenant),
+    revisionNo: result.revisionNo,
+    sha256: result.sha256,
+    fetchedAt: new Date().toISOString(),
+  });
+  if (!done.ok) {
+    log(`출처 표식을 남기지 못했습니다(${done.reason}) — 받기 자체는 끝났습니다.`);
   }
 }
 
-/**
- * 새 폴더가 그 사이트를 바라보게 한다 — 「폴더 연결」이 하는 그 쓰기를 미리 해 두는 것이다.
- *
- * 새 폴더는 아직 워크스페이스가 아니라 VS Code 설정 API 로는 못 적는다. **남의 키는 지우지
- * 않고**, 못 읽으면 **쓰지 않는다** — 사람 설정을 날리는 것보다 안 잇는 편이 낫다.
- */
+/** 새 폴더가 그 사이트를 바라보게 한다. 판정과 쓰기는 core(`linkFolderToTenant`). */
 async function linkFolderToSite(
   root: string,
   tenant: CapturedTenant,
 ): Promise<void> {
-  const path = join(root, ".vscode", "settings.json");
-  let existing: string | null = null;
-  try {
-    existing = await readFile(path, "utf8");
-  } catch {
-    existing = null;
-  }
-  const merged = mergeTenantSetting(existing, String(tenant));
-  if (!merged.ok) {
-    log(
-      `폴더 연결을 적지 못했습니다(${merged.reason}). 새 폴더를 연 뒤 「폴더 연결」을 눌러 주세요.`,
-    );
+  const done = await linkFolderToTenant(root, String(tenant));
+  if (done.ok) {
+    log("이 폴더를 지금 사이트에 연결해 두었습니다 — 폴더를 열면 바로 이어집니다.");
     return;
   }
-  try {
-    await mkdir(join(root, ".vscode"), { recursive: true });
-    await writeFile(path, merged.text, "utf8");
-    log("이 폴더를 지금 사이트에 연결해 두었습니다 — 폴더를 열면 바로 이어집니다.");
-  } catch (error) {
-    log(
-      `폴더 연결을 적지 못했습니다(${error instanceof Error ? error.message : error}). 새 폴더를 연 뒤 「폴더 연결」을 눌러 주세요.`,
-    );
-  }
+  log(
+    `폴더 연결을 적지 못했습니다(${done.reason}). 새 폴더를 연 뒤 「폴더 연결」을 눌러 주세요.`,
+  );
 }
 
 
