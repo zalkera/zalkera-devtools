@@ -21,20 +21,22 @@ import { dirname, join } from "node:path";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const pkg = JSON.parse(readFileSync(join(root, "packages/vscode/package.json"), "utf8"));
-const source = readFileSync(join(root, "packages/vscode/src/sidebar.ts"), "utf8");
+// ⚠ **라벨은 `sidebarPlan.ts`(core)에 있다.** 그리기는 `vscode/sidebar.ts` 가 하지만 무엇이
+//    보일지는 core 가 정한다 — 확장 안 판정은 시험도 검사기도 못 닿아서 내렸다. 검사기도 따라간다.
+const source = readFileSync(join(root, "packages/core/src/sidebarPlan.ts"), "utf8");
 
 const titles = new Map(pkg.contributes.commands.map((c) => [c.command, c.title.replace(/^잘커라:\s*/, "")]));
 const problems = [];
 let checked = 0;
 
 // action("라벨", "명령", …) 또는 action(`동적 ${라벨}`, "명령", …)
-for (const [, raw, command] of source.matchAll(/action\(\s*(`[^`]*`|"[^"]*")\s*,\s*"([^"]+)"/g)) {
+for (const [, raw, command] of source.matchAll(/\bact\(\s*(`[^`]*`|"[^"]*"|[A-Za-z][A-Za-z0-9_]*)\s*,\s*"([^"]+)"/g)) {
     checked += 1;
     if (!titles.has(command)) {
         problems.push(`팔레트에 없는 명령: ${command} — package.json contributes.commands 에 추가하라`);
         continue;
     }
-    if (raw.startsWith("`")) continue; // 동적 라벨 — 명령 존재만 본다
+    if (!raw.startsWith('"')) continue; // 동적 라벨·변수 — 명령 존재만 본다
     const label = raw.slice(1, -1);
     if (label !== titles.get(command)) {
         problems.push(`라벨이 갈렸다: 사이드바 "${label}" ↔ 팔레트 "${titles.get(command)}" (${command})`);
@@ -43,7 +45,7 @@ for (const [, raw, command] of source.matchAll(/action\(\s*(`[^`]*`|"[^"]*")\s*,
 
 if (checked === 0) {
     // 정규식이 소스 형태 변화로 아무것도 못 잡으면 **조용히 통과**한다 — 그게 제일 나쁘다.
-    console.error("✗ 사이드바에서 action() 호출을 하나도 찾지 못했다 — 검사기가 눈이 먼 것이다.");
+    console.error("✗ sidebarPlan 에서 act() 호출을 하나도 찾지 못했다 — 검사기가 눈이 먼 것이다.");
     process.exit(1);
 }
 if (problems.length > 0) {

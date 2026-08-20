@@ -17,6 +17,9 @@ async function fixture(): Promise<string> {
     await mkdir(join(dir, ".next"), { recursive: true });
     await writeFile(join(dir, ".next", "build"), "산출물");
     await writeFile(join(dir, ".env.local"), "ZALKERA_STOREFRONT_KEY=oqsk_secret");
+    // 출처 표식(`localMark.ts`). 이것이 정본에 실리면 다음 판을 받은 폴더가 낡은 거짓을 품는다.
+    await mkdir(join(dir, ".zalkera"), { recursive: true });
+    await writeFile(join(dir, ".zalkera", "source.json"), '{"format":1,"tenant":"a","revisionNo":13}');
     return dir;
 }
 
@@ -64,6 +67,11 @@ print("\\n".join(zipfile.ZipFile(sys.argv[1]).namelist()))`,
     ok(!names.some((n) => n.startsWith("node_modules/")), "의존성 제외");
     ok(!names.some((n) => n.startsWith(".next/")), "빌드 산출물 제외");
     ok(!names.includes(".env.local"), "자격증명 제외 — 여기서 새면 미리보기 키가 서버로 올라간다");
+    // ⚠ **소문자로 조회한다**(`ALWAYS_EXCLUDED` 주석) — 대문자 항목은 안 걸린다.
+    ok(
+        !names.some((n) => n.toLowerCase().startsWith(".zalkera/")),
+        "출처 표식 제외 — 실리면 「나는 그 판에서 왔다」는 낡은 거짓이 그 판을 받는 모두에게 복제된다",
+    );
     strictEqual(result.fileCount, names.length);
 });
 

@@ -157,3 +157,15 @@ export {
   type Diagnostic,
 } from "./diagnostics.ts";
 export { BUSY, createReentrancyGuard } from "./reentrancy.ts";
+export { pickRevision, suggestFolderName, nextAvailableName } from "./fetchTarget.ts";
+export type { RevisionChoice, RevisionLike } from "./fetchTarget.ts";
+export {
+    buildSourceMark,
+    parseSourceMark,
+    holdsSameRevision,
+    mergeTenantSetting,
+    SOURCE_MARK_PATH,
+} from "./localMark.ts";
+export type { SourceMark } from "./localMark.ts";
+export { sidebarPlan } from "./sidebarPlan.ts";
+export type { PlanGroup, PlanItem, SidebarState } from "./sidebarPlan.ts";

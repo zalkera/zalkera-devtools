@@ -1,0 +1,51 @@
+/**
+ * **받을 판·받을 자리 판정의 시험.** 이 판정이 틀리면 화면에 말한 것과 실제로 받는 것이 갈린다.
+ *
+ * 재현: `npm test -w @zalkera/devtools-core`
+ */
+import assert from "node:assert/strict";
+import test from "node:test";
+import { nextAvailableName, pickRevision, suggestFolderName } from "./fetchTarget.ts";
+
+const rev = (revisionNo: number, status: string, isActive = false) => ({ revisionNo, status, isActive });
+
+test("켜진 판이 있으면 그것을 받는다", () => {
+  const choice = pickRevision([rev(11, "READY"), rev(12, "READY", true), rev(13, "READY")]);
+  assert.deepEqual(choice, { revisionNo: 12, why: "active" });
+});
+
+test("켜진 판이 없으면 READY 중 가장 큰 번호 — 목록 첫 줄로 때우지 않는다", () => {
+  // `revisions[0]` 로 때우면 그것이 BUILDING·FAILED 일 수 있고, 그러면 화면에 말한 판과
+  // 실제로 받는 것이 갈린다.
+  const choice = pickRevision([rev(14, "BUILDING"), rev(13, "FAILED"), rev(12, "READY"), rev(11, "READY")]);
+  assert.deepEqual(choice, { revisionNo: 12, why: "latest-ready" });
+});
+
+test("READY 가 하나도 없으면 고르지 않는다", () => {
+  assert.equal(pickRevision([rev(3, "BUILDING"), rev(2, "FAILED")]), null);
+  assert.equal(pickRevision([]), null);
+});
+
+test("켜진 판이 READY 가 아니면 켜진 것으로 세지 않는다", () => {
+  // 서버가 그런 상태를 낼 수 있는지와 무관하게, 받을 수 없는 것을 「이걸 받습니다」라고 말하면 안 된다.
+  const choice = pickRevision([rev(9, "BUILDING", true), rev(8, "READY")]);
+  assert.deepEqual(choice, { revisionNo: 8, why: "latest-ready" });
+});
+
+test("폴더 이름은 판 번호로 특정한다 — 지문을 이름에 넣지 않는다", () => {
+  // 판 번호가 이미 불변 식별자다. 지문을 더하면 같은 말을 두 번 하면서 사람이 못 읽는 글자만 는다.
+  assert.equal(suggestFolderName("credium", 13), "credium-v13");
+  assert.equal(suggestFolderName("credium/", 13), "credium-v13");
+  assert.equal(suggestFolderName("  내사이트  ", 7), "내사이트-v7");
+  assert.equal(suggestFolderName("", 1), "site-v1", "이름이 없어도 쓸 수 있는 이름을 낸다");
+});
+
+test("이름이 남의 것이면 비킨다 — 덮어쓰지 않는다", () => {
+  const used = new Set(["a-v1", "a-v1-2", "a-v1-3"]);
+  assert.equal(nextAvailableName("a-v1", (n) => used.has(n)), "a-v1-4");
+  assert.equal(nextAvailableName("b-v1", (n) => used.has(n)), "b-v1");
+});
+
+test("끝없이 매달리지 않는다 — 못 찾으면 사람에게 고르게 한다", () => {
+  assert.equal(nextAvailableName("x", () => true, 5), null);
+});

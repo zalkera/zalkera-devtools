@@ -103,6 +103,29 @@ export function decideReadyPrompt(uploaded: CapturedTenant, current: string, rev
 const shown = (tenant: CapturedTenant | string): string => plainNotice(tenant, 64);
 
 export const say = {
+    /** 받기 — 어느 사이트의 어느 판을, 어디로. 「지금 폴더는 그대로」가 이 문장의 요점이다. */
+    fetchTargetTitle(tenant: CapturedTenant, revisionNo: number): string {
+        return `「${shown(tenant)}」 버전 ${count(revisionNo)} 를 받을 새 빈 폴더를 고르세요 — 지금 폴더는 그대로 둡니다`;
+    },
+    fetchProgress(tenant: CapturedTenant, revisionNo: number): string {
+        return `「${shown(tenant)}」 버전 ${count(revisionNo)} 를 받는 중`;
+    },
+    /** 받기 완료. `hadOpenSite` 면 **지금 폴더가 안 바뀌었다**는 사실을 같이 말한다. */
+    fetched(tenant: CapturedTenant, revisionNo: number, hadOpenSite: boolean): string {
+        // 소독 검사기는 **표시 문장 안의 보간**을 하나씩 본다. 중간 변수로 묶으면 그 변수가
+        // 「허용 목록 밖」이 된다 — 묶지 않고 자리마다 소독기를 그대로 둔다.
+        return hadOpenSite
+            ? `「${shown(tenant)}」 버전 ${count(revisionNo)} 를 새 폴더로 받았습니다. 지금 폴더는 바뀌지 않았습니다.`
+            : `「${shown(tenant)}」 버전 ${count(revisionNo)} 를 받았습니다.`;
+    },
+    /** 같은 판을 이미 받아 둔 폴더가 있다. **사본을 막지는 않는다** — 망가진 사본을 다시 받을 길은 남긴다. */
+    alreadyFetched(tenant: CapturedTenant, revisionNo: number): string {
+        return `「${shown(tenant)}」 버전 ${count(revisionNo)} 는 이미 받아 두셨습니다.`;
+    },
+    /** 켜진 판이 없어 최근 것을 고른 경우. 말없이 고르면 화면과 실제가 갈린다. */
+    pickedLatestReady(tenant: CapturedTenant, revisionNo: number): string {
+        return `「${shown(tenant)}」 에 켜진 판이 없어, 가장 최근에 만들어진 버전 ${count(revisionNo)} 를 받습니다.`;
+    },
     publishConfirm(tenant: CapturedTenant): { message: string; detail: string; action: string } {
         return {
             message: `「${shown(tenant)}」 사이트에 지금 소스를 새 버전으로 올립니다.`,

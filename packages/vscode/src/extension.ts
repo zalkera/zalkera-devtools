@@ -44,11 +44,20 @@ import {
   type StartFromPresetResult,
   BUSY,
   createReentrancyGuard,
+  pickRevision,
+  suggestFolderName,
+  nextAvailableName,
+  buildSourceMark,
+  parseSourceMark,
+  holdsSameRevision,
+  mergeTenantSetting,
+  SOURCE_MARK_PATH,
+  type SourceMark,
 } from "@zalkera/devtools-core";
 import { readFileSync } from "node:fs";
-import { readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { SecretTokenStore } from "./secretStore.ts";
 import {
   describeNpm,
@@ -529,38 +538,83 @@ async function revokeKeyQuietly(keyId: number, tenant: string): Promise<void> {
 
 // ── 사이트 가져오기 ──────────────────────────────────────────────────────
 
-/** B2 — **MVP 절단선의 핵심**. 이미 있는 사이트를 로컬로 받아야 체크리스트 ③ 이 선다. */
+/**
+ * B2 — **이미 있는 사이트를 로컬로.** 처음 받는 것과 **다시 받는 것**이 같은 명령이다.
+ *
+ * ■ 왜 이름을 가르지 않았나
+ *   동작이 문자 그대로 같다 — 같은 코어 함수, 같은 결과(빈 새 폴더에 그 판). 이름을 가르면
+ *   검사기·문서·로그가 두 벌이 되고, 언젠가 한쪽만 고쳐진다. 처음/다시의 맥락은 명령 이름이
+ *   아니라 **흐름 속 문장**이 싣는다.
+ *
+ * ■ 아무것도 덮어쓰지 않는다
+ *   받기는 **빈 새 폴더**로만 간다(`fetchSiteSource` 가 그것을 강제한다). 지금 폴더는 손대지
+ *   않는다 — 그 사실을 대화상자 제목과 완료 알림이 말한다. 고친 것을 옮기는 것은 사람 몫이고,
+ *   우리는 병합하지 않는다.
+ */
 async function openSite(): Promise<void> {
-  const api = await ensureApi();
-  const picked = await vscode.window.showOpenDialog({
-    canSelectFolders: true,
-    canSelectFiles: false,
-    openLabel: "여기에 받기",
-    title: "내 사이트 소스를 받을 빈 폴더를 고르세요",
-  });
-  const target = picked?.[0]?.fsPath;
+  // ⚠ `ensureApi()` 가 아니라 **`ensureApiFor()`** 다. 이 명령은 사이트 이름을 화면에 말하는데,
+  //    표기와 동작이 같은 값을 보려면 캡처된 테넌트가 필요하다(`tenantScope.ts` 의 규율).
+  const { api, tenant } = await ensureApiFor();
+
+  // 판을 **먼저 정한다.** 코어 폴백에 맡기면 ⑴ 받기 전에 판 번호를 말할 수 없고 ⑵ 화면에 말한
+  // 판과 실제로 받는 판이 갈릴 수 있으며 ⑶ 켜진 판이 없을 때 목록 첫 줄(BUILDING 일 수 있다)을
+  // 잡는다.
+  const choice = pickRevision(await api.listRevisions());
+  if (!choice) {
+    throw new DevtoolsError(
+      "NOT_A_SITE",
+      "받을 수 있는 판이 없습니다.",
+      "올린 판이 아직 만들어지는 중이거나 실패했습니다. 「버전 이력」에서 확인해 주세요.",
+    );
+  }
+  if (choice.why === "latest-ready") {
+    log(say.pickedLatestReady(tenant, choice.revisionNo));
+  }
+
+  const openDir = workspaceDir();
+  const target = await chooseFetchTarget(tenant, choice.revisionNo, openDir);
   if (!target) return;
 
   const result = await vscode.window.withProgress<FetchSourceResult>(
     {
       location: vscode.ProgressLocation.Notification,
-      title: "사이트 소스를 받는 중",
+      title: say.fetchProgress(tenant, choice.revisionNo),
     },
-    () => fetchSiteSource({ api, targetDir: target, onProgress: log }),
+    () =>
+      fetchSiteSource({
+        api,
+        revisionNo: choice.revisionNo,
+        targetDir: target,
+        onProgress: log,
+      }),
   );
 
   const root = await findProjectRoot(target);
   log(
     `버전 ${count(result.revisionNo)} · 파일 ${count(result.fileCount)}개를 받았습니다.`,
   );
-  // ⚠ 받은 폴더가 **지금 열린 폴더**일 수 있다. 그때 갱신하지 않으면 사이드바가 계속 「소스」에
+  log(`받은 곳: ${root}`);
+  if (openDir) log(`이전 폴더는 그대로 있습니다: ${openDir}`);
+
+  await writeSourceMark(root, tenant, result);
+  await linkFolderToSite(root, tenant);
+
+  // ⚠ 받은 폴더가 **지금 열린 폴더**일 수 있다. 그때 갱신하지 않으면 사이드바가 계속 「불러오기」에
   //    머물러 미리보기·발행으로 가는 길이 화면에서 끊긴다.
   await refreshSidebar();
+
+  const hadOpenSite = openDir !== undefined;
+  const message =
+    say.fetched(tenant, result.revisionNo, hadOpenSite) +
+    (hadOpenSite && session !== null
+      ? " 폴더를 열면 지금 미리보기는 멈춥니다 — 새 폴더에서 다시 시작해 주세요."
+      : "");
   const open = await vscode.window.showInformationMessage(
-    `사이트 소스를 받았습니다(버전 ${count(result.revisionNo)}).`,
-    "이 폴더 열기",
+    // `say` 가 만든 문장이다 — 서버 값은 그 안에서 이미 소독을 지났다(`tenantScope.ts` 의 `shown`).
+    ours(message),
+    hadOpenSite ? "새 폴더 열기" : "이 폴더 열기",
   );
-  if (open === "이 폴더 열기") {
+  if (open) {
     await vscode.commands.executeCommand(
       "vscode.openFolder",
       vscode.Uri.file(root),
@@ -568,6 +622,157 @@ async function openSite(): Promise<void> {
     );
   }
 }
+
+/**
+ * 받을 폴더를 정한다. **아무것도 덮어쓰지 않는다** — 이름이 남의 것이면 비키고, 같은 판을 이미
+ * 받아 둔 폴더면 그것을 알린다.
+ *
+ * 옆에 새 폴더를 **제안**하는 이유: 「빈 폴더를 새로 만들어 고르세요」는 비개발자가 멈추는
+ * 자리다(탐색기로 올라가 → 새 폴더 → 이름 → 선택). 기본값을 주되 「다른 폴더 고르기」는 남긴다.
+ */
+async function chooseFetchTarget(
+  tenant: CapturedTenant,
+  revisionNo: number,
+  openDir: string | undefined,
+): Promise<string | undefined> {
+  const suggestion = openDir ? suggestSibling(openDir, revisionNo) : null;
+  if (suggestion) {
+    // 같은 판을 이미 받아 둔 폴더가 있으면 사본을 하나 더 만들기 전에 그 사실을 말한다.
+    // **막지는 않는다** — 사본이 망가져서 다시 받는 경우가 있다.
+    if (holdsSameRevision(readSourceMarkAt(suggestion.preferred), tenant, revisionNo)) {
+      const answer = await vscode.window.showInformationMessage(
+        say.alreadyFetched(tenant, revisionNo),
+        { modal: false, detail: suggestion.preferred },
+        "그 폴더 열기",
+        "그래도 새로 받기",
+      );
+      if (answer === undefined) return undefined;
+      if (answer === "그 폴더 열기") {
+        await vscode.commands.executeCommand(
+          "vscode.openFolder",
+          vscode.Uri.file(suggestion.preferred),
+          { forceNewWindow: false },
+        );
+        return undefined;
+      }
+    }
+    const choices = suggestion.free
+      ? ["옆에 새 폴더로 받기", "다른 폴더 고르기…"]
+      : ["다른 폴더 고르기…"];
+    const pick = await vscode.window.showInformationMessage(
+      say.fetchTargetTitle(tenant, revisionNo),
+      { modal: false, detail: suggestion.free ?? "옆에 만들 이름을 못 정했습니다 — 직접 골라 주세요." },
+      ...choices,
+    );
+    if (pick === undefined) return undefined;
+    if (pick === "옆에 새 폴더로 받기" && suggestion.free) {
+      try {
+        // `recursive: false` — 이미 있으면 던진다. **덮어쓰기로 흘러가지 않는다.**
+        await mkdir(suggestion.free, { recursive: false });
+        return suggestion.free;
+      } catch (error) {
+        // 상위 폴더에 못 쓰는 경우다. 조용히 실패하지 않고 고르는 길로 떨어진다.
+        log(
+          `옆에 폴더를 만들지 못했습니다(${error instanceof Error ? error.message : error}) — 직접 골라 주세요.`,
+        );
+      }
+    }
+  }
+  const picked = await vscode.window.showOpenDialog({
+    canSelectFolders: true,
+    canSelectFiles: false,
+    openLabel: "여기에 받기",
+    defaultUri: openDir ? vscode.Uri.file(dirname(openDir)) : undefined,
+    title: say.fetchTargetTitle(tenant, revisionNo),
+  });
+  return picked?.[0]?.fsPath;
+}
+
+/** 옆에 만들 이름. `preferred` 는 판 번호가 정하는 이름, `free` 는 실제로 비어 있는 이름. */
+function suggestSibling(
+  openDir: string,
+  revisionNo: number,
+): { preferred: string; free: string | null } {
+  const parent = dirname(openDir);
+  const base = suggestFolderName(basename(openDir), revisionNo);
+  const free = nextAvailableName(base, (name) => existsSync(join(parent, name)));
+  return {
+    preferred: join(parent, base),
+    free: free === null ? null : join(parent, free),
+  };
+}
+
+function readSourceMarkAt(dir: string): SourceMark | null {
+  try {
+    return parseSourceMark(readFileSync(join(dir, SOURCE_MARK_PATH), "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 출처 표식을 남긴다. **해제가 끝난 뒤에만** 쓴다 — 실패 롤백 경로에 표식이 남으면 안 된다.
+ * 쓰기 실패는 받기를 실패로 만들지 않는다(표식은 편의지 조건이 아니다).
+ */
+async function writeSourceMark(
+  root: string,
+  tenant: CapturedTenant,
+  result: FetchSourceResult,
+): Promise<void> {
+  try {
+    await mkdir(join(root, ".zalkera"), { recursive: true });
+    await writeFile(
+      join(root, SOURCE_MARK_PATH),
+      buildSourceMark({
+        tenant: String(tenant),
+        revisionNo: result.revisionNo,
+        sha256: result.sha256,
+        fetchedAt: new Date().toISOString(),
+      }),
+      "utf8",
+    );
+  } catch (error) {
+    log(
+      `출처 표식을 남기지 못했습니다(${error instanceof Error ? error.message : error}) — 받기 자체는 끝났습니다.`,
+    );
+  }
+}
+
+/**
+ * 새 폴더가 그 사이트를 바라보게 한다 — 「폴더 연결」이 하는 그 쓰기를 미리 해 두는 것이다.
+ *
+ * 새 폴더는 아직 워크스페이스가 아니라 VS Code 설정 API 로는 못 적는다. **남의 키는 지우지
+ * 않고**, 못 읽으면 **쓰지 않는다** — 사람 설정을 날리는 것보다 안 잇는 편이 낫다.
+ */
+async function linkFolderToSite(
+  root: string,
+  tenant: CapturedTenant,
+): Promise<void> {
+  const path = join(root, ".vscode", "settings.json");
+  let existing: string | null = null;
+  try {
+    existing = await readFile(path, "utf8");
+  } catch {
+    existing = null;
+  }
+  const merged = mergeTenantSetting(existing, String(tenant));
+  if (!merged.ok) {
+    log(
+      `폴더 연결을 적지 못했습니다(${merged.reason}). 새 폴더를 연 뒤 「폴더 연결」을 눌러 주세요.`,
+    );
+    return;
+  }
+  try {
+    await mkdir(join(root, ".vscode"), { recursive: true });
+    await writeFile(path, merged.text, "utf8");
+    log("이 폴더를 지금 사이트에 연결해 두었습니다 — 폴더를 열면 바로 이어집니다.");
+  } catch (error) {
+    log(
+      `폴더 연결을 적지 못했습니다(${error instanceof Error ? error.message : error}). 새 폴더를 연 뒤 「폴더 연결」을 눌러 주세요.`,
+    );
+  }
+}
+
 
 /**
  * B1「예제로 시작」 — 시작 소스 팩을 골라 빈 폴더에 푼다.

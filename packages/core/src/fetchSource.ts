@@ -36,6 +36,8 @@ export interface FetchSourceOptions {
 export interface FetchSourceResult {
     revisionNo: number;
     fileCount: number;
+    /** 받아서 **대조까지 마친** 정본 tar.gz 의 sha256. 출처 표식이 이 값을 적는다. */
+    sha256: string;
 }
 
 /**
@@ -138,7 +140,7 @@ export async function fetchSiteSource(options: FetchSourceOptions): Promise<Fetc
         throw cause;
     }
     report(`${fileCount}개 파일을 받았습니다.`);
-    return { revisionNo, fileCount };
+    return { revisionNo, fileCount, sha256: source.sha256 };
 }
 
 /** 큰 아카이브를 메모리에 다 올리지 않고 파일로 흘리고 싶을 때(현재 미사용 · CLI 대용량 경로 대비). */
