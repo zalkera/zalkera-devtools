@@ -143,7 +143,7 @@ export async function assertNotSymlink(path: string, name: string): Promise<void
  *   심링크를 실현하지 않고 빈 폴더 판정이 링크 자식을 「비어 있음」으로 안 보아 도달할 수 없지만,
  *   **그 전제를 안 지나는 호출부가 생기면 이 갭이 살아난다.** 「심링크를 안 따라간다」는 주장은
  *   그 한정 안에서만 참이다.
-*/
+ */
 export async function writeOwnFile(path: string, data: string, mode = 0o644): Promise<void> {
     const info = await lstat(path).catch(() => null);
     if (info?.isSymbolicLink()) {
