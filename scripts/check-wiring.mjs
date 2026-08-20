@@ -90,7 +90,7 @@ const WIRES = [
     ],
     [
         "packages/vscode/src/extension.ts",
-        'if (shown.kind === "cancelled") return;',
+        'if (notice.kind === "cancelled") return;',
         "사용자가 스스로 그만둔 일이 빨간 오류 창으로 뜬다 — 로그인 창을 닫았을 뿐인데 「인터넷을 확인하세요」를 본다",
     ],
     [
@@ -111,7 +111,7 @@ const WIRES = [
     ],
     [
         "packages/vscode/src/extension.ts",
-        'if (shown.kind !== "cancelled") {',
+        'if (notice.kind !== "cancelled") {',
         "12시간 자동 갱신 중에 스스로 취소를 누른 사람에게 「갱신하지 못해 미리보기가 멈췄습니다」 빨간창이 뜬다",
     ],
     [
@@ -134,6 +134,27 @@ const WIRES = [
         "packages/core/src/publish.ts",
         "return await options.api.confirmArchive(storageKey, true);",
         "동의를 받아 놓고 서버에는 전하지 않는다 — 같은 409 가 반복된다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "return answer === ask.action;",
+        "동의 창은 뜨는데 **무엇을 누르든 동의**가 된다 — 게시 대기 중인 AI 변경이 사람이 거절해도 사라진다. " +
+            "올리기·전환 두 문이 이 한 점을 공유하므로 파급이 둘이다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "if (!(await askDiscardConsent(tenant, (error as Error).message))) return;",
+        "전환에서 거절해도 그대로 진행한다 — 사람이 「아니오」를 눌렀는데 AI 변경이 사라진다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "void revokeKeyQuietly(key.keyId, key.tenant);",
+        "목록 상한에 밀려난 열쇠를 서버에서 안 지운다 — 그 열쇠가 최대 12시간 산다",
+    ],
+    [
+        "packages/core/src/untar.ts",
+        "await writeExclusive(path, data, name, written);",
+        "tar 쪽에서 「원래 있던 파일」과 「아카이브 중복 항목」이 다시 뭉친다 — 후자에 「빈 폴더를 만드세요」는 무한 고리다",
     ],
     [
         "packages/core/src/fetchSource.ts",

@@ -62,6 +62,8 @@ const MARKER = "ours";
 const ALIAS_MUST_CALL = new Map([["shown", "plainNotice"]]);
 /** 소독기 중 **정의가 이 파일에 있어야** 하는 것. 이름만 흉내 낸 가짜를 막는다. */
 const SANITIZER_HOME = new Map([["count", "packages/core/src/notice.ts"]]);
+/** 표기 `ours` 의 정의가 사는 자리. [assertMarkerIsIdentity] 가 그것을 확인한다. */
+const MARKER_HOME = "packages/core/src/notice.ts";
 
 const NOTIFY = new Set(["showInformationMessage", "showWarningMessage", "showErrorMessage"]);
 
@@ -206,11 +208,14 @@ function isAllowed(e) {
         return isCanonicalObject(e.expression);
     }
     if (!ts.isCallExpression(e)) return false;
+    // `say.*(...)` — ⚠ **그 `say` 가 정본 모듈에서 온 것이라야 한다.** 이름만 보면 어느 파일에서든
+    //    지역 `say` 를 만들어 통과시킬 수 있다. `isCanonicalObject` 는 그것을 보는데 이 갈래만
+    //    안 봐서, `.message` 를 **떼기만 하면** 같은 섀도잉이 다시 통과했다(확인 심의 실증).
     if (
         ts.isPropertyAccessExpression(e.expression) &&
         e.expression.expression.getText() === CANON_FACTORY
     ) {
-        return true; // `say.*(...)`
+        return currentImports.has(CANON_FACTORY);
     }
     const callee = ts.isPropertyAccessExpression(e.expression) ? e.expression.name.getText() : e.expression.getText();
     return SANITIZERS.has(callee) || callee === MARKER;
@@ -339,6 +344,49 @@ function assertMarkerIsIdentity() {
 }
 
 /**
+ * **정본 이름을 가리는 것**을 금지한다.
+ *
+ * 출처 검사(`isCanonicalObject`·`isAllowed`)는 **파일 단위**로 「그 이름이 정본 모듈에서
+ * 수입됐는가」를 본다. 그래서 정본을 수입한 파일 **안에서 함수 스코프로 가리면** 통과한다:
+ *
+ *   `function f() { const say = {evil: v => String(v)}; show(\`${say.evil(x)}\`) }`  → 통과했다
+ *
+ * 스코프를 따라가는 대신 **가리는 것 자체를 막는다.** 판정이 도는 파일에서 정본 이름을 지역
+ * 변수로 다시 선언할 이유가 없고, 막으면 출처 검사가 파일 단위여도 뚫리지 않는다.
+ *
+ * ■ **판정이 도는 파일에만 건다**
+ *   `isAllowed` 는 알림을 부르는 파일과 [NOTICE_SOURCES] 에서만 돈다. 그 밖의 파일에 지역
+ *   `count` 가 있어도 알림 판정에 닿지 않는다 — 거기까지 막으면 무해한 이름을 금지어로 만들고,
+ *   그러면 사람이 검사기에 맞춰 코드를 비틀게 된다(그것이 곧 다음 판의 면제다).
+ *
+ * ■ **정본을 정의하는 파일은 뺀다**
+ *   `notice.ts` 는 `plainNotice`·`count`·`ours` 를 **만든다.** 만드는 것은 가리는 것이 아니다.
+ *
+ * 현재 코드에 걸리는 자리는 0건이다 — **지금 닫아 두는 것**이지 오늘의 결함이 아니다.
+ */
+function assertNoCanonicalShadow(rel) {
+    // 정본을 **정의**하는 파일. 여기서 그 이름이 나오는 것은 선언이지 섀도잉이 아니다.
+    const homes = new Set([...SANITIZER_HOME.values(), MARKER_HOME, ...NOTICE_SOURCES]);
+    if (homes.has(rel)) return;
+    const source = parse(join(root, rel));
+    const shadowed = new Set([CANON_FACTORY, ...SANITIZERS, MARKER]);
+    walk(source, (node) => {
+        const named =
+            (ts.isVariableDeclaration(node) || ts.isFunctionDeclaration(node) || ts.isParameter(node)) &&
+            node.name &&
+            ts.isIdentifier(node.name)
+                ? node.name.getText()
+                : null;
+        if (named === null || !shadowed.has(named)) return;
+        const {line} = source.getLineAndCharacterOfPosition(node.getStart());
+        findings.push(
+            `${rel}:${line + 1} — 정본 이름 \`${named}\` 을 지역에 다시 선언했습니다 — ` +
+                "출처 검사가 파일 단위라 이렇게 가리면 뚫립니다(다른 이름을 쓰십시오)",
+        );
+    });
+}
+
+/**
  * 알림 API 를 **변수에 담아 부르는 것**을 금지한다. `const shw = vscode.window.showWarningMessage`
  * 처럼 한 겹만 두면 위 ⑶ 의 호출 인식(`vscode.window.show*`)이 통째로 빗나간다(변이로 실측해 뚫었다).
  *
@@ -464,6 +512,8 @@ for (const rel of notifiers) {
 for (const rel of all) {
     if (!notifiers.includes(rel)) assertNoIndirectNotify(rel);
 }
+// 섀도잉은 **판정이 도는 파일**에서만 위험하다 — 그 밖에서는 알림 판정에 닿지 않는다.
+for (const rel of new Set([...notifiers, ...NOTICE_SOURCES])) assertNoCanonicalShadow(rel);
 assertMarkerIsIdentity();
 
 // **관할이 비었는데 초록**은 이 레포의 반복 실패 형상이다. 세어서 보인다.

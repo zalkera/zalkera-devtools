@@ -371,12 +371,12 @@ function register(
     } catch (error) {
       // 판정은 core 가 한다(`errorNotice.ts`) — 이 자리는 시험도 검사기도 못 닿아서, 「취소는
       // 오류가 아니다」 갈래를 통째로 지워도 전건 초록이었다. 여기서는 그리기만 한다.
-      const shown = decideErrorNotice(error);
+      const notice = decideErrorNotice(error);
       // 출력 채널에는 **원문**이 간다 — 링크를 렌더하지 않는 자리이고, 여기가 근거다.
-      log(`${shown.logPrefix}: ${shown.raw}`);
-      if (shown.kind === "cancelled") return;
+      log(`${notice.logPrefix}: ${notice.raw}`);
+      if (notice.kind === "cancelled") return;
       const choice = await vscode.window.showErrorMessage(
-        shown.message,
+        notice.message,
         "자세히 보기",
       );
       if (choice === "자세히 보기") output.show();
@@ -1280,11 +1280,11 @@ function scheduleRenewal(expiresAt: string, ttlSeconds: number): void {
         //    그것도 고장으로 읽힌다」고 적어 둔 그 규율이다.
         // 판정은 core 가 한다(`errorNotice.ts`) — 여기 사본을 두면 이 자리만 낡는다.
         // 스스로 취소를 누른 사람에게 「갱신하지 못해 멈췄습니다」 빨간창을 띄우면 안 된다.
-        const shown = decideErrorNotice(error);
-        log(`미리보기 자격증명 갱신 ${shown.logPrefix}: ${shown.raw}`);
-        if (shown.kind !== "cancelled") {
+        const notice = decideErrorNotice(error);
+        log(`미리보기 자격증명 갱신 ${notice.logPrefix}: ${notice.raw}`);
+        if (notice.kind !== "cancelled") {
           void vscode.window.showErrorMessage(
-            `미리보기 자격증명을 갱신하지 못해 미리보기가 멈췄습니다 — ${shown.message}`,
+            `미리보기 자격증명을 갱신하지 못해 미리보기가 멈췄습니다 — ${notice.message}`,
           );
         }
       }
@@ -1717,10 +1717,10 @@ async function ensureHandshake(): Promise<Handshake> {
       // **문장은 우리가 쓴다.** 서버 글자를 알림 본문에 얹으면, 그 글자를 정하는 쪽이 우리 이름으로
       // 뜨는 화면을 쓰게 된다(경계에서 소독은 하지만, 안 쓰는 편이 낫다). 서버 문장은 출력 채널에 남긴다.
       log(`서버 안내: ${handshake.message}`);
-      const notice = `새 판이 있습니다(권고 ${target}). 지금 판은 ${extensionVersion} 입니다.`;
+      const upgradeLine = `새 판이 있습니다(권고 ${target}). 지금 판은 ${extensionVersion} 입니다.`;
       // 바로 위에서 **우리가 조립한** 문장이다 — 서버 글자는 출력 채널에만 남긴다.
       void vscode.window
-        .showInformationMessage(ours(notice), "업데이트")
+        .showInformationMessage(ours(upgradeLine), "업데이트")
         .then((picked) => {
           if (picked === "업데이트") {
             void vscode.commands.executeCommand(
