@@ -77,46 +77,57 @@ npx vsce publish --packagePath dist/zalkera-devtools-<version>.vsix
 BUNDLE=$(unzip -p dist/zalkera-devtools-<version>.vsix extension/dist/extension.cjs | sha256sum | cut -d' ' -f1)
 VSIX=$(sha256sum dist/zalkera-devtools-<version>.vsix | cut -d' ' -f1)
 git tag -a v<version> -m "발행본 sha256: vsix $VSIX · bundle $BUNDLE
-재현: npm run package && sha256sum dist/zalkera-devtools-<version>.vsix" HEAD
+재현(번들): npm run package && unzip -p dist/zalkera-devtools-<version>.vsix extension/dist/extension.cjs | sha256sum" HEAD
 git push origin v<version>
 ```
 
-빌드가 결정론적이라(esbuild + zip mtime 고정) 이 sha 로 **나중에도 대조할 수 있다.**
-그것이 이 태그의 값어치다 — 번호만 적으면 다음 사람이 못 되짚는다.
+두 sha 의 쓰임이 다르다.
+
+- **번들 sha** 는 **재현된다**. esbuild 산출물이 결정론적이라 같은 트리에서 다시 구우면 같다.
+  나중에 「마켓의 그 판이 어느 트리냐」를 되짚는 것은 이쪽이다.
+- **vsix sha** 는 **재현되지 않는다.** 스테이징에서 `node_modules` 를 복사할 때 zip 항목 **순서**가
+  실행마다 달라진다(내용은 같다). 이 값은 마켓이 알려 주는 `VsixSha256` 과 대조하는
+  **발행본 식별자**로만 쓴다.
 
 ---
 
-## 4. 설치 경로가 갱신을 정한다
+## 4. 갱신 안내는 **비파괴 한 줄**로만 적는다
 
-발행이 끝나도 **파일로 깐 사용자에게는 안 갑니다.**
-
-| 설치 경로                                                 | 자동 갱신     |
-| --------------------------------------------------------- | ------------- |
-| `code --install-extension zalkera.zalkera-devtools`(마켓) | 받는다        |
-| `code --install-extension <파일>.vsix`                    | **안 받는다** |
-
-VS Code 가 파일 설치본을 마켓 항목과 연결하지 않아 갱신 확인 대상에서 빠진다. 확장 화면에
-「Update」 단추도 안 뜬다. 고치려면 **지웠다 다시** 깐다 — `--force` 덮어쓰기로는 안 바뀐다.
+배송 문서(README·help)가 사용자에게 시키는 갱신 명령은 이것 하나다.
 
 ```bash
-code --list-extensions --show-versions | grep zalkera   # 어느 쪽인지
-code --uninstall-extension zalkera.zalkera-devtools
-code --install-extension zalkera.zalkera-devtools
+code --install-extension zalkera.zalkera-devtools --force
 ```
 
-⚠ **포장 스크립트가 찍는 `shared/*.vsix` 설치 명령은 임시 경로다**(마켓 검증 대기 중에 쓰는 것).
-발행이 끝난 뒤에는 마켓 경로가 정본이다. 그 사실을 안 적어 뒀더니, 그 줄만 보고 깐 사람이 다음
-판이 나와도 계속 옛 판을 썼다.
+**지우라고 하지 마라.** `uninstall` 과 `install` 을 한 펜스에 담으면, 통째로 복붙한 사람이
+2줄에서 네트워크·마켓 장애를 만났을 때 **확장이 사라진 채로 남는다.** 그 사람에게는 `.vsix`
+파일도 없다.
 
-⚠ 이 표는 **이 박스에서 재현해 확인한 것이 아니다** — 여기 VS Code Server 에는 확장이 안 깔려
-있다. 진단 명령으로 어느 쪽인지 먼저 보고 처방하라.
+⚠ **「파일로 깔면 갱신을 못 받는다」를 단정하지 마라.** VS Code 1.134.0 번들을 읽어 확인한
+것은 둘이다 — VSIX 설치가 끝나면 `this.source instanceof …&&this.updateMetadata(...)` 가 돌고,
+갱신 대상 선별은 `a.identifier.uuid&&n.push(...)` 로 uuid 만 본다. 즉 마켓에 올라간 뒤에 파일로
+깐 사람은 갱신 대상에 들어간다. 종전 문면은 그들에게 필요 없는 수술을 시켰다.
+
+**이 박스에서는 실동작을 재현하지 못했다** — 여기 VS Code Server 에는 확장이 하나도 안 깔려
+있다. 데스크톱에서 확인하기 전에는 어느 방향으로도 단정하지 말 것.
+
+포크(Cursor·Windsurf)는 다르다. OpenVSX 에 `zalkera` 네임스페이스가 없어(실측 404) 마켓 경로로는
+설치가 안 되고, 자동 갱신도 오지 않는다. 그 사실은 배송 문서에 적혀 있어야 한다.
 
 강제로 올려야 하면 `minExtensionVersion`(백엔드 설정)을 올리는 길이 있다. 그러면 그 미만 판은
 알림이 아니라 **하던 일이 멈춘다** — 사용자 작업을 끊는 것이라 오너 판단이다.
 
----
+## 5. 변경 기록에 무엇을 적나
 
-## 5. 체크리스트
+`packages/vscode/CHANGELOG.md` 는 **고객이 마켓에서 읽는 문서**다. 우리 규율을 설명하는 자리가
+아니다 — 방침 문장은 여기 적고, 거기에는 결과만 적는다.
+
+- 보안 수정은 **무엇이 고쳐졌는지까지만.** 재현 조건·크기·형상은 적지 않는다 — 아직 옛 판을
+  쓰는 사람이 그대로 노출된다.
+- 그렇다고 **빼지도 않는다.** 「올려야 할 이유」가 안 보이면 그 사람은 옛 판에 남는다.
+  「…를 고쳤습니다. 그 밖에 안전 관점의 수정이 여럿 있습니다」 정도가 두 요구를 다 만족한다.
+
+## 6. 체크리스트
 
 ```
 [ ] packages/vscode/package.json 의 version 을 올렸다

@@ -246,27 +246,17 @@ AI 가 알아서 필요한 도구를 골라 조회합니다.
 
 ### 업데이트가 안 될 때
 
-VS Code 는 확장을 스스로 갱신합니다. 그런데 **`.vsix` 파일로 설치하셨다면 갱신을 받지 못합니다** —
-그렇게 깐 확장은 마켓 항목과 연결되지 않아 갱신 확인 대상에서 빠집니다. 확장 화면에 「Update」
-단추도 안 뜹니다.
-
-지금 어느 쪽인지 보시려면:
+VS Code 는 확장을 스스로 갱신합니다. 새 판이 안 온다 싶으면 이 한 줄로 맞추십시오. 지우지
+않으니 안전합니다.
 
 ```
-code --list-extensions --show-versions | grep zalkera
+code --install-extension zalkera.zalkera-devtools --force
 ```
 
-파일로 까신 것 같으면 **지웠다가 마켓에서 다시** 까십시오. 덮어쓰기(`--force`)로는 안 바뀝니다.
+그래도 그대로면 설정에서 `extensions.autoUpdate` 를 확인하십시오.
 
-```
-code --uninstall-extension zalkera.zalkera-devtools
-code --install-extension zalkera.zalkera-devtools
-```
-
-그다음 VS Code 를 다시 켜시면 새 확장이 뜹니다. 자동 갱신을 꺼 두셨다면 설정에서
-`extensions.autoUpdate` 를 확인하십시오.
-
-VS Code 가 확장을 자동으로 업데이트하도록 두셨다면 대개 이 알림을 보실 일이 없습니다.
+Cursor·Windsurf 같은 포크에는 아직 올리지 못했습니다. 그쪽에서는 `.vsix` 파일로 까셔야 하고
+자동 갱신이 오지 않으니, 새 판이 나오면 파일을 다시 받아 까셔야 합니다.
 
 ### 어느 npm 으로 설치할까요
 
