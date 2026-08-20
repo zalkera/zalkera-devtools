@@ -114,7 +114,10 @@ export const say = {
      *   그러면 사람이 어디에 폴더가 생기는지 못 본 채 「옆에 새 폴더로 받기」를 누른다.
      */
     fetchTargetHere(tenant: CapturedTenant, revisionNo: number, path: string): string {
-        return `「${shown(tenant)}」 버전 ${count(revisionNo)} 를 ${ours(path)} 로 받습니다 — 지금 폴더는 그대로 둡니다.`;
+        // ⚠ **안심 문구가 경로 앞이다.** 비-모달 알림은 한 줄로 잘리는데, 경로는 길이가
+        //    사람 폴더 깊이에 따라 정해진다(윈도우에서 65자가 흔하다). 경로 뒤에 두면
+        //    「지금 폴더는 그대로」가 잘려 사라지고, 그것이 이 화면의 **요점**이다.
+        return `지금 폴더는 그대로 둡니다. 「${shown(tenant)}」 버전 ${count(revisionNo)} 를 ${ours(path)} 로 받습니다.`;
     },
     /** 같은 판을 담은 폴더가 **어디인지**까지 말한다. */
     alreadyFetchedAt(tenant: CapturedTenant, revisionNo: number, path: string): string {
@@ -130,10 +133,6 @@ export const say = {
         return hadOpenSite
             ? `「${shown(tenant)}」 버전 ${count(revisionNo)} 를 새 폴더로 받았습니다. 지금 폴더는 바뀌지 않았습니다.`
             : `「${shown(tenant)}」 버전 ${count(revisionNo)} 를 받았습니다.`;
-    },
-    /** 같은 판을 이미 받아 둔 폴더가 있다. **사본을 막지는 않는다** — 망가진 사본을 다시 받을 길은 남긴다. */
-    alreadyFetched(tenant: CapturedTenant, revisionNo: number): string {
-        return `「${shown(tenant)}」 버전 ${count(revisionNo)} 는 이미 받아 두셨습니다.`;
     },
     /** 켜진 판이 없어 최근 것을 고른 경우. 말없이 고르면 화면과 실제가 갈린다. */
     pickedLatestReady(tenant: CapturedTenant, revisionNo: number): string {

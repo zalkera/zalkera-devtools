@@ -15,7 +15,7 @@
  * ■ 걸리면
  *   둘 중 하나를 고쳐 맞춘다. 사이드바 쪽을 바꾸는 편이 대개 맞다 — 팔레트 제목은 사용자의 검색어다.
  */
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
@@ -24,7 +24,21 @@ const pkg = JSON.parse(readFileSync(join(root, "packages/vscode/package.json"), 
 // ⚠ **정규식이 아니라 `sidebarPlan()` 을 불러 결과를 훑는다.** 소스를 문자열로 훑으면 항목을
 //    객체 리터럴로 쓰는 순간 눈이 먼다 — 실측으로, 없는 명령을 리터럴로 넣어도 전 게이트가
 //    초록이었다. 판정을 부르면 표기 방식과 무관하게 다 걸린다.
-const { sidebarPlan } = await import(join(root, "packages/core/dist/sidebarPlan.js"));
+// ⚠ **산출물이 낡으면 이 검사기는 옛 코드를 검사하고 초록을 낸다.** 소스를 고치고 안 구운 채
+//    단독으로 돌리면 무력화가 안 잡힌다 — 정규식으로 소스를 읽던 종전 판에는 없던 사각이다.
+//    `verify` 는 앞서 typecheck 가 굽지만, 검사기는 단독으로도 정직해야 한다.
+const DIST = join(root, "packages/core/dist/sidebarPlan.js");
+const SRC = join(root, "packages/core/src/sidebarPlan.ts");
+if (!existsSync(DIST)) {
+    console.error("✗ core 산출물이 없습니다 — `npm run build -w @zalkera/devtools-core` 를 먼저 돌리십시오.");
+    process.exit(1);
+}
+if (statSync(SRC).mtimeMs > statSync(DIST).mtimeMs) {
+    console.error("✗ core 산출물이 소스보다 낡았습니다 — 이 검사기는 낡은 것을 검사하게 됩니다.");
+    console.error("  `npm run build -w @zalkera/devtools-core` 를 먼저 돌리십시오.");
+    process.exit(1);
+}
+const { sidebarPlan } = await import(DIST);
 
 const titles = new Map(pkg.contributes.commands.map((c) => [c.command, c.title.replace(/^잘커라:\s*/, "")]));
 const problems = [];
@@ -71,11 +85,15 @@ for (const state of STATES) {
         }
     }
 }
-// **묶음 라벨도 본다.** 지금까지 어느 검사도 안 봤고, 그 구멍으로 낡은 이름이 배송 문서에 남았다.
+// **도움말이 묶음을 가리키는 자리를 본다.**
+//
+// 두 형태만 본다 — `「X」 →`(길안내)와 `「X」 묶음`. 도움말은 오류 문장도 「」 로 인용하므로
+// 모든 인용을 어휘와 대조하면 오탐투성이가 된다(실측: 정당한 인용 여럿이 걸렸다).
+// **이 검사가 잡는 것은 그 두 형태뿐이다** — 평문으로 묶음 이름을 언급하는 자리는 못 본다.
 const HELP = readFileSync(join(root, "packages/vscode/media/help.md"), "utf8");
 const LABELS = new Set();
 for (const state of STATES) for (const g of sidebarPlan(state)) if (g.label !== "") LABELS.add(g.label);
-for (const [, quoted] of HELP.matchAll(/「([^」]{2,12})」\s*→/g)) {
+for (const [, quoted] of HELP.matchAll(/「([^」]{2,12})」\s*(?:→|묶음)/g)) {
     if (!LABELS.has(quoted)) {
         problems.push(`도움말이 없는 묶음을 가리킨다: 「${quoted}」 — 지금 묶음은 ${[...LABELS].join("·")}`);
     }

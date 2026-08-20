@@ -137,7 +137,13 @@ export async function assertNotSymlink(path: string, name: string): Promise<void
  *   끊는다. 안전하지만 남의 의도를 말없이 지우는 것이라 옳지 않다. 그래서 심링크는 먼저 보고
  *   **사람에게 말하고 멈춘다.** 하드링크·교체(TOCTOU)처럼 말해 줄 수 없는 형태는 `rename` 이 막는다.
  *   ⚠ `lstat` 를 **경계로 읽지 마라** — 그것은 예의이고, 경계는 `rename` 이다.
- */
+  *
+ * ⚠ **막는 것은 잎(leaf) 심링크뿐이다.** 부모 디렉터리(`.vscode`·`.zalkera` 자체)가 링크면
+ *   `mkdir(recursive)` 가 무동작이 되고 `rename` 이 폴더 밖에 쓴다. 지금 호출부에서는 해제기가
+ *   심링크를 실현하지 않고 빈 폴더 판정이 링크 자식을 「비어 있음」으로 안 보아 도달할 수 없지만,
+ *   **그 전제를 안 지나는 호출부가 생기면 이 갭이 살아난다.** 「심링크를 안 따라간다」는 주장은
+ *   그 한정 안에서만 참이다.
+*/
 export async function writeOwnFile(path: string, data: string, mode = 0o644): Promise<void> {
     const info = await lstat(path).catch(() => null);
     if (info?.isSymbolicLink()) {

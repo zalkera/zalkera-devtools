@@ -51,12 +51,11 @@ import {
   linkFolderToTenant,
   parseSourceMark,
   holdsSameRevision,
-  mergeTenantSetting,
   SOURCE_MARK_PATH,
   type SourceMark,
 } from "@zalkera/devtools-core";
 import { readFileSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { SecretTokenStore } from "./secretStore.ts";

@@ -118,6 +118,7 @@ export async function writeSourceMarkTo(root: string, mark: Omit<SourceMark, "fo
  *   ⑴ **남의 키를 안 지운다**(병합) ⑵ **못 읽으면 안 쓴다**(「없다」와 구분한다)
  *   ⑶ **심링크를 안 따라간다**(`writeOwnFile`) — `.vscode/settings.json` 을 링크로 두는 것이
  *      흔해서, 생 쓰기는 고객 폴더 **밖**의 공유 설정을 고쳐 놓고 성공했다고 말한다.
+ *      (막는 것은 **잎 심링크**다 —  의 한계 주석을 함께 보라.)
  */
 export async function linkFolderToTenant(root: string, tenant: string): Promise<MergeResult> {
     const path = join(root, ".vscode", "settings.json");
