@@ -92,6 +92,13 @@ export async function startDevServer(
         BROWSER: "none",
       },
       stdio: ["ignore", "pipe", "pipe"],
+      // **자기 프로세스 그룹을 준다**(POSIX). Next 는 렌더 워커를, Turbopack 은 자기 node 를 더
+      // 띄운다 — 부모만 끊으면 그것들이 고아로 남아 포트를 물고 메모리를 먹는데, 사용자 화면에는
+      // 끄는 수단이 없다. 그룹이 있어야 `kill(-pid)` 로 한 번에 끊는다(`stopChild`).
+      //
+      // ⚠ 윈도에는 안 준다 — `detached` 가 **새 콘솔 창을 띄운다.** 거기서는 `taskkill /T` 가
+      //   같은 일을 한다.
+      detached: process.platform !== "win32",
     },
   );
 
@@ -228,12 +235,66 @@ async function waitForReady(
   });
 }
 
+/**
+ * 명령을 띄우되 **못 떠도 아무 일이 없게** 한다.
+ *
+ * ⚠ **`spawn` 의 ENOENT 는 던지지 않는다 — `error` 이벤트로 온다.** `try/catch` 만 두면 그 명령이
+ *   없는 기계에서 처리되지 않은 `error` 가 되어 **프로세스가 통째로 죽는다.**
+ *   재현: `node -e 'require("child_process").spawn("없는명령",[],{stdio:"ignore"})'` → rc=1.
+ *
+ * 리눅스에서는 이 함수를 쓰는 자리가 없다(윈도 `taskkill` 전용). 그래도 여기 두는 이유는
+ * **시험이 물게** 하기 위해서다 — 윈도 갈래는 이 박스에서 재지 못한다.
+ */
+export function spawnQuietly(command: string, args: readonly string[]): void {
+  try {
+    const child = spawn(command, [...args], { stdio: "ignore" });
+    child.on("error", () => {
+      /* 그 명령이 없거나 못 떴다 — 부르는 쪽에 폴백이 있다. */
+    });
+    child.unref();
+  } catch {
+    /* spawn 이 동기로 던지는 경로(인자 오류 등) — 같은 이유로 삼킨다. */
+  }
+}
+
+/**
+ * 자식과 **그 아래 전부**에 신호를 보낸다.
+ *
+ * `child.kill()` 은 그 프로세스 하나만 끊는다. 실측으로 손자가 그대로 살아남았다
+ * (`dev.cancel.test.ts` 의 「미리보기를 끄면 손자까지 끊는다」 — 고치기 전에는 그 시험이 빨갛다).
+ *
+ * ⚠ **윈도 갈래는 이 박스에서 재지 못했다.** `taskkill` 이 없다. 문서로만 확인한 것: `/T` 가
+ *   자식 트리를, `/F` 가 강제 종료를 뜻한다. 실패해도 삼킨다 — 아래에서 `child.kill()` 이 최소한
+ *   당사자는 끊는다.
+ */
+function killTree(child: ChildProcess, signal: NodeJS.Signals): void {
+  const pid = child.pid;
+  if (pid === undefined) return;
+  if (process.platform === "win32") {
+    // ⚠ **`spawn` 의 ENOENT 는 던지지 않는다 — `error` 이벤트로 온다.** `try/catch` 만 두면
+    //    `taskkill` 이 없는 기계에서 처리되지 않은 `error` 가 되어 **프로세스가 통째로 죽는다**
+    //    (심의 실측 · 리눅스에서 같은 기전 재현: 없는 명령을 spawn 하면 300ms 안에 rc=1).
+    //    이 모듈은 `index.ts` 로 공개 export 라, 전역 핸들러가 없는 호스트에서는 그대로 크래시다.
+    //    리스너를 달아야 주석의 「실패해도 삼킨다」가 비로소 참이 된다.
+    spawnQuietly("taskkill", ["/pid", String(pid), "/T", "/F"]);
+    child.kill(signal);
+    return;
+  }
+  try {
+    // 음수 pid = **프로세스 그룹 전체.** `detached: true` 로 띄웠기에 그룹이 자식 것이다.
+    process.kill(-pid, signal);
+  } catch {
+    // 그룹이 이미 없다(다 죽었다)거나 그룹을 못 받았다 — 당사자만이라도 끊는다.
+    child.kill(signal);
+  }
+}
+
 async function stopChild(child: ChildProcess): Promise<void> {
   if (child.exitCode !== null || child.signalCode !== null) return;
-  child.kill("SIGTERM");
+  killTree(child, "SIGTERM");
   await new Promise<void>((resolve) => {
     const timer = setTimeout(() => {
-      child.kill("SIGKILL");
+      killTree(child, "SIGKILL");
       resolve();
     }, 5_000);
     timer.unref?.();

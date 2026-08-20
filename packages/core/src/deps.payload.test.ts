@@ -2,11 +2,11 @@ import { ok, rejects, strictEqual } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { lstat, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { lstat, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
 import { computeCacheKey, ensureDependencies } from "./deps.ts";
+import { tempDir } from "./testing/tempDir.ts";
 
 /**
  * 페이로드 → 캐시 → 프로젝트 **합류점**(memo146 §13.10.6 · 심의 W5).
@@ -16,7 +16,7 @@ import { computeCacheKey, ensureDependencies } from "./deps.ts";
  * 보고 나서 `Cannot find module` 을 만난다.
  */
 async function fakeSite(): Promise<string> {
-    const dir = await mkdtemp(join(tmpdir(), "zalkera-site-"));
+    const dir = await tempDir("zalkera-site-");
     await writeFile(join(dir, "package.json"), '{"name":"site"}');
     await writeFile(join(dir, "package-lock.json"), '{"lockfileVersion":3}');
     return dir;
@@ -24,7 +24,7 @@ async function fakeSite(): Promise<string> {
 
 /** 서버가 굽는 것과 같은 모양 — 뿌리에 `node_modules/` 가 있는 tar.gz. */
 async function bakedPayload(): Promise<{ gz: Buffer; sha: string }> {
-    const dir = await mkdtemp(join(tmpdir(), "zalkera-baked-"));
+    const dir = await tempDir("zalkera-baked-");
     await mkdir(join(dir, "node_modules", ".bin"), { recursive: true });
     await mkdir(join(dir, "node_modules", "next", "bin"), { recursive: true });
     await writeFile(join(dir, "node_modules", "next", "bin", "next"), "#!/usr/bin/env node\n");
@@ -58,7 +58,7 @@ function serve(gz: Buffer, sha: string, lockSha: string): typeof fetch {
 
 test("페이로드가 있으면 npm 없이 연결까지 끝난다", async () => {
     const projectDir = await fakeSite();
-    const cacheRoot = await mkdtemp(join(tmpdir(), "zalkera-croot-"));
+    const cacheRoot = await tempDir("zalkera-croot-");
     const { gz, sha } = await bakedPayload();
     const lockSha = createHash("sha256").update(await readFile(join(projectDir, "package-lock.json"))).digest("hex");
     const said: string[] = [];
@@ -86,7 +86,7 @@ test("페이로드가 있으면 npm 없이 연결까지 끝난다", async () => 
 
 test("두 번째 호출은 캐시를 재사용한다", async () => {
     const projectDir = await fakeSite();
-    const cacheRoot = await mkdtemp(join(tmpdir(), "zalkera-croot-"));
+    const cacheRoot = await tempDir("zalkera-croot-");
     const { gz, sha } = await bakedPayload();
     const lockSha = createHash("sha256").update(await readFile(join(projectDir, "package-lock.json"))).digest("hex");
 
@@ -98,7 +98,7 @@ test("두 번째 호출은 캐시를 재사용한다", async () => {
 
 test("서버가 안 주면 npm 으로 내려간다 — 그리고 말한다", async () => {
     const projectDir = await fakeSite();
-    const cacheRoot = await mkdtemp(join(tmpdir(), "zalkera-croot-"));
+    const cacheRoot = await tempDir("zalkera-croot-");
     const said: string[] = [];
 
     // npm 을 일부러 없는 명령으로 두고, **거기까지 내려갔는지**를 실패로 확인한다.
@@ -117,7 +117,7 @@ test("서버가 안 주면 npm 으로 내려간다 — 그리고 말한다", asy
 
 test("apiBase 가 없으면 조회 자체를 안 한다", async () => {
     const projectDir = await fakeSite();
-    const cacheRoot = await mkdtemp(join(tmpdir(), "zalkera-croot-"));
+    const cacheRoot = await tempDir("zalkera-croot-");
     let called = 0;
 
     await ensureDependencies({
@@ -134,10 +134,10 @@ test("apiBase 가 없으면 조회 자체를 안 한다", async () => {
 });
 
 test("lockfile 이 npm 계열이 아니면 말하고 내려간다", async () => {
-    const projectDir = await mkdtemp(join(tmpdir(), "zalkera-site-"));
+    const projectDir = await tempDir("zalkera-site-");
     await writeFile(join(projectDir, "package.json"), '{"name":"site"}');
     await writeFile(join(projectDir, "pnpm-lock.yaml"), "lockfileVersion: 9");
-    const cacheRoot = await mkdtemp(join(tmpdir(), "zalkera-croot-"));
+    const cacheRoot = await tempDir("zalkera-croot-");
     const said: string[] = [];
 
     await ensureDependencies({
@@ -153,7 +153,7 @@ test("lockfile 이 npm 계열이 아니면 말하고 내려간다", async () => 
 });
 
 test("캐시가 3세대를 넘으면 정리된다", async () => {
-    const cacheRoot = await mkdtemp(join(tmpdir(), "zalkera-croot-"));
+    const cacheRoot = await tempDir("zalkera-croot-");
     for (const name of ["old1", "old2", "old3", "old4"]) {
         await mkdir(join(cacheRoot, name), { recursive: true });
     }
@@ -179,7 +179,7 @@ test("받은 폴더가 완결 표식을 담아 와도 준비를 건너뛰지 않
     //   그러면 **zip 이 담아 온 `node_modules` 가 그대로 실행**된다 — 어느 npm 을 쓸지 고르는 장치가
     //   한 번도 안 돈다.
     const projectDir = await fakeSite();
-    const cacheRoot = await mkdtemp(join(tmpdir(), "zalkera-croot-"));
+    const cacheRoot = await tempDir("zalkera-croot-");
     await mkdir(join(projectDir, "node_modules"), { recursive: true });
     await writeFile(join(projectDir, "node_modules", ".zalkera-deps-complete"), "받은 zip 이 담아 온 것\n");
     await writeFile(join(projectDir, "node_modules", "PWNED.txt"), "여기 있으면 안 된다\n");

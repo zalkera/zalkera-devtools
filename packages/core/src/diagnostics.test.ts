@@ -175,3 +175,36 @@ test("양성 통제군 — `use client` 판정이 그대로다", () => {
   }
   ok(!hits("const a = 1;"), "지시어가 없는데 클라이언트로 봤다");
 });
+
+test("규칙 ②는 선형이다 — 모호한 반복을 두지 않는다", () => {
+  // 종전 형태는 접미 대안이 앞 문자류의 부분집합이라 제곱이었다. 이 판정은 **문서를 열 때와
+  // 저장할 때마다** 확장 호스트 스레드에서 동기로 돌고, 그 스레드는 다른 확장과 공유한다.
+  // 400KB 한 줄에 12.4초가 걸리던 자리다.
+  const big = "NEXT_PUBLIC_".repeat(34133); // 약 400KB
+  const started = Date.now();
+  diagnose("a.tsx", big);
+  const ms = Date.now() - started;
+  ok(ms < 2000, `규칙 ②가 ${ms}ms 걸렸다 — 모호한 반복이 돌아왔다`);
+});
+
+test("규칙 ②의 판정은 종전 정규식과 같다 — 길이까지", () => {
+  // 접미가 둘이면 종전 `*` 는 탐욕적이라 **가장 긴 매치**를 냈다. 순서대로 첫 접미를 잡으면
+  // 밑줄이 짧아진다(실측으로 갈렸다).
+  const rows: [string, number][] = [
+    ["const a = process.env.NEXT_PUBLIC_API_KEY;", 19],
+    ["NEXT_PUBLIC_TOKEN_ID", 17],
+    ["NEXT_PUBLIC_KEY_SECRET", 22],
+    ["NEXT_PUBLIC_PASSWORD_KEY", 24],
+    ["NEXT_PUBLIC_A_PASSWORD_B", 22],
+    ["XNEXT_PUBLIC_KEY", 15],
+  ];
+  for (const [line, length] of rows) {
+    const hit = diagnose("a.tsx", line).filter((d) => d.rule === "zalkera/no-public-secret");
+    strictEqual(hit.length, 1, `못 잡았다: ${line}`);
+    strictEqual(hit[0]?.length, length, `밑줄 길이가 갈렸다: ${line}`);
+  }
+  for (const line of ["NEXT_PUBLIC_PREVIEW_KEY", "NEXT_PUBLIC_BASE", "next_public_api_key"]) {
+    const hit = diagnose("a.tsx", line).filter((d) => d.rule === "zalkera/no-public-secret");
+    strictEqual(hit.length, 0, `거짓 양성: ${line}`);
+  }
+});

@@ -28,12 +28,12 @@ test("도는 중에 다시 부르면 실행하지 않는다", async () => {
   const gate = deferred();
   let ran = 0;
 
-  const first = guard(async () => {
+  const first = guard.run(async () => {
     ran += 1;
     await gate.promise;
     return "첫 번째";
   });
-  const second = await guard(async () => {
+  const second = await guard.run(async () => {
     ran += 1;
     return "두 번째";
   });
@@ -50,22 +50,22 @@ test("도는 중에 다시 부르면 실행하지 않는다", async () => {
 
 test("끝나면 다시 받는다", async () => {
   const guard = createReentrancyGuard();
-  strictEqual(await guard(async () => "a"), "a");
-  strictEqual(await guard(async () => "b"), "b", "한 번 쓰고 잠겼다");
+  strictEqual(await guard.run(async () => "a"), "a");
+  strictEqual(await guard.run(async () => "b"), "b", "한 번 쓰고 잠겼다");
 });
 
 test("던져도 가드를 푼다 — 취소 한 번에 영영 잠기지 않는다", async () => {
   const guard = createReentrancyGuard();
-  await guard(async () => {
+  await guard.run(async () => {
     throw new Error("폴더 선택 취소");
   }).catch(() => {});
-  strictEqual(await guard(async () => "다음"), "다음", "실패 뒤 가드가 잠겼다");
+  strictEqual(await guard.run(async () => "다음"), "다음", "실패 뒤 가드가 잠겼다");
 });
 
 test("던진 오류는 그대로 올라간다 — 가드가 삼키지 않는다", async () => {
   const guard = createReentrancyGuard();
   let caught: unknown = null;
-  await guard(async () => {
+  await guard.run(async () => {
     throw new Error("네트워크 오류");
   }).catch((e) => {
     caught = e;
@@ -80,14 +80,39 @@ test("가드는 서로 독립이다 — 다른 일이 막히지 않는다", asyn
   const a = createReentrancyGuard();
   const b = createReentrancyGuard();
   const gate = deferred();
-  const running = a(async () => {
+  const running = a.run(async () => {
     await gate.promise;
   });
   strictEqual(
-    await b(async () => "다른 가드"),
+    await b.run(async () => "다른 가드"),
     "다른 가드",
     "가드 하나가 전부를 막았다",
   );
   gate.resolve();
   await running;
+});
+
+test("`busy` 는 도는 동안만 참이다 — 「막는다」와 「돌고 있느냐」는 다른 질문이다", async () => {
+  // 미리보기를 준비하는 동안 로그아웃을 거절하는 자리가 이 질문을 쓴다. 그 판정이 확장 안
+  // 불리언으로 살면 시험이 못 닿는다 — 실제로 `if (previewStarting)` 을 `if (false)` 로 바꿔도
+  // 전건 초록이었다.
+  const g = createReentrancyGuard();
+  strictEqual(g.busy, false, "시작 전인데 바쁘다");
+  const gate = deferred();
+  const running = g.run(async () => {
+    strictEqual(g.busy, true, "도는 중인데 안 바쁘다");
+    await gate.promise;
+  });
+  strictEqual(g.busy, true, "밖에서 봐도 바빠야 한다");
+  gate.resolve();
+  await running;
+  strictEqual(g.busy, false, "끝났는데 계속 바쁘다");
+});
+
+test("`busy` 는 던져도 풀린다", async () => {
+  const g = createReentrancyGuard();
+  await g.run(async () => {
+    throw new Error("실패");
+  }).catch(() => undefined);
+  strictEqual(g.busy, false, "던진 뒤 영영 잠겼다");
 });

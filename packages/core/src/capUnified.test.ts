@@ -9,13 +9,13 @@
  * 「호출부가 건 값이 두 경로에서 같은 답을 낸다」가 지켜야 할 성질이고, 그것은 크기와 무관하다.
  */
 import { rejects, strictEqual } from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { after, test } from "node:test";
 import { gzipSync } from "node:zlib";
 import { MAX_EXTRACT_BYTES } from "./limits.ts";
 import { extractTarGz, extractTarGzFile } from "./untar.ts";
+import { tempDir } from "./testing/tempDir.ts";
 
 function header(name: string, size: number): Buffer {
     const h = Buffer.alloc(512);
@@ -51,7 +51,7 @@ after(async () => {
 });
 
 async function scratch(prefix: string): Promise<string> {
-    const dir = await mkdtemp(join(tmpdir(), prefix));
+    const dir = await tempDir(prefix);
     made.push(dir);
     return dir;
 }

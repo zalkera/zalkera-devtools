@@ -9,22 +9,15 @@
  * 재현: `node --test packages/core/dist/nodeOnPath.test.js` (또는 `npm test -w @zalkera/devtools-core`)
  */
 import assert from "node:assert/strict";
-import {
-  mkdtempSync,
-  rmSync,
-  symlinkSync,
-  writeFileSync,
-  mkdirSync,
-  chmodSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
+import { rmSync, symlinkSync, writeFileSync, mkdirSync, chmodSync } from "node:fs";
 import { delimiter, join } from "node:path";
 import test from "node:test";
 import { devEngineArgs, hasNodeOnPath } from "./nodeOnPath.ts";
+import { tempDirSync } from "./testing/tempDir.ts";
 
 const roots: string[] = [];
 function dirWith(names: string[]): string {
-  const root = mkdtempSync(join(tmpdir(), "zalkera-nop-"));
+  const root = tempDirSync("zalkera-nop-");
   roots.push(root);
   for (const n of names) {
     writeFileSync(join(root, n), "");
@@ -100,7 +93,7 @@ test("Windows 의 Path·path 표기도 읽는다", () => {
 });
 
 test("디렉터리가 node 라는 이름이어도 실행 파일이 아니다", () => {
-  const root = mkdtempSync(join(tmpdir(), "zalkera-nop-dir-"));
+  const root = tempDirSync("zalkera-nop-dir-");
   roots.push(root);
   mkdirSync(join(root, "node"));
   assert.equal(
@@ -111,7 +104,7 @@ test("디렉터리가 node 라는 이름이어도 실행 파일이 아니다", (
 });
 
 test("깨진 심링크는 없는 것으로 본다", () => {
-  const root = mkdtempSync(join(tmpdir(), "zalkera-nop-bad-"));
+  const root = tempDirSync("zalkera-nop-bad-");
   roots.push(root);
   symlinkSync(join(root, "nowhere"), join(root, "node"));
   assert.equal(hasNodeOnPath({ PATH: root }, "linux"), false);

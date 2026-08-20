@@ -1,11 +1,11 @@
 import { ok, strictEqual } from "node:assert/strict";
-import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
 import { isReceivable, meaningfulEntries } from "./emptyDir.ts";
+import { tempDir } from "./testing/tempDir.ts";
 
-const scratch = () => mkdtemp(join(tmpdir(), "zalkera-empty-"));
+const scratch = () => tempDir("zalkera-empty-");
 
 test("빈 폴더는 받을 수 있다", async () => {
     ok(await isReceivable(await scratch()));
@@ -51,14 +51,14 @@ test("무시 이름이라도 **심링크**면 무시하지 않는다", async () 
     const { mkdtemp, symlink, mkdir, writeFile } = await import("node:fs/promises");
     const { tmpdir } = await import("node:os");
     const { join } = await import("node:path");
-    const victim = await mkdtemp(join(tmpdir(), "victim-"));
+    const victim = await tempDir("victim-");
     for (const name of [".vscode", ".DS_Store", "Thumbs.db", "desktop.ini"]) {
-        const dir = await mkdtemp(join(tmpdir(), "tgt-"));
+        const dir = await tempDir("tgt-");
         await symlink(victim, join(dir, name));
         strictEqual(await isReceivable(dir), false, `${name} 심링크가 "빈 폴더"를 통과했다`);
     }
     // 통제군 — 진짜 편집기 파일은 여전히 무시한다.
-    const clean = await mkdtemp(join(tmpdir(), "tgt-"));
+    const clean = await tempDir("tgt-");
     await mkdir(join(clean, ".vscode"));
     await writeFile(join(clean, ".vscode", "settings.json"), "{}");
     await writeFile(join(clean, ".DS_Store"), "x");

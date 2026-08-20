@@ -1,12 +1,12 @@
 import { ok, rejects, strictEqual } from "node:assert/strict";
-import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
 import { ensureAgentDocs } from "./agents.ts";
 import { DevtoolsError } from "./errors.ts";
 import { registerMcpServer, type McpRegistration } from "./mcp.ts";
 import { mcpServerName } from "./serverUrl.ts";
+import { tempDir } from "./testing/tempDir.ts";
 
 /**
  * 서버 이름을 **정문으로** 만든다.
@@ -28,7 +28,7 @@ const registration: McpRegistration = {
 };
 
 test("파일이 없으면 만든다", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "zalkera-mcp-"));
+    const dir = await tempDir("zalkera-mcp-");
     strictEqual((await registerMcpServer(dir, registration)).action, "created");
     const parsed = JSON.parse(await readFile(join(dir, ".mcp.json"), "utf8"));
     strictEqual(parsed.mcpServers["zalkera-site"].url, registration.url);
@@ -36,7 +36,7 @@ test("파일이 없으면 만든다", async () => {
 });
 
 test("남의 서버 설정과 최상위 키를 보존한다", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "zalkera-mcp-"));
+    const dir = await tempDir("zalkera-mcp-");
     await writeFile(
         join(dir, ".mcp.json"),
         JSON.stringify({ mcpServers: { other: { type: "stdio", command: "x" } }, somethingElse: 1 }),
@@ -50,13 +50,13 @@ test("남의 서버 설정과 최상위 키를 보존한다", async () => {
 });
 
 test("같은 값이면 다시 쓰지 않는다", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "zalkera-mcp-"));
+    const dir = await tempDir("zalkera-mcp-");
     await registerMcpServer(dir, registration);
     strictEqual((await registerMcpServer(dir, registration)).action, "unchanged");
 });
 
 test("깨진 JSON 은 덮지 않고 알린다", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "zalkera-mcp-"));
+    const dir = await tempDir("zalkera-mcp-");
     const path = join(dir, ".mcp.json");
     await writeFile(path, "{ 이건 JSON 이 아니다");
 
@@ -69,7 +69,7 @@ test("깨진 JSON 은 덮지 않고 알린다", async () => {
 });
 
 test("규약 문서: 있으면 손대지 않고, 없으면 포인터만 만든다", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "zalkera-agents-"));
+    const dir = await tempDir("zalkera-agents-");
     await writeFile(join(dir, "AGENTS.md"), "# 팩이 준 정본\n내용 있음\n");
 
     const first = await ensureAgentDocs(dir);
@@ -85,7 +85,7 @@ test("규약 문서: 있으면 손대지 않고, 없으면 포인터만 만든�
 });
 
 test("AGENTS.md 스텁에 규약을 복사하지 않는다(정본 포인터만)", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "zalkera-agents-"));
+    const dir = await tempDir("zalkera-agents-");
     await ensureAgentDocs(dir);
     const stub = await readFile(join(dir, "AGENTS.md"), "utf8");
     ok(stub.includes("llms.txt"), "정본을 가리킨다");
@@ -100,7 +100,7 @@ test("AGENTS.md 스텁에 규약을 복사하지 않는다(정본 포인터만)"
  * **파괴**다. 그래서 이름이 아니라 **형상**으로 소유를 판정한다.
  */
 test("이름이 겹쳐도 남의 항목은 덮지 않는다", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "mcp-foreign-"));
+    const dir = await tempDir("mcp-foreign-");
     try {
         const before = JSON.stringify(
             { mcpServers: { github: { command: "npx", env: { GITHUB_TOKEN: "ghp_REAL" } } } },
@@ -120,7 +120,7 @@ test("이름이 겹쳐도 남의 항목은 덮지 않는다", async () => {
 });
 
 test("통제군 — 우리가 적은 항목은 갱신한다", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "mcp-ours-"));
+    const dir = await tempDir("mcp-ours-");
     try {
         const reg = { serverName: serverName("zalkera"), url: "https://mcp.zalkera.com/a", clientId: "a", authServerMetadataUrl: "https://auth.example/x" };
         strictEqual((await registerMcpServer(dir, reg)).action, "created");
@@ -132,8 +132,8 @@ test("통제군 — 우리가 적은 항목은 갱신한다", async () => {
 });
 
 test("`.mcp.json` 이 심링크면 쓰지 않는다 — 링크 대상이 남의 파일이다", async () => {
-    const victim = await mkdtemp(join(tmpdir(), "victim-"));
-    const dir = await mkdtemp(join(tmpdir(), "mcp-link-"));
+    const victim = await tempDir("victim-");
+    const dir = await tempDir("mcp-link-");
     try {
         // ⚠ 링크 대상은 **유효 JSON** 이어야 한다. 깨진 내용으로 두면 `JSON.parse` 가 먼저 던져
         //   `rejects` 가 그것을 받고 통과한다 — 가드를 지워도 초록인 시험이 된다(실측으로 겪음).

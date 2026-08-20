@@ -154,6 +154,27 @@ export const say = {
             action: "바꾸기",
         };
     },
+    /**
+     * 게시 대기 중인 AI 변경을 **버리고** 전환할지 묻는다.
+     *
+     * 서버는 이 거절에 「계속하려면 확인해 주세요」라고 적어 보낸다. 확인할 자리가 없으면 그 문장이
+     * 곧 막다른 길이다 — 사용자는 시키는 대로 할 방법이 없는 채로 같은 거절을 반복해서 본다.
+     *
+     * 몇 건이 사라지는지는 **서버만 안다.** 그래서 서버 문장을 그대로 싣되, 나가는 자리가 모달
+     * `detail` 이라 여기서 소독한다.
+     */
+    discardPendingConfirm(
+        tenant: CapturedTenant,
+        serverMessage: string,
+    ): { message: string; detail: string; action: string } {
+        return {
+            message: `「${shown(tenant)}」 에 아직 게시하지 않은 AI 변경이 있습니다.`,
+            detail:
+                `${plainNotice(serverMessage, 200)}\n` +
+                "버전을 바꾸면 그 변경은 사라집니다. 되돌릴 수 없습니다.",
+            action: "버리고 바꾸기",
+        };
+    },
     switched(tenant: CapturedTenant, revisionNo: number): string {
         return `「${shown(tenant)}」 사이트를 버전 ${count(revisionNo)} 로 바꿨습니다.`;
     },

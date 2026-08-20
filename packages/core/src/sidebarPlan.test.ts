@@ -76,7 +76,15 @@ test("사이트를 안 골랐으면 고를 길을 준다 — 알리기만 하고
 test("모든 실행 항목은 실제로 누를 수 있어야 한다", () => {
   // 「목록에 있다」와 「누를 수 있다」는 다르다. 렌더러는 `kind` 를 보고 `info` 면 명령을 통째로
   // 버리므로, 명령만 세는 판정은 사이드바 전체를 안 눌리게 만들어도 통과한다.
-  for (const state of [{}, { site: "/tmp/x" }, { site: "/tmp/x", previewUrl: "http://x" }, { signedIn: false }]) {
+  // ⚠ **상태를 하나라도 빼면 그 상태의 사이드바는 아무도 안 본다.** 「사이트를 안 골랐다」가
+  //   빠져 있었는데, 그 화면은 처음 쓰는 사람이 반드시 지나는 자리다.
+  for (const state of [
+    {},
+    { tenant: "" },
+    { site: "/tmp/x" },
+    { site: "/tmp/x", previewUrl: "http://x" },
+    { signedIn: false },
+  ]) {
     for (const g of plan(state)) {
       for (const i of g.items) {
         if (i.kind === "info") continue;
@@ -101,4 +109,39 @@ test("누를 수 있어야 하는 항목이 info 로 바뀌면 잡는다", () =>
   ]) {
     assert.ok(actions.includes(must), `${must} 가 누를 수 있는 항목이 아니다`);
   }
+});
+
+test("사이트가 붙으면 「불러오기」에는 받기 하나만 남는다 — 매뉴얼이 그렇게 적혀 있다", () => {
+  // help.md 가 「사이트가 연결된 뒤에는 사이드바의 **불러오기** 에 「사이트 소스 받기」만 보입니다」
+  // 라고 단정한다. 그 문장을 지키는 것이 여기밖에 없다 — 항목이 하나 더 늘어도 문서만 거짓이 된다.
+  const attached = plan({ site: "/tmp/x" }).find((g) => g.id === "source");
+  assert.ok(attached, "「불러오기」 묶음이 사라졌다");
+  assert.deepEqual(
+    attached.items.map((i) => (i.kind === "action" ? i.command : `info:${i.label}`)),
+    ["zalkera.site.open"],
+  );
+
+  // 붙기 **전**도 함께 못 박는다 — 한쪽만 재면 다른 갈래에 항목이 늘어도 아무도 안 본다.
+  const fresh = plan().find((g) => g.id === "source");
+  assert.ok(fresh, "처음 쓰는 사람에게 「불러오기」가 없다");
+  assert.deepEqual(
+    fresh.items.map((i) => (i.kind === "action" ? i.command : `info:${i.label}`)),
+    ["zalkera.site.create", "zalkera.site.open", "zalkera.site.link"],
+  );
+});
+
+test("툴팁이 세는 수와 실제 항목 수가 같다", () => {
+  // 「셋 중 하나로 시작합니다」는 **약속**이다. 항목이 넷이 되면 툴팁만 조용히 거짓이 되는데,
+  // 그것을 보는 눈이 아무 데도 없었다.
+  const WORDS: Record<string, number> = { 둘: 2, 셋: 3, 넷: 4, 다섯: 5 };
+  let checked = 0;
+  for (const state of [{}, { tenant: "" }, { site: "/tmp/x" }, { site: "/tmp/x", previewUrl: "http://x" }]) {
+    for (const g of plan(state)) {
+      const said = g.tooltip?.match(/([둘셋넷다섯])\s*중/);
+      if (!said) continue;
+      checked += 1;
+      assert.equal(g.items.length, WORDS[said[1]!], `${g.id} 툴팁은 「${said[1]} 중」인데 항목은 ${g.items.length}개다`);
+    }
+  }
+  assert.ok(checked > 0, "세는 툴팁을 하나도 못 찾았다 — 이 시험이 아무것도 안 재고 있다");
 });

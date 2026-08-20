@@ -7,6 +7,8 @@
  *   자리라 그 사각을 남길 수 없다.
  */
 
+import { DevtoolsError } from "./errors.ts";
+
 /** 판 목록의 한 줄. `api.ts` 의 `SiteRevision` 중 이 판정이 쓰는 것만 요구한다. */
 export interface RevisionLike {
     revisionNo: number;
@@ -68,4 +70,26 @@ export function nextAvailableName(base: string, taken: (name: string) => boolean
         if (!taken(candidate)) return candidate;
     }
     return null;
+}
+
+/**
+ * 받을 판이 없을 때의 오류. **「없다」를 한 문장으로 뭉치지 않는다.**
+ *
+ * 한 번도 안 올린 사람과 올렸는데 아직 못 켜는 사람은 다음에 할 일이 정반대다. 뭉치면 처음 쓰는
+ * 사람이 「아직 만들어지는 중이거나 실패했습니다」를 듣고 「버전 이력」을 열어 **빈 목록**을 본다 —
+ * 도구가 자기 상태를 잘못 진단해 놓고 사람을 엉뚱한 곳으로 보내는 것이다.
+ */
+export function noRevisionError(revisions: readonly RevisionLike[]): DevtoolsError {
+    if (revisions.length === 0) {
+        return new DevtoolsError(
+            "NOT_A_SITE",
+            "아직 올린 사이트 소스가 없습니다.",
+            "예제로 시작하거나, 잘커라 콘솔에서 소스를 먼저 올려 주세요.",
+        );
+    }
+    return new DevtoolsError(
+        "NOT_A_SITE",
+        "받을 수 있는 판이 없습니다.",
+        "올린 판이 아직 만들어지는 중이거나 실패했습니다. 「버전 이력」에서 확인해 주세요.",
+    );
 }

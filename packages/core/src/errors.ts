@@ -10,14 +10,29 @@ import { plainNotice } from "./notice.ts";
 export class DevtoolsError extends Error {
     readonly code: DevtoolsErrorCode;
     readonly hint: string | undefined;
+    /**
+     * 서버가 보낸 `errorCode` 원문. **분기용이지 표시용이 아니다** — 보여 줄 때는 [humanMessage] 를 쓴다.
+     *
+     * 이것이 없으면 「동의하면 계속할 수 있다」는 거절과 「어떻게 해도 안 된다」는 거절을 호출부가
+     * 구분하지 못한다. 서버가 "계속하려면 확인해 주세요"라고 적어 보내는데 확인할 자리가 없으면
+     * 그 문장이 곧 막다른 길이 된다.
+     */
+    readonly serverCode: string | undefined;
 
     // 파라미터 프로퍼티(`constructor(readonly x)`)를 쓰지 않는다 — Node 의 타입 스트립 실행이 그 문법을
     // 받지 않아서, 쓰는 순간 테스트가 빌드 산출물을 거쳐야 한다(소스를 그대로 돌리는 이점이 사라진다).
-    constructor(code: DevtoolsErrorCode, message: string, hint?: string, cause?: unknown) {
+    constructor(
+        code: DevtoolsErrorCode,
+        message: string,
+        hint?: string,
+        cause?: unknown,
+        serverCode?: string,
+    ) {
         super(message, cause === undefined ? undefined : { cause });
         this.name = "DevtoolsError";
         this.code = code;
         this.hint = hint;
+        this.serverCode = serverCode;
     }
 
     /**

@@ -183,3 +183,51 @@ export function assertNotVendored(segments: string[], name: string): void {
         "받은 꾸러미가 정상이 아닙니다. 잘커라에 문의해 주세요.",
     );
 }
+
+/**
+ * 해제기 전용 쓰기 — **이미 있는 파일 위에 쓰지 않는다.**
+ *
+ * ■ 왜 필요한가
+ *   받는 폴더는 「비어 있음」 판정을 지나지만, 그 판정은 편집기 산물(`.vscode`·`.DS_Store` 등)을
+ *   일부러 통과시킨다. 그러니 아카이브가 같은 경로를 담고 있으면 **고객 파일이 소리 없이
+ *   교체된다.** 롤백(`removeAdded`)은 그 파일을 기준선으로 보므로 되감지도 못한다.
+ *   화면은 그때 「지금 폴더는 바뀌지 않습니다」라고 말하고 있다.
+ *
+ * ■ 왜 `wx` 하나로 충분한가
+ *   빈-폴더-단-무시목록 전제상, 충돌하는 파일은 **정의상 고객 파일**이다. 아카이브 안에 같은
+ *   이름이 두 번 있는 경우도 여기서 걸리는 편이 맞다 — 둘 중 어느 쪽이 남을지가 순서에 달린
+ *   상태를 조용히 만들지 않는다.
+ */
+export async function writeExclusive(
+    path: string,
+    data: Buffer | string,
+    entryName: string,
+    /**
+     * **이번 해제에서 이미 쓴 경로들.** 부르는 쪽이 하나를 만들어 해제 내내 넘긴다.
+     *
+     * ⚠ 없으면 두 경우를 못 가른다 — 그리고 **다음에 할 일이 정반대**다:
+     *   · 원래 있던 고객 파일과 부딪힘 → **빈 폴더를 새로 만들면 된다.**
+     *   · 아카이브가 같은 경로를 두 번 담음 → 빈 폴더에서도 **똑같이 실패한다.** 그때 「빈 폴더를
+     *     새로 만드세요」라고 말하면 사람은 그 말을 따르고 또 실패하고 다시 따르는 고리에 갇힌다.
+     */
+    written?: Set<string>,
+): Promise<void> {
+    try {
+        await writeFile(path, data, {flag: "wx"});
+        written?.add(path);
+    } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+        if (written?.has(path)) {
+            throw new DevtoolsError(
+                "SERVER_REJECTED",
+                `받은 꾸러미가 같은 파일을 두 번 담고 있습니다: ${entryName}`,
+                "받은 것이 잘못됐습니다 — 빈 폴더로 다시 받아도 같은 자리에서 멈춥니다. 잘커라에 알려 주세요.",
+            );
+        }
+        throw new DevtoolsError(
+            "SERVER_REJECTED",
+            `받은 꾸러미가 이미 있는 파일을 덮으려 합니다: ${entryName}`,
+            "그 파일은 이 폴더에 원래 있던 것입니다. 빈 폴더를 새로 만들어 다시 받아 주세요.",
+        );
+    }
+}

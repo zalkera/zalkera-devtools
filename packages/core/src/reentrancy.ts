@@ -28,17 +28,32 @@ export const BUSY = Symbol("busy");
  * `run` 이 던져도 **반드시** 가드를 푼다: 성공 경로에서만 풀면 폴더 선택 취소 한 번에 영영
  * 잠겨, 창을 새로 열 때까지 「진행 중」만 반복한다(형제 가드가 실제로 겪은 사고다).
  */
-export function createReentrancyGuard(): <T>(
-  run: () => Promise<T>,
-) => Promise<T | typeof BUSY> {
+export interface ReentrancyGuard {
+  /** 이미 돌고 있으면 [BUSY] 를 돌려준다 — 부르는 쪽이 사람에게 무엇을 말할지 정한다. */
+  run<T>(run: () => Promise<T>): Promise<T | typeof BUSY>;
+  /**
+   * 지금 돌고 있는가.
+   *
+   * 「막는다」 말고 **「돌고 있느냐」를 묻는 자리**가 따로 있다 — 미리보기를 준비하는 동안 로그아웃을
+   * 거절하는 것이 그 자리다. 그 판정이 확장 안 불리언으로 살면 시험이 못 닿는다.
+   */
+  readonly busy: boolean;
+}
+
+export function createReentrancyGuard(): ReentrancyGuard {
   let running = false;
-  return async <T>(run: () => Promise<T>): Promise<T | typeof BUSY> => {
-    if (running) return BUSY;
-    running = true;
-    try {
-      return await run();
-    } finally {
-      running = false;
-    }
+  return {
+    async run<T>(run: () => Promise<T>): Promise<T | typeof BUSY> {
+      if (running) return BUSY;
+      running = true;
+      try {
+        return await run();
+      } finally {
+        running = false;
+      }
+    },
+    get busy() {
+      return running;
+    },
   };
 }

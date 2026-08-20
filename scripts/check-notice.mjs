@@ -75,16 +75,136 @@ let spansSeen = 0;
  */
 const CANON_FACTORY = "say";
 /**
+ * 정본이 **살 수 있는 모듈**. 이름만 보면 안 된다 — 어느 파일에서든 지역 `say` 나 `decideX` 를
+ * 만들면 그 결과가 정본으로 인정된다(심의 실증: 셋 다 검사기를 통과시켰다).
+ *
+ *   `const say = {build: () => 서버객체};  showErrorMessage(\`${say.build().message}\`)`  → 통과했다
+ *   `function decideBoom(s) { return s; }  showErrorMessage(\`${decideBoom(s).message}\`)` → 통과했다
+ *
+ * 그래서 **어디서 왔는지**를 본다: 정본 이름은 아래 모듈에서 `import` 된 것이어야 한다.
+ * 상대경로는 [NOTICE_SOURCES] 자신이고, 패키지 이름은 그 파일들을 재수출하는 자리다.
+ */
+const CANON_MODULES = new Set(["@zalkera/devtools-core"]);
+/**
  * 정본이 돌려주는 문장 조각. `decide*`·`say.*` 의 반환 모양이고, 그 내용물은 위와 같은 이유로
- * 이미 검사됐다. **이름이 아니라 «정본이 만든 것」이라는 사실**로 허용한다.
+ * 이미 검사됐다.
+ *
+ * ⚠ **이 이름들만 보면 안 된다.** 종전 판은 `.message`·`.detail`·`.action` 이면 **무엇의**
+ *   속성이든 통과시켰다. 그러면 `error.message`(서버 문장이 그대로 들어 있다)·`body.message`·
+ *   `finding.message` 가 전부 무검사로 알림 본문에 실린다 — 이 검사기가 스스로 배격한
+ *   *"이름을 열거한다"* 가 **속성 이름 층위에서** 되풀이된 것이다.
+ *
+ *   그래서 이름과 **출처를 함께** 본다: 그 속성이 붙은 객체가 `say.*(...)`·`decide*(...)` 의
+ *   결과라야 한다([isCanonicalObject]).
  */
 const CANON_FIELDS = new Set(["message", "detail", "action"]);
+/** 정본 판정 함수의 이름 모양. **이름만으로는 부족하다** — [CANON_MODULES] 에서 온 것이어야 한다. */
+const CANON_DECIDER = /^decide[A-Z]/;
+
+/**
+ * 이 파일 안에서 이름 → 그 이름이 받은 초기식들. 같은 이름이 여러 번 선언되면 **전부** 모은다 —
+ * 하나라도 정본이 아니면 거부다(가장 보수적인 쪽).
+ *
+ * 파일을 넘는 추적은 하지 않는다. 넘겨받은 인자·다른 모듈에서 온 값은 정본으로 인정하지 않으며,
+ * 그것이 안전하다면 부르는 쪽에서 `ours(...)`·`plainNotice(...)` 를 붙여 판단을 남기면 된다.
+ */
+function collectDeclarations(source) {
+    const decls = new Map();
+    const add = (name, expr) => {
+        if (!decls.has(name)) decls.set(name, []);
+        decls.get(name).push(expr);
+    };
+    walk(source, (node) => {
+        if (ts.isVariableDeclaration(node) && node.initializer && ts.isIdentifier(node.name)) {
+            add(node.name.getText(), node.initializer);
+            return;
+        }
+        // ⚠ **재대입도 본다.** 선언 초기식만 모으면 `let m = say.build(); m = 서버객체;` 가 통과한다
+        //    (심의 실증). 이름이 받은 값이 **하나라도** 정본이 아니면 그 이름은 정본이 아니다.
+        if (
+            ts.isBinaryExpression(node) &&
+            node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+            ts.isIdentifier(node.left)
+        ) {
+            add(node.left.getText(), node.right);
+        }
+        // 선언만 있고 값이 없는 것(`let m;`)도 등록한다 — 등록이 없으면 아래에서 «못 찾음»이 되어
+        // 어차피 거부지만, 뒤의 재대입만 보고 통과하는 일이 없게 자리를 만들어 둔다.
+        if (ts.isVariableDeclaration(node) && !node.initializer && ts.isIdentifier(node.name)) {
+            add(node.name.getText(), node.name);
+        }
+    });
+    return decls;
+}
+
+/**
+ * 이 파일이 [CANON_MODULES] 에서 **import 한** 이름들. 지역 선언은 여기 안 든다.
+ *
+ * 구조분해·별칭(`import {say as s}`)도 지역 이름 기준으로 담는다 — 별칭을 써도 출처는 그 모듈이다.
+ */
+function collectCanonicalImports(source) {
+    const names = new Set();
+    walk(source, (node) => {
+        if (!ts.isImportDeclaration(node)) return;
+        const spec = node.moduleSpecifier;
+        if (!ts.isStringLiteral(spec)) return;
+        const fromCanon =
+            CANON_MODULES.has(spec.text) ||
+            NOTICE_SOURCES.some((rel) => spec.text.endsWith(rel.slice(rel.lastIndexOf("/"))));
+        if (!fromCanon) return;
+        const bindings = node.importClause?.namedBindings;
+        if (bindings && ts.isNamedImports(bindings)) {
+            for (const e of bindings.elements) names.add(e.name.getText());
+        }
+    });
+    return names;
+}
+
+/** 이 스캔이 보고 있는 파일이 정본 모듈에서 들여온 이름들. [scan] 이 파일마다 갈아 끼운다. */
+let currentImports = new Set();
+
+/** 이 스캔이 보고 있는 파일의 선언 표. [scan] 이 파일마다 갈아 끼운다. */
+let currentDecls = new Map();
+
+/**
+ * 이 표현식이 **문구 정본이 만든 객체**인가. 아니면 그 속성은 서버 값일 수 있다.
+ *
+ * `depth` 는 별칭이 별칭을 가리키는 고리(`const a = b; const b = a;`)에서 멈추기 위한 것이다 —
+ * 그런 코드는 지금 없지만, 검사기가 스택오버플로로 죽으면 그것은 **통과가 아니라 무검사**다.
+ */
+function isCanonicalObject(e, depth = 0) {
+    if (depth > 8) return false;
+    if (ts.isParenthesizedExpression(e)) return isCanonicalObject(e.expression, depth + 1);
+    if (ts.isAwaitExpression(e)) return isCanonicalObject(e.expression, depth + 1);
+    if (ts.isCallExpression(e)) {
+        // `say.*(...)` — 그 `say` 가 **정본 모듈에서 온 것**이라야 한다.
+        if (
+            ts.isPropertyAccessExpression(e.expression) &&
+            e.expression.expression.getText() === CANON_FACTORY
+        ) {
+            return currentImports.has(CANON_FACTORY);
+        }
+        // `decideX(...)` — 이름 모양만으로는 부족하다. 같은 이유로 출처를 본다.
+        if (!ts.isIdentifier(e.expression)) return false;
+        const callee = e.expression.getText();
+        return CANON_DECIDER.test(callee) && currentImports.has(callee);
+    }
+    if (ts.isIdentifier(e)) {
+        const inits = currentDecls.get(e.getText());
+        // 선언을 못 찾으면 거부다. 인자·임포트·재대입은 여기서 걸린다.
+        if (!inits || inits.length === 0) return false;
+        return inits.every((init) => isCanonicalObject(init, depth + 1));
+    }
+    return false;
+}
 
 /** 이 표현식이 허용 목록에 드는가. **드는 것만 참** — 나머지는 전부 거부다. */
 function isAllowed(e) {
     if (ts.isNumericLiteral(e) || ts.isStringLiteral(e) || ts.isNoSubstitutionTemplateLiteral(e)) return true;
-    // 정본이 만든 문장 — `tenantScope.ts` 전수 검사가 덮는다.
-    if (ts.isPropertyAccessExpression(e) && CANON_FIELDS.has(e.name.getText())) return true;
+    // 정본이 만든 문장 — `tenantScope.ts` 전수 검사가 덮는다. **무엇의 속성인지까지** 본다.
+    if (ts.isPropertyAccessExpression(e) && CANON_FIELDS.has(e.name.getText())) {
+        return isCanonicalObject(e.expression);
+    }
     if (!ts.isCallExpression(e)) return false;
     if (
         ts.isPropertyAccessExpression(e.expression) &&
@@ -142,6 +262,8 @@ function scan(rel, { allTemplates }) {
     }
     scanned += 1;
     const source = parse(path);
+    currentDecls = collectDeclarations(source);
+    currentImports = collectCanonicalImports(source);
 
     walk(source, (node) => {
         // ⑴ 사용자 문구 정본: 템플릿 전부
@@ -247,7 +369,7 @@ function assertNoIndirectNotify(rel) {
  * 알림 **문구를 만들어 돌려주는** 파일. 알림 API 를 부르지 않아 자동 탐색에 안 걸리므로 여기 적는다.
  * 이 파일들은 템플릿 전부를 본다 — 어느 문자열이 알림으로 갈지는 호출부가 정하기 때문이다.
  */
-const NOTICE_SOURCES = ["packages/core/src/tenantScope.ts"];
+const NOTICE_SOURCES = ["packages/core/src/tenantScope.ts", "packages/core/src/errorNotice.ts"];
 
 /**
  * 소스로 볼 확장자. ⚠ `.ts` 만 보면 `.mts`·`.cts`·`.tsx` 로 옮기는 순간 그 파일이 **관할 밖**이

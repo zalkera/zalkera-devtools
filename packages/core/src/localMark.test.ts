@@ -67,23 +67,14 @@ test("못 읽으면 쓰지 않는다 — 사람 설정을 날리는 것보다 �
 });
 
 // ── 실제로 파일을 쓰는 자리. 이 경로가 확장 안에 있을 때 **아무 시험도 안 물었다.** ──
-import {
-  chmodSync,
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  symlinkSync,
-  writeFileSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { linkFolderToTenant, writeSourceMarkTo } from "./localMark.ts";
+import { tempDirSync } from "./testing/tempDir.ts";
 
 const roots: string[] = [];
 const fresh = () => {
-  const d = mkdtempSync(join(tmpdir(), "zalkera-lm-"));
+  const d = tempDirSync("zalkera-lm-");
   roots.push(d);
   return d;
 };

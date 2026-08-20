@@ -2,8 +2,7 @@ import { ok, strictEqual } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, readdir, utimes, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, readFile, readdir, utimes, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
 import {
@@ -14,6 +13,7 @@ import {
     evictOldCaches,
     tryFetchPayload,
 } from "./payload.ts";
+import { tempDir } from "./testing/tempDir.ts";
 
 /**
  * 의존성 페이로드 받기(memo146 §13.10 · T-D2c).
@@ -22,7 +22,7 @@ import {
  * ⑴ 던지지 않고 ⑵ 반쯤 펼쳐진 트리를 안 남기고 ⑶ **말은 하는지**가 계약이다(§13.5 무언 강등 금지).
  */
 async function payloadFixture(): Promise<{ gz: Buffer; sha: string }> {
-    const dir = await mkdtemp(join(tmpdir(), "zalkera-pf-"));
+    const dir = await tempDir("zalkera-pf-");
     await mkdir(join(dir, "node_modules", "next"), { recursive: true });
     await writeFile(join(dir, "node_modules", "next", "package.json"), '{"name":"next"}');
     const gzPath = join(dir, "p.tar.gz");
@@ -48,7 +48,7 @@ function stubFetch(deps: unknown, body?: Buffer, opts: { downloadStatus?: number
 }
 
 async function cacheDir(): Promise<string> {
-    return mkdtemp(join(tmpdir(), "zalkera-cache-"));
+    return tempDir("zalkera-cache-");
 }
 
 test("정상 꾸러미는 캐시에 펼쳐진다", async () => {
@@ -182,7 +182,7 @@ test("다운로드가 실패해도 반쯤 펼쳐진 트리를 남기지 않는�
 });
 
 test("질의 키는 lockfile 원본 바이트의 sha256 이다", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "zalkera-proj-"));
+    const dir = await tempDir("zalkera-proj-");
     const content = '{"lockfileVersion":3}';
     await writeFile(join(dir, "package-lock.json"), content);
 
@@ -192,7 +192,7 @@ test("질의 키는 lockfile 원본 바이트의 sha256 이다", async () => {
 });
 
 test("npm 계열이 아니면 조회조차 하지 않는다", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "zalkera-proj-"));
+    const dir = await tempDir("zalkera-proj-");
     await writeFile(join(dir, "pnpm-lock.yaml"), "lockfileVersion: 9");
 
     // 굽지 않는 매니저는 물어봐야 항상 "없다"이고, 그 왕복이 곧 낭비다.
@@ -204,7 +204,7 @@ test("플랫폼 표기는 서버가 쓰는 것과 같다", () => {
 });
 
 test("캐시는 최근 3개만 남긴다", async () => {
-    const root = await mkdtemp(join(tmpdir(), "zalkera-root-"));
+    const root = await tempDir("zalkera-root-");
     for (let i = 0; i < 5; i += 1) {
         const dir = join(root, `key${i}`);
         await mkdir(dir, { recursive: true });
@@ -223,7 +223,7 @@ test("캐시는 최근 3개만 남긴다", async () => {
 
 test("캐시 폐기 실패는 작업을 막지 않는다", async () => {
     // 없는 경로 — 청소가 안 됐다고 사용자의 작업을 막을 이유가 없다.
-    strictEqual(await evictOldCaches(join(tmpdir(), "zalkera-none-does-not-exist"), 3), 0);
+    strictEqual(await evictOldCaches(join(await tempDir("zalkera-none-"), "does-not-exist"), 3), 0);
 });
 
 test("디스크 여유 요구가 해제 상한이 허용한 최악을 덮는다", () => {

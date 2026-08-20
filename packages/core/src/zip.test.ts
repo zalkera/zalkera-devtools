@@ -1,13 +1,13 @@
 import { ok, strictEqual } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
 import { createZip, packProject, writeZip } from "./zip.ts";
+import { tempDir } from "./testing/tempDir.ts";
 
 async function fixture(): Promise<string> {
-    const dir = await mkdtemp(join(tmpdir(), "zalkera-pack-"));
+    const dir = await tempDir("zalkera-pack-");
     await writeFile(join(dir, "package.json"), JSON.stringify({ name: "site" }));
     await mkdir(join(dir, "src"), { recursive: true });
     await writeFile(join(dir, "src", "page.tsx"), "export default function Page() { return null; }");
@@ -20,6 +20,10 @@ async function fixture(): Promise<string> {
     // 출처 표식(`localMark.ts`). 이것이 정본에 실리면 다음 판을 받은 폴더가 낡은 거짓을 품는다.
     await mkdir(join(dir, ".zalkera"), { recursive: true });
     await writeFile(join(dir, ".zalkera", "source.json"), '{"format":1,"tenant":"a","revisionNo":13}');
+    // 라이선스 대장·판 출처는 **남아야 한다** — 백엔드가 canonical tar 에서 일부러 남기고,
+    // 배송 문서(CUSTOMIZE.md)가 그 실물을 가리킨다.
+    await writeFile(join(dir, ".zalkera", "ASSETS-LICENSE.md"), "# 라이선스");
+    await writeFile(join(dir, ".zalkera", "pack.json"), '{"rev":1,"code":"skeleton","version":"3.0.48"}');
     return dir;
 }
 
@@ -28,7 +32,7 @@ test("zip 은 표준 해제기로 열린다(파이썬 zipfile 로 교차 확인)
         { path: "a.txt", data: Buffer.from("가나다 hello", "utf8") },
         { path: "nested/b.bin", data: Buffer.from([0, 1, 2, 3, 255]) },
     ]);
-    const dir = await mkdtemp(join(tmpdir(), "zalkera-zip-"));
+    const dir = await tempDir("zalkera-zip-");
     const path = join(dir, "out.zip");
     await writeZip(path, buffer);
 
@@ -49,7 +53,9 @@ print(len(z.read("nested/b.bin")))`,
 test("패킹은 node_modules·빌드 산출물·자격증명을 담지 않는다", async () => {
     const dir = await fixture();
     const result = await packProject({ projectDir: dir });
-    const path = join(dir, "..", `packed-${Date.now()}.zip`);
+    // 픽스처 **밖**에 쓰면 `TMPDIR` 에 남는다. 안에 써도 이 시험이 재는 것은 이미 만들어진
+    // 버퍼의 내용물이라 판정이 안 바뀐다.
+    const path = join(await tempDir("zalkera-zipout-"), "packed.zip");
     await writeZip(path, result.buffer);
 
     const names = execFileSync("python3", [
@@ -69,9 +75,12 @@ print("\\n".join(zipfile.ZipFile(sys.argv[1]).namelist()))`,
     ok(!names.includes(".env.local"), "자격증명 제외 — 여기서 새면 미리보기 키가 서버로 올라간다");
     // ⚠ **소문자로 조회한다**(`ALWAYS_EXCLUDED` 주석) — 대문자 항목은 안 걸린다.
     ok(
-        !names.some((n) => n.toLowerCase().startsWith(".zalkera/")),
+        !names.some((n) => n.toLowerCase() === ".zalkera/source.json"),
         "출처 표식 제외 — 실리면 「나는 그 판에서 왔다」는 낡은 거짓이 그 판을 받는 모두에게 복제된다",
     );
+    // ⚠ **폴더째 빼면 안 된다.** 배송 문서가 가리키는 라이선스 대장이 매달린 참조가 된다.
+    ok(names.includes(".zalkera/ASSETS-LICENSE.md"), "라이선스 대장이 빠졌다");
+    ok(names.includes(".zalkera/pack.json"), "판 출처가 빠졌다");
     strictEqual(result.fileCount, names.length);
 });
 

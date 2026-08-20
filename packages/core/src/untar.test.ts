@@ -1,12 +1,12 @@
 import { ok, rejects, strictEqual } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, readlink, realpath, symlink, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { chmod, lstat, mkdir, readFile, readdir, readlink, realpath, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
 import { gzipSync } from "node:zlib";
 import { DevtoolsError } from "./errors.ts";
 import { extractTarGz, extractTarGzFile } from "./untar.ts";
+import { tempDir } from "./testing/tempDir.ts";
 
 /**
  * 링크 **사다리** 픽스처 — 심의가 이걸로 뚫었다(2026-08-03 · 실측).
@@ -53,7 +53,7 @@ function ladderTarGz(hops: number, finalFile: string): Buffer {
  * 아카이브는 **실제 tar 로** 만든다. 우리가 만든 바이트로 우리 파서를 재면 둘이 같이 틀려도 통과한다.
  */
 async function fixture(): Promise<{ dir: string; gz: string }> {
-    const dir = await mkdtemp(join(tmpdir(), "zalkera-untar-"));
+    const dir = await tempDir("zalkera-untar-");
     const src = join(dir, "node_modules");
     await mkdir(join(src, ".bin"), { recursive: true });
     await mkdir(join(src, "next", "dist", "bin"), { recursive: true });
@@ -69,7 +69,7 @@ async function fixture(): Promise<{ dir: string; gz: string }> {
 
 test("기본값은 심볼릭 링크를 만들지 않는다(사이트 소스 경로 회귀)", async () => {
     const { gz } = await fixture();
-    const target = await mkdtemp(join(tmpdir(), "zalkera-out-"));
+    const target = await tempDir("zalkera-out-");
 
     await extractTarGzFile(gz, target, join(target, ".scratch"));
 
@@ -79,7 +79,7 @@ test("기본값은 심볼릭 링크를 만들지 않는다(사이트 소스 경�
 
 test("materialize 면 상대 심볼릭 링크를 링크 그대로 만든다", async () => {
     const { gz } = await fixture();
-    const target = await mkdtemp(join(tmpdir(), "zalkera-out-"));
+    const target = await tempDir("zalkera-out-");
 
     await extractTarGzFile(gz, target, join(target, ".scratch"), { symlinks: "materialize" });
 
@@ -92,8 +92,8 @@ test("materialize 면 상대 심볼릭 링크를 링크 그대로 만든다", as
 
 test("preserveMode 면 실행 비트가 산다", async () => {
     const { gz } = await fixture();
-    const withMode = await mkdtemp(join(tmpdir(), "zalkera-out-"));
-    const without = await mkdtemp(join(tmpdir(), "zalkera-out-"));
+    const withMode = await tempDir("zalkera-out-");
+    const without = await tempDir("zalkera-out-");
 
     await extractTarGzFile(gz, withMode, join(withMode, ".s"), { preserveMode: true });
     await extractTarGzFile(gz, without, join(without, ".s"));
@@ -106,8 +106,8 @@ test("preserveMode 면 실행 비트가 산다", async () => {
 
 test("스트리밍과 버퍼 해제가 같은 결과를 낸다", async () => {
     const { gz } = await fixture();
-    const streamed = await mkdtemp(join(tmpdir(), "zalkera-out-"));
-    const buffered = await mkdtemp(join(tmpdir(), "zalkera-out-"));
+    const streamed = await tempDir("zalkera-out-");
+    const buffered = await tempDir("zalkera-out-");
 
     const a = await extractTarGzFile(gz, streamed, join(streamed, ".s"), { symlinks: "materialize" });
     const b = await extractTarGz(await readFile(gz), buffered, { symlinks: "materialize" });
@@ -120,7 +120,7 @@ test("스트리밍과 버퍼 해제가 같은 결과를 낸다", async () => {
 
 test("중간 tar 는 성공해도 남지 않는다", async () => {
     const { gz } = await fixture();
-    const target = await mkdtemp(join(tmpdir(), "zalkera-out-"));
+    const target = await tempDir("zalkera-out-");
     const scratch = join(target, ".scratch");
 
     await extractTarGzFile(gz, target, scratch);
@@ -131,7 +131,7 @@ test("중간 tar 는 성공해도 남지 않는다", async () => {
 
 /** 오염된 아카이브 모사 — 우리 CI 가 굽지만, 굽는 쪽이 뚫린 날 이 검사만이 고객 홈을 지킨다. */
 async function poisonedLinkTarGz(linkTarget: string): Promise<string> {
-    const dir = await mkdtemp(join(tmpdir(), "zalkera-evil-"));
+    const dir = await tempDir("zalkera-evil-");
     await mkdir(join(dir, "node_modules", ".bin"), { recursive: true });
     await symlink(linkTarget, join(dir, "node_modules", ".bin", "evil"));
     const gz = join(dir, "evil.tar.gz");
@@ -141,7 +141,7 @@ async function poisonedLinkTarGz(linkTarget: string): Promise<string> {
 
 test("뿌리 밖을 가리키는 링크는 거절한다", async () => {
     const gz = await poisonedLinkTarGz("../../../../../../etc/passwd");
-    const target = await mkdtemp(join(tmpdir(), "zalkera-out-"));
+    const target = await tempDir("zalkera-out-");
 
     // 링크는 **따라가는 시점에** 해석된다 — 해제기가 안 막으면 그 뒤 도구가 고객 홈의 파일을 읽는다.
     await rejects(
@@ -152,7 +152,7 @@ test("뿌리 밖을 가리키는 링크는 거절한다", async () => {
 
 test("절대경로 링크는 거절한다", async () => {
     const gz = await poisonedLinkTarGz("/etc/passwd");
-    const target = await mkdtemp(join(tmpdir(), "zalkera-out-"));
+    const target = await tempDir("zalkera-out-");
 
     await rejects(
         () => extractTarGzFile(gz, target, join(target, ".s"), { symlinks: "materialize" }),
@@ -162,7 +162,7 @@ test("절대경로 링크는 거절한다", async () => {
 
 test("잘린 아카이브는 성공으로 보고하지 않는다", async () => {
     const { gz } = await fixture();
-    const target = await mkdtemp(join(tmpdir(), "zalkera-out-"));
+    const target = await tempDir("zalkera-out-");
     const truncated = join(target, "cut.tar.gz");
     const whole = await readFile(gz);
     await writeFile(truncated, whole.subarray(0, Math.floor(whole.length / 2)));
@@ -172,7 +172,7 @@ test("잘린 아카이브는 성공으로 보고하지 않는다", async () => {
 });
 
 test("링크 사다리로 뿌리 밖에 쓰지 못한다 (심의 차단 회귀)", async () => {
-    const base = await mkdtemp(join(tmpdir(), "zalkera-ladder-"));
+    const base = await tempDir("zalkera-ladder-");
     const root = join(base, "sandbox", "cache");
     await mkdir(root, { recursive: true });
     await mkdir(join(base, "victim"), { recursive: true });
@@ -193,7 +193,7 @@ test("링크 사다리로 뿌리 밖에 쓰지 못한다 (심의 차단 회귀)"
 });
 
 test("한 홉짜리 링크(뿌리 자신을 가리킴)도 그 위로 못 올라간다", async () => {
-    const base = await mkdtemp(join(tmpdir(), "zalkera-ladder1-"));
+    const base = await tempDir("zalkera-ladder1-");
     const root = join(base, "cache");
     await mkdir(root, { recursive: true });
     const gz = join(base, "evil.tar.gz");
@@ -205,7 +205,7 @@ test("한 홉짜리 링크(뿌리 자신을 가리킴)도 그 위로 못 올라�
 });
 
 test("기본값(reject)에서도 사다리는 뿌리 안에 갇힌다", async () => {
-    const base = await mkdtemp(join(tmpdir(), "zalkera-ladder2-"));
+    const base = await tempDir("zalkera-ladder2-");
     const root = join(base, "cache");
     await mkdir(root, { recursive: true });
     await mkdir(join(base, "victim"), { recursive: true });
@@ -242,7 +242,7 @@ function indirectLinkTarGz(): Buffer {
 }
 
 test("심은 링크의 **물리 도달지**가 뿌리 안이다 (정규화 심기 회귀)", async () => {
-    const base = await mkdtemp(join(tmpdir(), "zalkera-indirect-"));
+    const base = await tempDir("zalkera-indirect-");
     const root = join(base, "cache");
     await mkdir(root, { recursive: true });
     await mkdir(join(base, "victim"), { recursive: true });
@@ -274,7 +274,7 @@ async function resolveManually(link: string): Promise<string> {
 }
 
 test("사다리는 버퍼 경로에서도 막힌다", async () => {
-    const base = await mkdtemp(join(tmpdir(), "zalkera-bufladder-"));
+    const base = await tempDir("zalkera-bufladder-");
     const root = join(base, "cache");
     await mkdir(root, { recursive: true });
     await mkdir(join(base, "victim"), { recursive: true });
@@ -287,7 +287,7 @@ test("사다리는 버퍼 경로에서도 막힌다", async () => {
 });
 
 test("항목 크기를 과대 신고하면 거절한다 (프로세스 abort 회귀)", async () => {
-    const base = await mkdtemp(join(tmpdir(), "zalkera-huge-"));
+    const base = await tempDir("zalkera-huge-");
     const gz = join(base, "huge.tar.gz");
     const h = Buffer.alloc(512);
     h.write("big", 0); h.write("0000644\0", 100); h.write("0000000\0", 108); h.write("0000000\0", 116);
@@ -305,7 +305,7 @@ test("항목 크기를 과대 신고하면 거절한다 (프로세스 abort 회�
 });
 
 test("버퍼 경로도 잘린 아카이브를 성공으로 보고하지 않는다", async () => {
-    const target = await mkdtemp(join(tmpdir(), "zalkera-out-"));
+    const target = await tempDir("zalkera-out-");
     // 파일 항목 헤더가 999,999바이트를 신고하는데 데이터는 100바이트만 있는 아카이브.
     // 잘린 지점이 **파일 항목의 데이터**여야 이 축을 잰다(디렉터리 항목에 떨어지면 크기가 0 이라 안 걸린다).
     const h = Buffer.alloc(512);
@@ -323,7 +323,7 @@ test("버퍼 경로도 잘린 아카이브를 성공으로 보고하지 않는�
 });
 
 test("대상 폴더에 심링크가 미리 놓여 있으면 그 위로 쓰지 않는다", async () => {
-    const base = await mkdtemp(join(tmpdir(), "zalkera-pre-"));
+    const base = await tempDir("zalkera-pre-");
     const root = join(base, "cache");
     await mkdir(join(root, "node_modules"), { recursive: true });
     await mkdir(join(base, "outside"), { recursive: true });
@@ -352,7 +352,7 @@ test("대상 폴더에 심링크가 미리 놓여 있으면 그 위로 쓰지 �
 
 test("링크 자리를 일반 파일이 선점했으면 조용히 넘어가지 않는다", async () => {
     const { gz } = await fixture();
-    const target = await mkdtemp(join(tmpdir(), "zalkera-occupied-"));
+    const target = await tempDir("zalkera-occupied-");
     await mkdir(join(target, "node_modules", ".bin"), { recursive: true });
     // 링크가 안 생긴 채 "성공"으로 보고되면, 결과가 하필 이 기능이 막으려던 증상이다
     // (`next dev` 가 실행 파일을 못 찾는다). EEXIST 를 삼키면 그 일이 난다(3회차 심의 경고 1).

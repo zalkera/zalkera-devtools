@@ -45,6 +45,15 @@ import {
   BUSY,
   createReentrancyGuard,
   pickRevision,
+  decideErrorNotice,
+  isCancelled,
+  readIssuedKeysWithOverflow,
+  addIssuedKeyWithOverflow,
+  addIssuedKey,
+  removeIssuedKey,
+  type IssuedKey,
+  noRevisionError,
+  needsDiscardConsent,
   suggestFolderName,
   nextAvailableName,
   writeSourceMarkTo,
@@ -90,7 +99,7 @@ let session: {
   tenant: CapturedTenant;
 } | null = null;
 /** 미리보기 시작 재진입 가드 — 첫 실행은 수 분짜리 설치라 사용자가 반드시 두 번 누른다(심의 경고). */
-let previewStarting = false;
+const previewGuard = createReentrancyGuard();
 /**
  * **소스 받기 재진입 가드.** 판정은 `createReentrancyGuard`(core)가 하고 여기서는 **문면만** 정한다 —
  * 확장 안에 판정을 두면 시험도 검사기도 못 닿는다(실측: 조건을 무력화해도 297건 전부 초록이었다).
@@ -106,7 +115,7 @@ const receiveGuard = createReentrancyGuard();
 async function withReceiveGuard(run: () => Promise<void>): Promise<void> {
   // ⚠ 문면을 **상태 중립**으로 둔다. 이 가드는 로그인·사이트 선택까지 감싸므로, 「받는 중입니다」로
   //   적으면 아직 아무것도 안 받고 있는데 그렇게 말하게 된다.
-  if ((await receiveGuard(run)) === BUSY) {
+  if ((await receiveGuard.run(run)) === BUSY) {
     void vscode.window.showInformationMessage(
       "소스 받기가 이미 진행 중입니다 — 진행 중인 알림을 확인해 주세요.",
     );
@@ -126,6 +135,33 @@ let issuedKey: { keyId: number; tenant: string } | null = null;
  * 살아 있었다. 도움말은 그 경로에서도 폐기된다고 무조건으로 약속하고 있었다.
  */
 const ISSUED_KEY_STATE = "zalkera.issuedKey";
+
+/**
+ * 창 밖에 적어 둔 **전체 목록**을 읽는다. 한 칸이 아니라 목록인 이유는 `issuedKeys.ts` 에 있다 —
+ * 요약하면 이 저장소는 창 사이에 공유되는데 미리보기는 창마다 켜기 때문이다.
+ */
+function recordedKeys(): IssuedKey[] {
+  const {list, dropped} = readIssuedKeysWithOverflow(
+    persistedState.get(ISSUED_KEY_STATE),
+  );
+  // 상한을 넘은 것은 **조용히 버리지 않는다** — 그 열쇠는 서버에서 살아 있고, 도움말은
+  // 「로그아웃하면 폐기됩니다」를 무조건으로 약속한다(심의 권고).
+  reapDropped(dropped);
+  return list;
+}
+
+/**
+ * 상한 때문에 목록에서 밀려난 열쇠를 **서버에서 지운다.**
+ *
+ * 기다리지 않는다 — 부르는 자리가 목록을 읽는 동기 경로이고, 폐기는 실패해도 사용자가 할 일을
+ * 막지 않는다(`revokeKeyQuietly` 가 그 규율이다). 정상 사용에서는 늘 0건이다.
+ */
+function reapDropped(dropped: readonly IssuedKey[]): void {
+  for (const key of dropped) {
+    log(`미리보기 자격증명이 목록 상한을 넘어 밀려났습니다 — 서버에서 지웁니다(#${count(key.keyId)}).`);
+    void revokeKeyQuietly(key.keyId, key.tenant);
+  }
+}
 let persistedState: vscode.Memento;
 
 /**
@@ -136,9 +172,19 @@ let persistedState: vscode.Memento;
  *
  * T3 가 「올리기·전환」에 만든 "표기와 동작이 같은 값을 본다"를 이 호출부에 그대로 옮긴 것이다.
  */
-function setIssuedKey(next: { keyId: number; tenant: string } | null): void {
+function setIssuedKey(next: IssuedKey | null): void {
+  const previous = issuedKey;
   issuedKey = next;
-  void persistedState.update(ISSUED_KEY_STATE, next);
+  // ⚠ **덮지 않고 더한다.** 이 저장소는 창 사이에 공유되므로 덮으면 다른 창의 열쇠가 사라지고,
+  //   사라진 열쇠는 아무도 못 지운 채 TTL(최대 12시간)까지 산다.
+  let list = recordedKeys();
+  if (previous) list = removeIssuedKey(list, previous.keyId);
+  if (next) {
+    const merged = addIssuedKeyWithOverflow(list, next);
+    reapDropped(merged.dropped);
+    list = merged.list;
+  }
+  void persistedState.update(ISSUED_KEY_STATE, list);
 }
 let store: SecretTokenStore;
 let handshake: Handshake | null = null;
@@ -177,11 +223,10 @@ export function activate(context: vscode.ExtensionContext): void {
   );
   extensionId = context.extension.id || extensionId;
   persistedState = context.globalState;
-  // 지난 창이 남긴 키가 있으면 이어받는다 — 그래야 로그아웃이 그것까지 지운다.
-  issuedKey =
-    context.globalState.get<{ keyId: number; tenant: string }>(
-      ISSUED_KEY_STATE,
-    ) ?? null;
+  // ⚠ **이어받지 않는다.** 적어 둔 목록에는 **다른 창이 켠 열쇠**가 섞여 있다. 그것을 이 창의
+  //   `issuedKey` 로 삼으면, 시작 실패 롤백이 남의 열쇠를 지우고 제 것을 남긴다. 목록은
+  //   로그아웃·초기화가 통째로 읽어 전부 지운다(`revokeRecordedKeys`).
+  issuedKey = null;
   helpUri = vscode.Uri.joinPath(context.extensionUri, "media", "help.md");
   sidebar = new ZalkeraSidebar();
   void refreshSidebar();
@@ -323,23 +368,14 @@ function register(
     try {
       await handler();
     } catch (error) {
-      // ⚠ **취소는 오류가 아니다.** 사용자가 스스로 그만둔 것을 빨간 창으로 알리면, 자기가
-      //    뭘 잘못했나 싶게 만든다. 출력 채널에는 남긴다 — 무슨 일이 있었는지는 보여야 한다.
-      //    (`signIn`·사이트 선택은 각자 삼키고 있었는데, 미리보기 취소가 이 자리까지 올라와
-      //    "인터넷을 확인하세요"로 떴다 — 재심의 지적. 한 자리에서 가른다.)
-      if (error instanceof DevtoolsError && error.code === "CANCELLED") {
-        log(`취소: ${error.humanMessage}`);
-        return;
-      }
-      const message =
-        error instanceof DevtoolsError ? error.humanMessage : String(error);
-      log(`오류: ${message}`);
-      // ⚠ `ours(message)` 였다 — **거짓이었다**(3회전 심의 실증). `humanMessage` 가 소독된 것은
-      //    `api.ts` 응답 파싱 경로뿐이고, `safeWrite.ts`·`untar.ts` 는 서버가 정한 항목 이름을
-      //    그대로 실어 보냈다. `String(error)` 갈래도 안전하지 않다 — `JSON.parse` 실패 메시지는
-      //    입력 조각을 담는다. 출력 채널(위 `log`)은 링크를 렌더하지 않아 원문을 남긴다.
+      // 판정은 core 가 한다(`errorNotice.ts`) — 이 자리는 시험도 검사기도 못 닿아서, 「취소는
+      // 오류가 아니다」 갈래를 통째로 지워도 전건 초록이었다. 여기서는 그리기만 한다.
+      const shown = decideErrorNotice(error);
+      // 출력 채널에는 **원문**이 간다 — 링크를 렌더하지 않는 자리이고, 여기가 근거다.
+      log(`${shown.logPrefix}: ${shown.raw}`);
+      if (shown.kind === "cancelled") return;
       const choice = await vscode.window.showErrorMessage(
-        plainNotice(message),
+        shown.message,
         "자세히 보기",
       );
       if (choice === "자세히 보기") output.show();
@@ -381,8 +417,7 @@ async function signIn(): Promise<boolean> {
         return false;
       } catch (error) {
         // 사람이 스스로 그만둔 것은 실패가 아니다 — 오류 창을 띄우지 않고 조용히 되돌린다.
-        if (error instanceof DevtoolsError && error.code === "CANCELLED")
-          return true;
+        if (isCancelled(error)) return true;
         throw error;
       } finally {
         subscription.dispose();
@@ -407,7 +442,7 @@ async function signOut(options: { quiet?: boolean } = {}): Promise<boolean> {
   // 준비 중(수 분짜리 첫 설치)에 로그아웃하면, 이미 발급된 키로 진행 중인 시작이 **로그아웃 뒤에
   // 완주해** 미리보기가 선다 — 사이드바는 로그아웃 화면인데 상태바는 "미리보기 N"이 된다(심의 경고).
   // 지금은 준비를 중간에 끊을 수단이 없으므로 **거절하고 말한다.** 조용히 어긋나게 두지 않는다.
-  if (previewStarting) {
+  if (previewGuard.busy) {
     void vscode.window.showWarningMessage(
       "미리보기를 준비하는 중입니다. 끝난 뒤 다시 시도해 주세요.",
     );
@@ -421,12 +456,8 @@ async function signOut(options: { quiet?: boolean } = {}): Promise<boolean> {
   // 아래 `.env.local` 정리가 지금 창의 폴더를 지우게 된다 — 키가 있는 곳은 저쪽인데(클로징 심의).
   const previewDir = session?.projectDir ?? null;
   await stopPreview();
-  // `session` 이 아니라 [issuedKey] 를 본다 — 「중지」 뒤 로그아웃해도 서버 키가 지워져야 한다.
-  if (issuedKey) {
-    const doomed = issuedKey;
-    setIssuedKey(null);
-    await revokeKeyQuietly(doomed.keyId, doomed.tenant);
-  }
+  // `session` 이 아니라 **적어 둔 목록 전부**를 본다 — 「중지」 뒤에도, 다른 창이 켠 것도 지운다.
+  await revokeRecordedKeys();
 
   await logout(store);
   // 로컬 자격증명도 함께 지운다(A4) — **키 줄만** 지우고 고객이 넣은 값은 남긴다.
@@ -536,6 +567,37 @@ async function revokeKeyQuietly(keyId: number, tenant: string): Promise<void> {
   }
 }
 
+/**
+ * **적어 둔 열쇠를 전부 폐기한다.** 하나가 실패해도 나머지를 계속 지운다 — 하나 때문에 전부
+ * 남으면 그 열쇠들이 최대 12시간 상용 데이터를 읽는다.
+ *
+ * 지운 것은 **그때그때** 목록에서 뺀다. 끝나고 한 번에 비우면, 도중에 죽었을 때 폐기한 것과
+ * 못 한 것이 함께 사라진다.
+ */
+async function revokeRecordedKeys(): Promise<void> {
+  // ⚠ **이 창의 열쇠를 목록과 합친다.** 저장은 비동기다(`setIssuedKey` 가 `update` 를 안 기다린다)
+  //    — 발급 직후 로그아웃하면 그 열쇠가 아직 목록에 없을 수 있고, 목록만 보면 **아무도 못 지운
+  //    채 TTL(최대 12시간)까지 산다.** 모듈 메모리의 값이 이 창에 대해서는 늘 앞선다.
+  const mine = issuedKey;
+  issuedKey = null;
+  const doomed = mine ? addIssuedKey(recordedKeys(), mine) : recordedKeys();
+
+  // 지운 것은 **그때그때** 목록에서 뺀다. 끝나고 한 번에 비우면, 도중에 죽었을 때 폐기한 것과
+  // 못 한 것이 함께 사라진다.
+  //
+  // 뒤늦게 도착한 저장이 이미 지운 항목을 되살릴 수는 있다. 그것은 **해가 없다** — 서버에서는
+  // 이미 폐기됐고 다음 폐기 시도는 조용히 실패한다. 반대(못 지움)만 값이 크다.
+  const revoked = new Set<number>();
+  for (const key of doomed) {
+    await revokeKeyQuietly(key.keyId, key.tenant);
+    revoked.add(key.keyId);
+    await persistedState.update(
+      ISSUED_KEY_STATE,
+      recordedKeys().filter((k) => !revoked.has(k.keyId)),
+    );
+  }
+}
+
 // ── 사이트 가져오기 ──────────────────────────────────────────────────────
 
 /**
@@ -559,14 +621,10 @@ async function openSite(): Promise<void> {
   // 판을 **먼저 정한다.** 코어 폴백에 맡기면 ⑴ 받기 전에 판 번호를 말할 수 없고 ⑵ 화면에 말한
   // 판과 실제로 받는 판이 갈릴 수 있으며 ⑶ 켜진 판이 없을 때 목록 첫 줄(BUILDING 일 수 있다)을
   // 잡는다.
-  const choice = pickRevision(await api.listRevisions());
-  if (!choice) {
-    throw new DevtoolsError(
-      "NOT_A_SITE",
-      "받을 수 있는 판이 없습니다.",
-      "올린 판이 아직 만들어지는 중이거나 실패했습니다. 「버전 이력」에서 확인해 주세요.",
-    );
-  }
+  const revisions = await api.listRevisions();
+  const choice = pickRevision(revisions);
+  // 「없다」의 이유는 둘이고 다음에 할 일이 정반대다 — 판정은 core 가 한다(`noRevisionError`).
+  if (!choice) throw noRevisionError(revisions);
   if (choice.why === "latest-ready") {
     log(say.pickedLatestReady(tenant, choice.revisionNo));
   }
@@ -884,7 +942,9 @@ async function switchVersion(
     : await vscode.window.showQuickPick(
         candidates.map((r, index) => ({
           label: `버전 ${r.revisionNo}`,
-          description: new Date(r.createdAt).toLocaleString("ko-KR"),
+          description: r.label
+            ? `${plainNotice(r.label, 60)} · ${new Date(r.createdAt).toLocaleString("ko-KR")}`
+            : new Date(r.createdAt).toLocaleString("ko-KR"),
           detail:
             index === 0 &&
             (active === undefined || r.revisionNo > active.revisionNo)
@@ -910,13 +970,30 @@ async function switchVersion(
   );
   if (confirm !== ask.action) return;
 
-  await vscode.window.withProgress(
-    {
-      location: vscode.ProgressLocation.Notification,
-      title: `버전 ${count(target.revisionNo)} 로 바꾸는 중`,
-    },
-    () => api.activateRevision(target.revisionNo),
-  );
+  const activate = (discardPendingChanges: boolean): Thenable<unknown> =>
+    vscode.window.withProgress(
+      {
+        location: vscode.ProgressLocation.Notification,
+        title: `버전 ${count(target.revisionNo)} 로 바꾸는 중`,
+      },
+      () => api.activateRevision(target.revisionNo, discardPendingChanges),
+    );
+  try {
+    await activate(false);
+  } catch (error) {
+    // 서버가 「계속하려면 확인해 주세요」라고 말했는데 확인할 자리가 없으면 그 문장이 곧 막다른
+    // 길이다. **여기 하나만 뚫는다** — 다른 거절(게시 진행 중·AI 작업 중)에는 동의로 넘어가는
+    // 길이 없고, 넓히면 뚫을 수 없는 거절에도 동의 창을 띄우게 된다.
+    if (!needsDiscardConsent(error)) throw error;
+    const ask = say.discardPendingConfirm(tenant, (error as Error).message);
+    const answer = await vscode.window.showWarningMessage(
+      ask.message,
+      { modal: true, detail: ask.detail },
+      ask.action,
+    );
+    if (answer !== ask.action) return;
+    await activate(true);
+  }
   log(`사이트를 버전 ${target.revisionNo} 로 바꿨습니다.`);
   void vscode.window.showInformationMessage(
     say.switched(tenant, target.revisionNo),
@@ -987,17 +1064,22 @@ async function startPreviewCommand(pinned?: CapturedTenant): Promise<void> {
   }
   // 두 번 누르면 키가 2회 발급돼 **두 번째가 첫 번째를 폐기**하고, dev 서버 2개가 뜨고, 첫 서버는 UI 에서
   // 끌 수 없는 고아가 된다(심의 경고). 첫 실행이 수 분짜리 설치라 실제로 자주 밟힌다.
-  if (previewStarting) {
+  if (previewGuard.busy) {
     void vscode.window.showInformationMessage(
       "미리보기를 준비하는 중입니다. 잠시만 기다려 주세요.",
     );
     return;
   }
-  // ⚠ **가드는 반드시 finally 로 푼다**(심의 차단 · 2026-08-10). 종전에는 성공 경로에서만 풀어서,
-  // 바로 아래 세 호출 중 하나만 던져도(폴더 미개방·사이트 선택 ESC·네트워크 오류) 가드가 영영 잠겼다.
-  // 그 뒤로는 「미리보기 시작」이 창을 새로 열 때까지 "준비하는 중입니다"만 반복했다 — 준비 중인 것이
-  // 없는데 준비 중이라고 말하는 막다른 길이었다.
-  previewStarting = true;
+  // 이 함수가 미리보기 시작의 **유일한 문**이다 — 명령 셋(시작·다시 시작·사이드바 항목)이 전부 여기로
+  // 온다. 가드를 등록부에 두면 그중 하나만 덮는다.
+  await previewGuard.run(() => startPreviewGuarded(pinned));
+}
+
+/**
+ * 가드 **안에서만** 부른다. 던져도 core 가드가 `finally` 로 풀어 주므로 여기서 풀지 않는다 —
+ * 푸는 자리가 둘이면 반드시 어긋난다.
+ */
+async function startPreviewGuarded(pinned?: CapturedTenant): Promise<void> {
   try {
     await startPreviewInner(pinned);
   } catch (error) {
@@ -1011,8 +1093,6 @@ async function startPreviewCommand(pinned?: CapturedTenant): Promise<void> {
       await revokeKeyQuietly(doomed.keyId, doomed.tenant);
     }
     throw error;
-  } finally {
-    previewStarting = false;
   }
 }
 
@@ -1203,12 +1283,13 @@ function scheduleRenewal(expiresAt: string, ttlSeconds: number): void {
         //    미리보기가 말없이 사라진 것만 본다**(마감 심의 차단). 12시간 뒤 오프라인이면
         //    실제로 밟는다. 같은 자리의 KDoc 이 「재기동은 알린다 — 말없이 재시작되면
         //    그것도 고장으로 읽힌다」고 적어 둔 그 규율이다.
-        const message =
-          error instanceof DevtoolsError ? error.humanMessage : String(error);
-        log(`미리보기 자격증명 갱신 실패: ${message}`);
-        if (!(error instanceof DevtoolsError && error.code === "CANCELLED")) {
+        // 판정은 core 가 한다(`errorNotice.ts`) — 여기 사본을 두면 이 자리만 낡는다.
+        // 스스로 취소를 누른 사람에게 「갱신하지 못해 멈췄습니다」 빨간창을 띄우면 안 된다.
+        const shown = decideErrorNotice(error);
+        log(`미리보기 자격증명 갱신 ${shown.logPrefix}: ${shown.raw}`);
+        if (shown.kind !== "cancelled") {
           void vscode.window.showErrorMessage(
-            `미리보기 자격증명을 갱신하지 못해 미리보기가 멈췄습니다 — ${plainNotice(message)}`,
+            `미리보기 자격증명을 갱신하지 못해 미리보기가 멈췄습니다 — ${shown.message}`,
           );
         }
       }
@@ -1220,12 +1301,11 @@ function scheduleRenewal(expiresAt: string, ttlSeconds: number): void {
 /**
  * 실패하면 상태바를 되돌린다.
  *
- * ⚠ **여기서 가드를 풀지 않는다**(심의 경고 · 2026-08-10). 종전에는 이 catch 가 `previewStarting = false`
- * 를 했는데, 바깥 catch 가 키를 폐기하는 **수 초 동안 가드가 이미 풀려 있었다.** 그 창에서 다시 「미리보기
- * 시작」이 통과하면 새 키가 발급되고, 뒤늦게 끝난 첫 번째 정리가 `issuedKeyId` 를 비워 **두 번째 키를
- * 아무도 못 지우게** 만든다 — 이 트랜치가 닫으려던 바로 그 누수가 경합으로 되살아난다.
+ * ⚠ **여기서 재진입 가드를 풀지 않는다.** 이 catch 가 도는 동안 바깥에서는 키 폐기가 **수 초** 더
+ * 이어진다. 그 창에 가드가 풀려 있으면 「미리보기 시작」이 다시 통과해 새 키가 발급되고, 뒤늦게 끝난
+ * 첫 번째 정리가 `issuedKeyId` 를 비워 **두 번째 키를 아무도 못 지우게** 만든다.
  *
- * 가드 해제는 바깥 `finally` 한 곳뿐이다. 푸는 자리가 둘이면 반드시 어긋난다.
+ * 가드 해제는 `createReentrancyGuard` 의 `finally` 한 곳뿐이다. 푸는 자리가 둘이면 반드시 어긋난다.
  */
 async function withStartGuard<T>(run: () => Thenable<T>): Promise<T> {
   try {
@@ -1458,7 +1538,9 @@ async function showHistory(): Promise<void> {
   for (const r of revisions) {
     const when = new Date(r.createdAt).toLocaleString("ko-KR");
     log(
-      `${r.isActive ? "▶" : " "} 버전 ${r.revisionNo} · ${r.status} · ${when}${r.note ? ` · ${r.note}` : ""}`,
+      `${r.isActive ? "▶" : " "} 버전 ${r.revisionNo} · ${r.status} · ${when}${
+        r.label ? ` · ${plainNotice(r.label, 80)}` : ""
+      }`,
     );
   }
   log(`(총 ${revisions.length}개 · 바꾸려면 「버전 전환」을 쓰세요)`);
@@ -1738,7 +1820,7 @@ async function chooseSite(): Promise<void> {
       `사이트: ${plainNotice(code, 64)}`,
     );
   } catch (error) {
-    if (error instanceof DevtoolsError && error.code === "CANCELLED") return;
+    if (isCancelled(error)) return;
     throw error;
   }
 }

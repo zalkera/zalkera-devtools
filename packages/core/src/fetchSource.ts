@@ -8,6 +8,7 @@ import { pipeline } from "node:stream/promises";
 import type { ZalkeraApi } from "./api.ts";
 import { MAX_EXTRACT_BYTES } from "./limits.ts";
 import { DevtoolsError } from "./errors.ts";
+import { noRevisionError, pickRevision } from "./fetchTarget.ts";
 import { downloadBounded } from "./download.ts";
 import { extractTarGz } from "./untar.ts";
 
@@ -55,16 +56,14 @@ export async function fetchSiteSource(options: FetchSourceOptions): Promise<Fetc
 
     let revisionNo = options.revisionNo;
     if (revisionNo === undefined) {
+        // ⚠ **판정을 여기 두 벌로 두지 않는다.** 종전에는 `revisions[0]` 로 때웠는데 그것이
+        //    `BUILDING`·`FAILED` 일 수 있고(화면에 말한 판과 받는 판이 갈린다), 「없다」 문면도
+        //    별도 사본이라 확장 쪽만 고쳐지면 이 길로 든 사람은 옛 문장을 본다.
+        //    지금은 확장이 늘 `revisionNo` 를 넘겨 여기가 안 도는 길이지만, **이 함수는 공개 API** 다.
         const revisions = await options.api.listRevisions();
-        const active = revisions.find((r) => r.isActive) ?? revisions[0];
-        if (!active) {
-            throw new DevtoolsError(
-                "NOT_A_SITE",
-                "아직 올린 사이트 소스가 없습니다.",
-                "예제로 시작하거나, 콘솔에서 소스를 먼저 올려 주세요.",
-            );
-        }
-        revisionNo = active.revisionNo;
+        const choice = pickRevision(revisions);
+        if (!choice) throw noRevisionError(revisions);
+        revisionNo = choice.revisionNo;
     }
 
     report(`버전 ${revisionNo} 소스를 받는 중…`);

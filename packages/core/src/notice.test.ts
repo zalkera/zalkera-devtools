@@ -192,3 +192,40 @@ test("상한 안쪽 링크는 잘림과 무관하게 무력화된다", () => {
   );
   ok(!RENDERS_AS_LINK.test(out), out.slice(0, 120));
 });
+
+test("링크 무력화는 고정점까지 간다 — 한 번 돌린 결과가 다시 링크가 되지 않는다", () => {
+  // 오늘의 정규식 둘은 한 번으로도 충분하다(닫는 괄호가 전각이 되어 안쪽 조각이 종결자를 못 찾는다).
+  // 이 시험이 잠그는 것은 그 **추론**이 아니라 결과다 — 무엇을 넣어도 렌더되는 링크가 남지 않는다.
+  const nested = [
+    "[열기](command:a](command:workbench.action.terminal.new))",
+    "[열기]<command:a](command:workbench.action.terminal.new)>",
+    "](a:1](b:2](c:3](command:evil))))",
+    "<command:<command:evil>>",
+    "]".repeat(40) + "(command:evil)".repeat(40),
+  ];
+  for (const evil of nested) {
+    const out = plainNotice(evil, 512);
+    ok(!RENDERS_AS_LINK.test(out), `링크가 살아남았다: ${evil} → ${out}`);
+  }
+});
+
+test("고정점 반복이 평범한 문장을 망가뜨리지 않는다", () => {
+  // 반복이 회수 상한에 걸리면 문법 글자를 지우는 폴백이 돈다. 정상 문장이 거기 닿으면 안 된다.
+  for (const plain of [
+    "버전 3(가장 최근에 올린 것) 으로 바꿉니다.",
+    "폴더가 비어 있지 않습니다 — [프로젝트] 폴더를 고르세요.",
+    "a < b 이고 <010-1234> 로 연락 주세요.",
+    "괄호 (안) 과 대괄호 [안] 은 그대로 남는다",
+  ]) {
+    strictEqual(plainNotice(plain, 512), plain.replace(/\s+/g, " ").trim());
+  }
+});
+
+test("회수를 다 써도 안 끝나면 문법 글자 자체를 지운다 — 「아마 안전할 것」으로 넘기지 않는다", () => {
+  // 겹침이 상한보다 깊으면 반복만으로는 못 끝난다. 그때 남는 것을 그대로 내보내면 살아 있는
+  // 링크가 알림에 실린다. 문장이 상해도 그 편이 낫다.
+  const deep = "](a:1](b:2](c:3](d:4](e:5](command:evil))))))";
+  const out = plainNotice(deep, 512);
+  ok(!RENDERS_AS_LINK.test(out), out);
+  ok(!/\]\s*\(/.test(out), `링크 문법이 남았다: ${out}`);
+});

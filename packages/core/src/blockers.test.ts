@@ -1,15 +1,7 @@
 import { ok, rejects, strictEqual } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import {
-  mkdir,
-  mkdtemp,
-  readdir,
-  readFile,
-  rm,
-  writeFile,
-} from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, readdir, readFile, rm, truncate, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { after, test } from "node:test";
 import { ensureDependencies } from "./deps.ts";
@@ -17,31 +9,12 @@ import { DevtoolsError } from "./errors.ts";
 import { extractTarGz } from "./fetchSource.ts";
 import { ensureEnvIgnored } from "./project.ts";
 import { packProject } from "./zip.ts";
+import { tempDir } from "./testing/tempDir.ts";
 
 /**
  * 심의(Fable·Opus)가 실제 입력으로 재현한 차단들의 회귀 고정.
  * **각 테스트는 "고쳤다"가 아니라 "그 입력으로 다시 깨지지 않는다"를 증명한다.**
  */
-
-/**
- * **임시물을 회수한다.** 이 파일은 `mkdtemp` 를 16번 부르고 그중 하나는 **101MB** 픽스처를 쓴다
- * (「큰 파일을 이름 대고 끊는다」를 재는 자리다). 회수가 없어 실행마다 그만큼이 `TMPDIR` 에 남았고,
- * 이 박스의 기본 `TMPDIR` 은 tmpfs(메모리)다 — 실측으로 시험 반복이 캐시를 3.3GB 까지 밀어 올렸다.
- * 가드를 재는 시험이 가드가 막으려는 손해를 내면 안 된다.
- *
- * 재현: `TMPDIR=$(mktemp -d) npm run test -w @zalkera/devtools-core && du -sh $TMPDIR`
- */
-const roots: string[] = [];
-after(async () => {
-  for (const r of roots) await rm(r, { recursive: true, force: true });
-});
-
-/** `mkdtemp` 를 감싸 회수 목록에 올린다 — 자리마다 손으로 적으면 하나씩 빠진다. */
-async function tempDir(prefix: string): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), prefix));
-  roots.push(dir);
-  return dir;
-}
 
 test("차단1 — 100바이트 초과 경로가 잘리지 않는다(GNU 긴 이름)", async () => {
   const src = await tempDir("zalkera-long-");
@@ -175,7 +148,11 @@ test("차단3 — git 레포에 .gitignore 가 없으면 만들어 자격증명�
 test("차단4 — 큰 파일을 조용히 빼지 않고 이름을 대고 끊는다", async () => {
   const dir = await tempDir("zalkera-big-");
   await writeFile(join(dir, "package.json"), "{}");
-  await writeFile(join(dir, "hero.mp4"), Buffer.alloc(101 * 1024 * 1024));
+  // ⚠ **희소 파일로 만든다.** `Buffer.alloc(101MB)` 는 그 자리에서 101MB 를 메모리에 잡고 같은
+  //   양을 디스크에 적었다. SIGKILL 로 죽으면 그 101MB 가 그대로 `TMPDIR` 에 남는데, 이 박스의
+  //   기본 `TMPDIR` 은 tmpfs 다. 판정은 `stat` 의 크기만 보므로 실제 바이트는 필요 없다.
+  await writeFile(join(dir, "hero.mp4"), "");
+  await truncate(join(dir, "hero.mp4"), 101 * 1024 * 1024);
 
   await rejects(
     () => packProject({ projectDir: dir }),

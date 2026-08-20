@@ -6,6 +6,7 @@ import { pipeline } from "node:stream/promises";
 import { createGunzip } from "node:zlib";
 import { MAX_ENTRIES, MAX_ENTRY_BYTES, MAX_EXTRACT_BYTES } from "./limits.ts";
 import { DevtoolsError } from "./errors.ts";
+import { writeExclusive } from "./safeWrite.ts";
 import {assertNotSymlink, descend, safeSegments, assertNotVendored} from "./safeWrite.ts";
 
 /**
@@ -251,6 +252,11 @@ async function createSink(targetDir: string, options: UntarOptions) {
     const materializeLinks = options.symlinks === "materialize";
     const preserveMode = options.preserveMode === true;
     let count = 0;
+    /**
+     * **이번 해제에서 우리가 쓴 경로들.** `writeExclusive` 가 「원래 있던 고객 파일」과 「아카이브가
+     * 같은 경로를 두 번 담음」을 가르는 데 쓴다 — 다음에 할 일이 정반대라 뭉치면 안 된다.
+     */
+    const written = new Set<string>();
     /** 앞선 `L`/`x` 헤더가 지정한 다음 항목의 이름. 쓰고 나면 비운다. */
     let pendingName: string | null = null;
     /** 앞선 `K` 헤더가 지정한 다음 항목의 링크 대상(100바이트를 넘는 링크). */
@@ -322,7 +328,11 @@ async function createSink(targetDir: string, options: UntarOptions) {
             const path = join(parent, leaf);
             // 마지막 조각이 이미 심링크면 **쓰기가 그 링크를 따라간다** — 조각 검사의 마지막 칸이다.
             await assertNotSymlink(path, name);
-            await writeFile(path, data);
+            // ⚠ **이미 있는 파일 위에 쓰지 않는다.** 「빈 폴더」 판정은 `.vscode` 같은 편집기
+            //    산물을 일부러 통과시키고 도움말도 「있어도 괜찮습니다」라고 말한다. 아카이브가
+            //    같은 경로를 담고 있으면 고객 파일이 소리 없이 교체되고, 롤백은 그 파일을
+            //    기준선으로 봐서 못 되감는다 — 화면은 「지금 폴더는 바뀌지 않습니다」라고 한다.
+            await writeExclusive(path, data, name, written);
             if (preserveMode && (entry.mode & 0o111) !== 0) {
                 // 실행 비트가 있던 것만 되살린다. 전체 mode 를 그대로 쓰지 않는 이유는 아카이브가 정한
                 // 권한(예: 0777·setuid)을 고객 디스크에 그대로 옮기지 않기 위해서다.

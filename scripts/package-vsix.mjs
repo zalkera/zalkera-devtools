@@ -29,7 +29,8 @@
 //   node scripts/package-vsix.mjs --bump minor    0.1.0 → 0.2.0
 //   node scripts/package-vsix.mjs --bump major    0.1.0 → 1.0.0
 //   → dist/<name>-<version>.vsix  (+ shared/ 로 사본)
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync, readdirSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
@@ -112,6 +113,24 @@ delete staged.scripts;
 staged.dependencies = { npm: manifest.dependencies?.npm ?? "*" };
 writeFileSync(join(stage, "package.json"), JSON.stringify(staged, null, 2) + "\n");
 
+/** 폴더 하나의 바이트 합. 「얼마나 뺐나」를 눈대중으로 적지 않기 위한 것. */
+function dirBytes(target) {
+    const info = statSync(target);
+    if (!info.isDirectory()) return info.size;
+    let total = 0;
+    for (const entry of readdirSync(target)) total += dirBytes(join(target, entry));
+    return total;
+}
+
+/** 아래 파일 전부(경로). 확장자 규칙은 부르는 쪽이 정한다. */
+function* walkFiles(dir) {
+    for (const entry of readdirSync(dir)) {
+        const full = join(dir, entry);
+        if (statSync(full).isDirectory()) yield* walkFiles(full);
+        else yield full;
+    }
+}
+
 // ── 3. npm CLI 실물 ─────────────────────────────────────────────────────────
 const npmSrc = join(root, "node_modules", "npm");
 if (!existsSync(npmSrc)) throw new Error(`npm CLI 가 없다: ${npmSrc} — 먼저 npm install`);
@@ -122,6 +141,49 @@ cpSync(npmSrc, join(stage, "node_modules", "npm"), { recursive: true });
 // 실행 진입점이 실제로 있는지 본다 — 없으면 폴백이 조용히 죽는다(runtime.ts 가 찾는 자리).
 const npmCli = join(stage, "node_modules", "npm", "bin", "npm-cli.js");
 if (!existsSync(npmCli)) throw new Error("npm-cli.js 가 없다 — 폴백이 죽는다. 중단");
+
+// ── 3b. 읽을거리를 뺀다 ──────────────────────────────────────────────────────
+//
+// ⚠ **실행되는 것은 하나도 빼지 않는다.** 여기서 지우는 넷은 `npm help` 만 읽는다(`lib/commands/
+//    help.js` 가 `man/man[0-9]/*` 와 `docs/output/…` 을 연다). 확장의 폴백은 `npm install` 만
+//    부르므로 그 경로를 안 지난다.
+//
+//    `node-gyp` 는 **안 뺀다.** 2.1MB 로 가장 크지만 그것은 문서가 아니라 네이티브 빌드 폴백이다.
+//    그리고 애초에 뺄 수 없다 — npm 의 `bundleDependencies` 에 들어 있어 빼면 `vsce package` 가
+//    rc=1 로 선다. 실측: 이 파일에 `prune(join(npmStage, "node_modules", "node-gyp"))` 를 한 줄
+//    더해 `node scripts/package-vsix.mjs --skip-verify` 를 돌리면 굽기에서 죽는다.
+//    (npm 자체는 의존 없는 프로젝트라면 node-gyp 없이도 `install --dry-run` 이 돈다 — 그러니
+//     「npm 이 못 돈다」가 아니라 「포장이 안 된다」가 이유다.)
+console.log("· npm 읽을거리 제거");
+const npmStage = join(stage, "node_modules", "npm");
+let prunedBytes = 0;
+const prune = (target) => {
+    if (!existsSync(target)) return;
+    prunedBytes += dirBytes(target);
+    rmSync(target, { recursive: true, force: true });
+};
+prune(join(npmStage, "docs"));
+prune(join(npmStage, "man"));
+for (const file of walkFiles(npmStage)) {
+    if (/\.(?:md|markdown|png|jpe?g|gif|svg)$/i.test(file)) prune(file);
+}
+console.log(`  ${Math.round(prunedBytes / 1024)}KB 뺌`);
+
+// **뺀 뒤에 실제로 도는지 본다.** 크기만 재고 넘기면, 폴백이 죽는 것은 그 폴백이 필요한
+// 사람에게서만 드러난다 — 우리는 영영 못 본다.
+const smoke = mkdtempSync(join(tmpdir(), "zalkera-npmsmoke-"));
+writeFileSync(join(smoke, "package.json"), JSON.stringify({ name: "smoke", version: "1.0.0" }) + "\n");
+try {
+    execFileSync(process.execPath, [npmCli, "install", "--dry-run", "--no-audit", "--no-fund", "--offline"], {
+        cwd: smoke,
+        stdio: "pipe",
+    });
+} catch (error) {
+    throw new Error(`뺀 뒤 npm 이 안 돈다 — 폴백이 죽는다. 중단\n${error}`);
+} finally {
+    rmSync(smoke, { recursive: true, force: true });
+}
+console.log("  npm install 경로 확인");
 
 // ── 4. 굽기 ─────────────────────────────────────────────────────────────────
 console.log("· vsce package");

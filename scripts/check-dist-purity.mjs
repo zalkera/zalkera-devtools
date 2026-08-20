@@ -11,6 +11,11 @@
  *   재현: `packages/core/tsconfig.json` 의 `exclude` 를 비우고 `npm run typecheck` 뒤
  *   `ls packages/core/dist | grep -c '\.test\.'`
  *
+ * ■ 시험 파일만이 아니다
+ *   시험이 쓰는 **헬퍼**도 같은 자리에 있다(`src/testing/`). 파일 이름에 `.test.` 가 없어서 이름
+ *   규칙만 보는 검사는 그것을 통과시킨다 — 그러면 빌드를 좁히는 규율이 반쪽이 된다. 실측으로,
+ *   `exclude` 에서 그 폴더를 빼면 산출물이 셋 늘어나는데 종전 검사는 초록이었다.
+ *
  * ■ 걸리면
  *   `tsconfig.json` 의 `exclude` 를 되돌린다. 타입 검사를 좁히지 말고 **빌드를 좁힌다.**
  */
@@ -33,7 +38,11 @@ let seen = 0;
         if (statSync(full).isDirectory()) walk(full);
         else {
             seen += 1;
-            if (/\.test\.(js|cjs|mjs|d\.ts|js\.map|d\.ts\.map)$/.test(entry)) found.push(relative(root, full));
+            const rel = relative(root, full);
+            // 시험 파일과 **시험 전용 폴더**를 같은 눈으로 본다. 둘 다 빌드가 좁혀 두는 것이라
+            // 한쪽만 지키면 다른 쪽으로 샌다(`src/testing/` 은 시험 헬퍼가 사는 자리다).
+            if (/\.test\.(js|cjs|mjs|d\.ts|js\.map|d\.ts\.map)$/.test(entry)) found.push(rel);
+            else if (/(^|[\\/])testing[\\/]/.test(relative(dist, full))) found.push(rel);
         }
     }
 })(dist);
@@ -43,7 +52,7 @@ if (seen === 0) {
     process.exit(2);
 }
 if (found.length) {
-    console.error(`❌ 구운 것 검사 — 시험이 ${found.length}개 섞였습니다:`);
+    console.error(`❌ 구운 것 검사 — 시험 전용 산출물이 ${found.length}개 섞였습니다:`);
     for (const f of found.slice(0, 5)) console.error(`   · ${f}`);
     console.error("   → packages/core/tsconfig.json 의 exclude 를 되돌리십시오(타입 검사는 tsconfig.typecheck.json 이 봅니다).");
     process.exit(1);

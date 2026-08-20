@@ -1,19 +1,19 @@
 import { ok, rejects, strictEqual } from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";
-import { mkdtemp, mkdir, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
 import { deflateRawSync } from "node:zlib";
 import { DevtoolsError } from "./errors.ts";
 import { createZip } from "./zip.ts";
 import { extractZip } from "./unzip.ts";
+import { tempDir } from "./testing/tempDir.ts";
 
 test("남이 만든 zip 을 푼다(우리 작성기가 아니라 파이썬 zipfile 산출물)", async () => {
     // **교차 확인이 핵심이다** — 우리 작성기로 만든 것만 풀면 "우리끼리만 맞는 형식"을 못 잡는다.
     // 서버가 주는 시작 소스 팩은 우리 작성기가 만든 것이 아니다.
-    const dir = await mkdtemp(join(tmpdir(), "zalkera-unzip-src-"));
+    const dir = await tempDir("zalkera-unzip-src-");
     await mkdir(join(dir, "src"), { recursive: true });
     await writeFile(join(dir, "package.json"), '{"name":"시작 소스"}');
     await writeFile(join(dir, "src", "page.tsx"), "export default () => null;");
@@ -28,7 +28,7 @@ z.close()`,
         dir,
     ]);
 
-    const target = await mkdtemp(join(tmpdir(), "zalkera-unzip-out-"));
+    const target = await tempDir("zalkera-unzip-out-");
     const result = await extractZip(await readFile(join(dir, "out.zip")), target);
 
     strictEqual(result.fileCount, 2);
@@ -41,7 +41,7 @@ test("우리 작성기와 해제기가 서로 맞는다(왕복)", async () => {
         { path: "a/b/c.txt", data: Buffer.from("가나다", "utf8") },
         { path: "bin.dat", data: Buffer.from([0, 255, 128]) },
     ]);
-    const target = await mkdtemp(join(tmpdir(), "zalkera-roundtrip-"));
+    const target = await tempDir("zalkera-roundtrip-");
     const result = await extractZip(zip, target);
 
     strictEqual(result.fileCount, 2);
@@ -51,7 +51,7 @@ test("우리 작성기와 해제기가 서로 맞는다(왕복)", async () => {
 
 test("폴더 밖을 가리키는 항목은 거절한다(Zip Slip)", async () => {
     const zip = await createZip([{ path: "../escaped.txt", data: Buffer.from("탈출") }]);
-    const target = await mkdtemp(join(tmpdir(), "zalkera-slip-"));
+    const target = await tempDir("zalkera-slip-");
     await rejects(
         () => extractZip(zip, target),
         (error: unknown) => error instanceof DevtoolsError && /폴더 밖/.test(error.message),
@@ -59,7 +59,7 @@ test("폴더 밖을 가리키는 항목은 거절한다(Zip Slip)", async () => 
 });
 
 test("zip 이 아닌 바이트는 형식 오류로 끊는다", async () => {
-    const target = await mkdtemp(join(tmpdir(), "zalkera-notzip-"));
+    const target = await tempDir("zalkera-notzip-");
     await rejects(
         () => extractZip(Buffer.from("이건 zip 이 아니다"), target),
         (error: unknown) => error instanceof DevtoolsError && /zip 형식/.test(error.message),
@@ -74,8 +74,8 @@ test("zip 이 아닌 바이트는 형식 오류로 끊는다", async () => {
  * zip 쪽에는 *"같은 판정이어야 한다"* 는 주석만 있고 뚫린 어휘 판정이 남아 있었다.
  */
 test("부모 조각이 심링크면 거부한다 — 문자열로는 뿌리 안이어도", async () => {
-    const victim = await mkdtemp(join(tmpdir(), "victim-"));
-    const target = await mkdtemp(join(tmpdir(), "target-"));
+    const victim = await tempDir("victim-");
+    const target = await tempDir("target-");
     try {
         await symlink(victim, join(target, ".vscode"));
         const zip = await createZip([{ path: ".vscode/settings.json", data: Buffer.from("PWNED\n") }]);
@@ -92,8 +92,8 @@ test("부모 조각이 심링크면 거부한다 — 문자열로는 뿌리 안�
 });
 
 test("파일 자리 자체가 심링크여도 거부한다", async () => {
-    const victim = await mkdtemp(join(tmpdir(), "victim-"));
-    const target = await mkdtemp(join(tmpdir(), "target-"));
+    const victim = await tempDir("victim-");
+    const target = await tempDir("target-");
     try {
         await writeFile(join(victim, "keep.txt"), "original\n");
         await symlink(join(victim, "keep.txt"), join(target, "a.txt"));
@@ -107,7 +107,7 @@ test("파일 자리 자체가 심링크여도 거부한다", async () => {
 });
 
 test("통제군 — 심링크가 없으면 중첩 경로도 정상으로 푼다", async () => {
-    const target = await mkdtemp(join(tmpdir(), "target-"));
+    const target = await tempDir("target-");
     try {
         const zip = await createZip([
             { path: "a/b/c.txt", data: Buffer.from("ok\n") },
@@ -127,7 +127,7 @@ test("중앙 디렉터리 오프셋이 깨져도 raw RangeError 가 아니라 �
     const eocd = zip.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]));
     const broken = Buffer.from(zip);
     broken.writeUInt32LE(0xfffffff0, eocd + 16);
-    const target = await mkdtemp(join(tmpdir(), "target-"));
+    const target = await tempDir("target-");
     try {
         await rejects(
             () => extractZip(broken, target),
@@ -191,7 +191,7 @@ function sharedPayloadZip(names: string[], payload: Buffer): Buffer {
 }
 
 async function target(): Promise<string> {
-    return mkdtemp(join(tmpdir(), "zalkera-unzip-"));
+    return tempDir("zalkera-unzip-");
 }
 
 test("작은 zip 이 총량 상한을 넘기면 끊는다 — 이름 여럿이 스트림 하나를 공유한다", async () => {
@@ -254,7 +254,7 @@ test("양성 통제군 — 상한 아래 다중 항목도 그대로 풀린다", 
 test("소스 zip 이 node_modules 를 담으면 거부한다", async () => {
     for (const path of ["node_modules/evil/index.js", "a/node_modules/evil.js"]) {
         const zip = await createZip([{ path, data: Buffer.from("PWNED") }]);
-        const target = await mkdtemp(join(tmpdir(), "zalkera-nm-"));
+        const target = await tempDir("zalkera-nm-");
         try {
             await rejects(
                 () => extractZip(zip, target),
@@ -273,11 +273,84 @@ test("양성 통제군 — 이름에 걸치기만 한 것은 막지 않는다", 
         { path: "src/node_modules_helper.ts", data: Buffer.from("export const a = 1;") },
         { path: "docs/about-node_modules.md", data: Buffer.from("# 설명") },
     ]);
-    const target = await mkdtemp(join(tmpdir(), "zalkera-nm-ok-"));
+    const target = await tempDir("zalkera-nm-ok-");
     try {
         const result = await extractZip(zip, target);
         strictEqual(result.fileCount, 2);
     } finally {
         await rm(target, { recursive: true, force: true });
     }
+});
+
+test("이미 있는 파일 위에 쓰지 않는다 — 고객 파일이 소리 없이 교체되던 자리", async () => {
+  // 「빈 폴더」 판정은 `.vscode` 를 일부러 통과시키고 도움말도 「있어도 괜찮습니다」라고 말한다.
+  // 아카이브가 같은 경로를 담고 있으면 그 파일이 교체되고, 롤백은 기준선으로 봐서 못 되감는다.
+  const root = await tempDir("zalkera-wx-");
+  try {
+    await mkdir(join(root, ".vscode"), { recursive: true });
+    const mine = join(root, ".vscode", "settings.json");
+    await writeFile(mine, '{"customer":"내가 손으로 만든 설정"}');
+
+    const zip = await createZip([
+      { path: ".vscode/settings.json", data: Buffer.from('{"from":"archive"}') },
+    ]);
+    await rejects(
+      () => extractZip(zip, root),
+      /이미 있는 파일을 덮으려/,
+      "고객 파일을 덮었다",
+    );
+    strictEqual(await readFile(mine, "utf8"), '{"customer":"내가 손으로 만든 설정"}', "내용이 바뀌었다");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("같은 경로를 두 번 담은 꾸러미는 **다른 말**을 한다 — 빈 폴더로도 안 풀린다", async () => {
+  // 두 경우는 다음에 할 일이 정반대다. 뭉치면 사람이 「빈 폴더를 새로 만드세요」를 따르고
+  // 또 실패하고 다시 따르는 고리에 갇힌다(심의 권고).
+  const root = await tempDir("zalkera-dup-");
+  try {
+    const zip = await createZip([
+      { path: "src/app/page.tsx", data: Buffer.from("첫 번째") },
+      { path: "src/app/page.tsx", data: Buffer.from("두 번째") },
+    ]);
+    await rejects(
+      () => extractZip(zip, root),
+      (error: unknown) =>
+        error instanceof DevtoolsError &&
+        /같은 파일을 두 번 담고 있습니다/.test(error.message) &&
+        /빈 폴더로 다시 받아도 같은 자리에서 멈춥니다/.test(error.hint ?? ""),
+      "중복 항목을 「원래 있던 파일」로 오진했다",
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("두 문면은 서로 달라야 한다 — 같으면 가른 뜻이 없다", async () => {
+  const a = await tempDir("zalkera-dupA-");
+  const b = await tempDir("zalkera-dupB-");
+  try {
+    await writeFile(join(a, "x.txt"), "원래 있던 것");
+    const pre = await extractZip(await createZip([{ path: "x.txt", data: Buffer.from("새것") }]), a).then(
+      () => null,
+      (e: unknown) => e as DevtoolsError,
+    );
+    const dup = await extractZip(
+      await createZip([
+        { path: "y.txt", data: Buffer.from("1") },
+        { path: "y.txt", data: Buffer.from("2") },
+      ]),
+      b,
+    ).then(
+      () => null,
+      (e: unknown) => e as DevtoolsError,
+    );
+    ok(pre && dup, "둘 다 던져야 한다");
+    ok(pre.message !== dup.message, `같은 문면이다: ${pre.message}`);
+    ok(pre.hint !== dup.hint, `같은 힌트다: ${pre.hint}`);
+  } finally {
+    await rm(a, { recursive: true, force: true });
+    await rm(b, { recursive: true, force: true });
+  }
 });

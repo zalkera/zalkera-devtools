@@ -5,7 +5,7 @@
  */
 import assert from "node:assert/strict";
 import test from "node:test";
-import { nextAvailableName, pickRevision, suggestFolderName } from "./fetchTarget.ts";
+import { nextAvailableName, noRevisionError, pickRevision, suggestFolderName } from "./fetchTarget.ts";
 
 const rev = (revisionNo: number, status: string, isActive = false) => ({ revisionNo, status, isActive });
 
@@ -48,4 +48,23 @@ test("이름이 남의 것이면 비킨다 — 덮어쓰지 않는다", () => {
 
 test("끝없이 매달리지 않는다 — 못 찾으면 사람에게 고르게 한다", () => {
   assert.equal(nextAvailableName("x", () => true, 5), null);
+});
+
+test("한 번도 안 올린 사람에게 「빌드 중이거나 실패했다」고 말하지 않는다", () => {
+    // 뭉치면 처음 쓰는 사람이 「버전 이력」을 열어 빈 목록을 본다 — 도구가 자기 상태를 잘못 진단해
+    // 놓고 사람을 엉뚱한 곳으로 보내는 것이다.
+    const empty = noRevisionError([]);
+    assert.match(empty.message, /올린 사이트 소스가 없/);
+    assert.match(empty.hint ?? "", /예제로 시작/);
+    assert.doesNotMatch(empty.hint ?? "", /만들어지는 중|실패/);
+});
+
+test("올렸는데 아직 못 켜는 경우는 그렇게 말한다", () => {
+    const notReady = noRevisionError([rev(3, "BUILDING"), rev(2, "FAILED")]);
+    assert.match(notReady.hint ?? "", /만들어지는 중이거나 실패/);
+    assert.doesNotMatch(notReady.hint ?? "", /예제로 시작/);
+});
+
+test("두 문장은 서로 달라야 한다 — 같으면 가른 뜻이 없다", () => {
+    assert.notEqual(noRevisionError([]).hint, noRevisionError([rev(1, "BUILDING")]).hint);
 });

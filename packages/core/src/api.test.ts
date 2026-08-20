@@ -1,6 +1,6 @@
 import { ok, rejects, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
-import { ZalkeraApi } from "./api.ts";
+import { ZalkeraApi, needsDiscardConsent } from "./api.ts";
 import { DevtoolsError } from "./errors.ts";
 
 function api(handler: (url: string, init: RequestInit) => Response): ZalkeraApi {
@@ -150,4 +150,41 @@ test("오류 응답의 errorCode 도 소독을 지난다", async () => {
             return true;
         },
     );
+});
+
+test("동의로 넘어갈 수 있는 거절만 그렇다고 말한다", async () => {
+  // 「409 면 물어본다」로 넓히면 뚫을 수 없는 거절(게시 진행 중·AI 작업 중·레포 연결 테넌트)에도
+  // 동의 창이 뜬다. 사용자는 「버리고 바꾸기」를 눌렀는데 또 거절당한다.
+  const reject = (errorCode: string) =>
+    new Response(JSON.stringify({ errorCode, message: "거절" }), { status: 409 });
+  for (const [code, expected] of [
+    ["PENDING_AI_CHANGES_CONFIRM_REQUIRED", true],
+    ["AI_WORK_IN_PROGRESS", false],
+    ["PUBLISH_IN_PROGRESS", false],
+    ["REPO_ALREADY_CONNECTED", false],
+    ["", false],
+  ] as [string, boolean][]) {
+    const api = new ZalkeraApi({
+      apiBase: "https://example.test",
+      accessToken: async () => "t",
+      tenantCode: () => "bix",
+      fetchImpl: async () => reject(code),
+    });
+    const error = await api.activateRevision(7).then(
+      () => null,
+      (e: unknown) => e,
+    );
+    ok(error instanceof DevtoolsError, `${code}: DevtoolsError 가 아니다`);
+    strictEqual(needsDiscardConsent(error), expected, `${code} 판정이 틀렸다`);
+  }
+});
+
+test("동의 판정은 오류 코드만 본다 — 메시지 문면으로 흉내 낼 수 없다", () => {
+  const impostor = new DevtoolsError(
+    "SERVER_REJECTED",
+    "PENDING_AI_CHANGES_CONFIRM_REQUIRED 게시 대기 중인 AI 변경 3건이 취소됩니다.",
+  );
+  strictEqual(needsDiscardConsent(impostor), false);
+  strictEqual(needsDiscardConsent(new Error("아무거나")), false);
+  strictEqual(needsDiscardConsent(undefined), false);
 });

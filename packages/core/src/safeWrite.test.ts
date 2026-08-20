@@ -1,9 +1,9 @@
 import { ok, rejects, strictEqual } from "node:assert/strict";
-import { link, mkdtemp, readFile, readlink, symlink, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { link, readFile, readlink, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
 import { writeOwnFile } from "./safeWrite.ts";
+import { tempDir } from "./testing/tempDir.ts";
 
 /**
  * 우리가 소유하는 파일 쓰기의 계약.
@@ -13,8 +13,8 @@ import { writeOwnFile } from "./safeWrite.ts";
  * 쓰기가 가드 밖에 있었다). `rename` 은 디렉터리 항목만 바꾸므로 셋이 같이 닫힌다.
  */
 async function victimAnd(setup: (proj: string, target: string) => Promise<unknown>) {
-    const victim = await mkdtemp(join(tmpdir(), "victim-"));
-    const proj = await mkdtemp(join(tmpdir(), "proj-"));
+    const victim = await tempDir("victim-");
+    const proj = await tempDir("proj-");
     const target = join(victim, "t");
     await writeFile(target, "ORIGINAL\n");
     await setup(proj, target);
@@ -42,7 +42,7 @@ test("통제군 — `lstat` 판정만으로는 하드링크가 통과한다(이 
 });
 
 test("끊어진 심링크도 같다 — 대상을 만들지 않는다", async () => {
-    const proj = await mkdtemp(join(tmpdir(), "proj-"));
+    const proj = await tempDir("proj-");
     const dangling = join(proj, "nowhere");
     await symlink(dangling, join(proj, "owned.txt"));
     await rejects(() => writeOwnFile(join(proj, "owned.txt"), "MINE\n"), /링크라 쓰지 않았습니다/);
@@ -50,7 +50,7 @@ test("끊어진 심링크도 같다 — 대상을 만들지 않는다", async ()
 });
 
 test("통제군 — 평범한 갱신·생성은 그대로 된다", async () => {
-    const proj = await mkdtemp(join(tmpdir(), "proj-"));
+    const proj = await tempDir("proj-");
     const at = join(proj, "owned.txt");
     await writeOwnFile(at, "FIRST\n");
     strictEqual(await readFile(at, "utf8"), "FIRST\n");
@@ -59,7 +59,7 @@ test("통제군 — 평범한 갱신·생성은 그대로 된다", async () => {
 });
 
 test("권한을 준 대로 붙인다 — 자격증명 파일은 0600 이다", async () => {
-    const proj = await mkdtemp(join(tmpdir(), "proj-"));
+    const proj = await tempDir("proj-");
     const at = join(proj, "owned.txt");
     await writeOwnFile(at, "SECRET\n", 0o600);
     const { stat } = await import("node:fs/promises");
@@ -67,7 +67,7 @@ test("권한을 준 대로 붙인다 — 자격증명 파일은 0600 이다", as
 });
 
 test("임시 파일을 남기지 않는다", async () => {
-    const proj = await mkdtemp(join(tmpdir(), "proj-"));
+    const proj = await tempDir("proj-");
     await writeOwnFile(join(proj, "owned.txt"), "MINE\n");
     const { readdir } = await import("node:fs/promises");
     const left = (await readdir(proj)).filter((f) => f.includes(".tmp"));
@@ -77,7 +77,7 @@ test("임시 파일을 남기지 않는다", async () => {
 
 test("NUL 이 든 항목 이름을 거절한다", async () => {
     const { safeSegments } = await import("./safeWrite.ts");
-    const proj = await mkdtemp(join(tmpdir(), "proj-"));
+    const proj = await tempDir("proj-");
     // NUL 뒤는 많은 시스템 호출이 잘라 읽는다 — `a\u0000.png` 가 `a` 로 착지하면 남의 파일을 덮는다.
     for (const name of ["a\u0000.txt", "dir/b\u0000", "\u0000"]) {
         let threw = false;

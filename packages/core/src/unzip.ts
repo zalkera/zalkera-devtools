@@ -1,4 +1,4 @@
-import { writeFile } from "node:fs/promises";
+import { writeExclusive } from "./safeWrite.ts";
 import { join, resolve } from "node:path";
 import { inflateRaw } from "node:zlib";
 import { promisify } from "node:util";
@@ -42,6 +42,11 @@ export async function extractZip(zip: Buffer, targetDir: string): Promise<UnzipR
     let offset = zip.readUInt32LE(eocd + 16);
     const root = resolve(targetDir);
     let fileCount = 0;
+    /**
+     * **이번 해제에서 우리가 쓴 경로들.** `writeExclusive` 가 「원래 있던 고객 파일」과 「아카이브가
+     * 같은 경로를 두 번 담음」을 가르는 데 쓴다 — 다음에 할 일이 정반대라 뭉치면 안 된다.
+     */
+    const written = new Set<string>();
     let totalBytes = 0;
 
     if (entryCount > MAX_ENTRIES) {
@@ -111,7 +116,12 @@ export async function extractZip(zip: Buffer, targetDir: string): Promise<UnzipR
         const parent = await descend(root, segments.slice(0, -1), verified);
         const path = join(parent, segments[segments.length - 1] ?? "");
         await assertNotSymlink(path, name);
-        await writeFile(path, data);
+        // ⚠ **`wx` — 이미 있는 파일 위에 쓰지 않는다.** 「빈 폴더」 판정은 `.vscode` 같은
+        //    편집기 산물을 일부러 통과시키고(`emptyDir.ts`), 도움말도 「있어도 괜찮습니다」라고
+        //    말한다. 그런데 받는 아카이브가 같은 경로를 담고 있으면 **고객 파일이 소리 없이
+        //    교체된다** — 그리고 롤백은 그 파일을 기준선으로 봐서 못 되감는다.
+        //    「지금 폴더는 바뀌지 않습니다」라고 화면이 약속하는 자리다.
+        await writeExclusive(path, data, name, written);
         fileCount += 1;
     }
     return { fileCount };

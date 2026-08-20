@@ -1,6 +1,5 @@
 import { ok, rejects, strictEqual } from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
 import { gzipSync } from "node:zlib";
@@ -9,6 +8,7 @@ import { packProject } from "./zip.ts";
 import { isSafeHttpsUrl } from "./payload.ts";
 import { protectedPathWarning } from "./diagnostics.ts";
 import { DevtoolsError } from "./errors.ts";
+import { tempDir } from "./testing/tempDir.ts";
 
 /**
  * **가드가 실제로 막는지** 재는 파일.
@@ -25,7 +25,21 @@ import { DevtoolsError } from "./errors.ts";
  *   가드를 고칠 때는 여기 대응하는 시험을 **먼저 깨뜨려 보라.** 안 깨지면 그 시험이 가짜다.
  */
 
-const scratch = () => mkdtemp(join(tmpdir(), "zalkera-guard-"));
+const scratch = () => tempDir("zalkera-guard-");
+
+/**
+ * 루트와 **그 바깥**을 한 회수 단위 안에 둔다.
+ *
+ * 이탈 시험은 「루트 밖 파일이 그대로인가」를 봐야 하므로 루트 밖에 실물을 하나 만든다. 루트가
+ * 곧 임시 폴더면 그 「밖」은 `TMPDIR` 자체라 회수 대상이 아니다 — 실행마다 한 개씩 남았다.
+ * 한 겹을 더 파서 바깥까지 회수 안에 넣는다.
+ */
+async function scratchWithOutside(): Promise<{ root: string; outside: string }> {
+    const base = await tempDir("zalkera-guard-esc-");
+    const root = join(base, "root");
+    await mkdir(root, { recursive: true });
+    return { root, outside: join(base, `victim-${process.pid}.txt`) };
+}
 
 /**
  * tar 를 **바이트로 짓는다.** 디스크에 만들어 `tar` 로 묶으면 이런 아카이브를 만들 수 없다 —
@@ -63,8 +77,7 @@ function tarGz(entries: { name: string; body?: string; type?: string; link?: str
 // 이 넷이 같은 가드의 네 얼굴이다. 하나만 잠그면 나머지로 들어온다.
 
 test("가드 — `../` 로 해제 루트를 벗어나지 못한다", async () => {
-    const root = await scratch();
-    const outside = join(root, "..", `victim-${process.pid}.txt`);
+    const { root, outside } = await scratchWithOutside();
     await writeFile(outside, "원래 내용", "utf8");
 
     await rejects(

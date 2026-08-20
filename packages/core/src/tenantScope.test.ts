@@ -203,3 +203,26 @@ test("숫자로 못 읽으면 물음표 — 남의 글자를 문장에 싣지 �
     const line = say.switched(tenant, "abc" as unknown as number);
     ok(line.includes("버전 ? "), line);
 });
+
+test("동의 문면은 서버 문장을 싣되 소독한다", () => {
+  // 몇 건이 사라지는지는 서버만 안다 — 그래서 서버 문장을 그대로 싣는다. 나가는 자리가 모달
+  // `detail` 이라 링크 형태는 여기서 무력화해야 한다.
+  const ask = say.discardPendingConfirm(
+    captureTenant("bix"),
+    "게시 대기 중인 AI 변경 3건이 취소됩니다. [열기](command:workbench.action.terminal.new)",
+  );
+  match(ask.detail, /3건이 취소됩니다/);
+  match(ask.detail, /되돌릴 수 없습니다/);
+  ok(!/\]\(command:/.test(ask.detail), `링크가 살아 있다: ${ask.detail}`);
+  ok(ask.action.length > 0);
+});
+
+test("동의 문면도 사이트 이름을 소독한다", () => {
+  const ask = say.discardPendingConfirm(captureTenant(EVIL), "");
+  ok(!/\]\(command:/.test(ask.message), ask.message);
+});
+
+test("서버 문장이 길어도 모달을 밀어내지 않는다", () => {
+  const ask = say.discardPendingConfirm(captureTenant("bix"), "가".repeat(5000));
+  ok(ask.detail.length < 400, `detail 이 ${ask.detail.length}자다`);
+});

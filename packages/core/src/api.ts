@@ -64,7 +64,13 @@ export interface SiteRevision {
     status: string;
     isActive: boolean;
     createdAt: string;
-    note?: string | null;
+    /**
+     * 사람이 붙인 버전 이름. 백엔드 `SiteRevisionSummaryResponse.label` 이다.
+     *
+     * ⚠ **이름을 옮겨 적지 마라.** 서버가 안 보내는 이름을 여기 적으면 값이 늘 `undefined` 라
+     *   화면에서 조용히 사라진다 — 붙인 이름이 아무 데도 안 뜨는데 오류도 안 난다.
+     */
+    label?: string | null;
     /** FAILED 일 때만, 그리고 TENANT_ADMIN+ 에게만 온다 — 빌드 로그 tail. */
     failReason?: string | null;
 }
@@ -293,7 +299,23 @@ async function toError(response: Response): Promise<DevtoolsError> {
         "SERVER_REJECTED",
         serverMessage || `서버가 요청을 거절했습니다(HTTP ${response.status}).`,
         errorCode ? `오류 코드: ${errorCode}` : undefined,
+        undefined,
+        errorCode || undefined,
     );
+}
+
+/**
+ * 게시 대기 중인 AI 변경이 있어 서버가 **동의를 요구한** 거절. 백엔드 `BaselineShiftGuard` 가
+ * `discardPendingChanges=true` 를 받으면 통과시킨다.
+ *
+ * 다른 409(게시 진행 중·AI 작업 중·레포 연결 테넌트)에는 동의로 뚫는 길이 없다 — 그래서 코드를
+ * 정확히 하나만 본다. 「409 면 물어본다」로 넓히면 뚫을 수 없는 거절에도 동의 창을 띄우게 된다.
+ */
+const PENDING_AI_CHANGES = "PENDING_AI_CHANGES_CONFIRM_REQUIRED";
+
+/** 이 거절이 **사용자 동의 한 번으로 넘어갈 수 있는가.** */
+export function needsDiscardConsent(error: unknown): boolean {
+    return error instanceof DevtoolsError && error.serverCode === PENDING_AI_CHANGES;
 }
 
 const MAX_SERVER_MESSAGE = 300;

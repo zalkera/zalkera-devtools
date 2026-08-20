@@ -16,6 +16,33 @@ export interface Diagnostic {
     rule: string;
 }
 
+/** 접미 이름들. 순서는 판정에 영향이 없다 — 존재만 본다. */
+const SECRET_SUFFIXES = ["KEY", "SECRET", "TOKEN", "PASSWORD"];
+
+/**
+ * `NEXT_PUBLIC_…KEY|SECRET|TOKEN|PASSWORD` 를 찾는다. **선형이다.**
+ *
+ * 식별자를 최대 munch 로 물면 매치가 겹치지 않아 훑기가 한 번이고, 접미는 그 매치 안에서
+ * `endsWith` 로 본다. 정규식 하나로 하려 들면 접미 대안이 문자류의 부분집합이라 모호해진다.
+ */
+function matchPublicSecret(line: string): {0: string; index: number} | null {
+    for (const m of line.matchAll(/NEXT_PUBLIC_[A-Z0-9_]*/g)) {
+        const text = m[0];
+        if (m.index === undefined) continue;
+        // ⚠ **가장 늦게 끝나는 접미를 고른다.** 종전 정규식의 `*` 는 탐욕적이라 끝에서 되돌아오며
+        //   **가장 긴 매치**를 냈다. 순서대로 첫 접미를 잡으면 `NEXT_PUBLIC_KEY_SECRET` 에서
+        //   길이가 22 대신 15 가 되어 밑줄이 짧아진다(실측으로 갈렸다).
+        let end = -1;
+        for (const suffix of SECRET_SUFFIXES) {
+            const at = text.lastIndexOf(suffix);
+            if (at < 0) continue;
+            if (at + suffix.length > end) end = at + suffix.length;
+        }
+        if (end > 0) return {0: text.slice(0, end), index: m.index};
+    }
+    return null;
+}
+
 /**
  * 파일 하나를 본다. 경로와 내용만으로 판정한다(빌드·타입 정보 없음 — 저장할 때마다 도는 것이라 싸야 한다).
  */
@@ -60,7 +87,18 @@ export function diagnose(filePath: string, content: string): Diagnostic[] {
         }
 
         // ② 자격증명을 브라우저 번들에 싣는 자리. `NEXT_PUBLIC_` 은 클라이언트로 그대로 나간다.
-        const publicSecret = /NEXT_PUBLIC_[A-Z0-9_]*(KEY|SECRET|TOKEN|PASSWORD)/.exec(line);
+        // ⚠ **여기도 모호한 반복이었다.** 종전 형태 `NEXT_PUBLIC_[A-Z0-9_]*(KEY|SECRET|…)` 는
+        //   접미 대안이 앞 문자류의 **부분집합**이라, `NEXT_PUBLIC_` 이 대문자 런 안에 여러 번
+        //   나오면 시작점마다 줄 끝까지 훑고 되돌아온다 — 비용이 줄 길이의 제곱이다.
+        //   바로 위 규칙 ①에서 같은 병을 고쳤는데 **이 형제를 안 봤다.**
+        //
+        //   처방: 식별자를 **최대 munch 로 먼저 물고**(겹치지 않아 선형) 접미는 그 안에서 본다.
+        //   ⚠ 부정 lookahead 안에 같은 대안을 넣는 형태는 **같은 모호성을 다시 들여온다** —
+        //     lookahead 없는 이 형태로 둘 것.
+        //   재현: `node -e 'const{diagnose}=require("./packages/core/dist/diagnostics.js");
+        //         const s="NEXT_PUBLIC_".repeat(34133);const t=Date.now();diagnose("a.tsx",s);
+        //         console.log(Date.now()-t+"ms")'` → 종전 12,405ms · 지금 1ms
+        const publicSecret = matchPublicSecret(line);
         if (publicSecret && !/PREVIEW/.test(publicSecret[0])) {
             found.push({
                 line: index,

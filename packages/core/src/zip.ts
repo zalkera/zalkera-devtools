@@ -113,10 +113,6 @@ const ALWAYS_EXCLUDED = new Set([
     ".turbo",
     ".vercel",
     ".claude",
-    // ⚠ **`.zalkera/source.json` 은 우리가 만드는 출처 표식이다**(`localMark.ts`). 정본에 실리면,
-    //    서버가 만든 다음 판을 받은 폴더가 「나는 그 판에서 왔다」는 낡은 거짓을 품는다 — 그리고
-    //    그 거짓이 그 판을 받는 **모두에게** 복제된다. 표식을 쓰는 코드와 이 줄은 같은 커밋에 있다.
-    ".zalkera",
     // ── 아래 넷은 심의 실측으로 추가됐다(2026-08-10) ──────────────────────────
     // 이 목록이 옛 배치 기준으로 쓰인 뒤 **우리가 파일을 늘렸는데** 목록을 안 늘렸다.
     //
@@ -211,6 +207,18 @@ export interface PackResult {
     sha256: string;
 }
 
+/**
+ * **경로로 빼는 것.** 위 목록은 이름으로 빼므로 폴더가 통째로 사라진다 — 그러면 안 되는 자리가 있다.
+ *
+ * `.zalkera/source.json` 은 우리가 만드는 출처 표식이라 정본에 실리면 안 된다(다음 판을 받은
+ * 폴더가 「나는 그 판에서 왔다」는 낡은 거짓을 품고, 그 거짓이 그 판을 받는 모두에게 복제된다).
+ *
+ * ⚠ 그런데 **`.zalkera/` 를 통째로 빼면 안 된다.** 백엔드가 canonical tar 에서 그 폴더를 일부러
+ *   남기고(고객 소스와 동행), 같은 폴더의 `ASSETS-LICENSE.md`(라이선스 대장)·`pack.json`(판 출처)이
+ *   배송 문서가 가리키는 실물이다 — 폴더째 빼면 그 참조가 매달린다.
+ */
+const EXCLUDED_PATHS = new Set([".zalkera/source.json"]);
+
 /** 프로젝트를 zip 으로 묶는다. 제외 규칙은 위 목록 + 호출부 추가분. */
 export async function packProject(options: PackOptions): Promise<PackResult> {
     const excluded = new Set(
@@ -245,6 +253,10 @@ export async function packProject(options: PackOptions): Promise<PackResult> {
             if (item.isDirectory()) {
                 await walk(full);
             } else if (item.isFile()) {
+                // 경로로 빼는 것(위 `EXCLUDED_PATHS`) — 이름으로 빼면 폴더가 통째로 사라지는 자리다.
+                if (EXCLUDED_PATHS.has(relative(options.projectDir, full).split(sep).join("/").toLowerCase())) {
+                    continue;
+                }
                 const info = await stat(full);
                 if (info.size > MAX_FILE_BYTES) {
                     // ⚠ **조용히 빼지 않는다**(심의 차단 · 2026-08-03). 초판은 건너뛰고 로그 한 줄만 남겼는데,

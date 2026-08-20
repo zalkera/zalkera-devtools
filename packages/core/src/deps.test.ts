@@ -5,13 +5,13 @@
  * 특히 **취소**는 오류가 아니다 — `register()` 가 `CANCELLED` 를 보고 조용히 삼킨다. 코드가
  * 바뀌면 취소를 누른 사람에게 빨간 오류창이 뜬다(실제로 그랬다).
  */
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { existsSync } from "node:fs";
 import { test } from "node:test";
 import { ok, strictEqual } from "node:assert/strict";
 import { ensureDependencies, spawnFailure } from "./deps.ts";
+import { tempDir } from "./testing/tempDir.ts";
 
 /** `AbortController.abort()` 로 끊었을 때 Node 가 주는 것과 같은 모양. */
 function abortError(): Error {
@@ -56,8 +56,8 @@ test("AbortError 는 이름으로 판정한다 — 메시지 문면이 아니라
 // 안내하는 「폴더 연결」 흐름을 탄 고객은 **첫 실행에서 무조건** 자기 `node_modules` 를 잃는다.
 
 test("고객이 손수 설치한 node_modules 를 준비가 지우지 않는다", async () => {
-    const project = await mkdtemp(join(tmpdir(), "zalkera-deps-keep-"));
-    const cacheRoot = await mkdtemp(join(tmpdir(), "zalkera-deps-cache-"));
+    const project = await tempDir("zalkera-deps-keep-");
+    const cacheRoot = await tempDir("zalkera-deps-cache-");
     await writeFile(join(project, "package.json"), '{"name":"고객소스","dependencies":{"next":"14.0.0"}}');
     await writeFile(join(project, "package-lock.json"), '{"lockfileVersion":3,"packages":{}}');
     await mkdir(join(project, "node_modules", "next", "dist"), {recursive: true});

@@ -25,6 +25,7 @@ export {
 } from "./auth/store.ts";
 export {
   ZalkeraApi,
+  needsDiscardConsent,
   type ApiOptions,
   type IssuedPreviewKey,
   type PresetSource,
@@ -157,7 +158,17 @@ export {
   type Diagnostic,
 } from "./diagnostics.ts";
 export { BUSY, createReentrancyGuard } from "./reentrancy.ts";
-export { pickRevision, suggestFolderName, nextAvailableName } from "./fetchTarget.ts";
+export { pickRevision, noRevisionError, suggestFolderName, nextAvailableName } from "./fetchTarget.ts";
+export { decideErrorNotice, isCancelled, type ErrorNotice } from "./errorNotice.ts";
+export {
+  MAX_ISSUED_KEYS,
+  addIssuedKey,
+  addIssuedKeyWithOverflow,
+  readIssuedKeys,
+  readIssuedKeysWithOverflow,
+  removeIssuedKey,
+  type IssuedKey,
+} from "./issuedKeys.ts";
 export type { RevisionChoice, RevisionLike } from "./fetchTarget.ts";
 export {
     buildSourceMark,

@@ -72,6 +72,43 @@ const AUTOLINK_SHAPE = new RegExp(
  *   그래서 `cap` 을 512 로 죈다: `cap * 4 = 2048` 이라 자른 뒤 길이가 안쪽 상한을 **넘을 수 없다.**
  *   상용 최대 호출값이 300 이라 실제 문장은 짧아지지 않는다.
  */
+/**
+ * 고정점을 찾는 회수의 상한.
+ *
+ * ⚠ **이 숫자는 안전을 지탱하지 않는다.** 지탱하는 것은 회수를 다 쓰고도 고정점에 못 갔을 때
+ *   도는 폴백(문법 글자 제거)이다. 이 값을 1 로 줄여도 결과는 안전하고 **문장만 상한다** —
+ *   그러니 「몇 번이면 충분한가」를 여기서 추론하지 않는다. 한 번 돌 때마다 ASCII `)`·`>` 가
+ *   반드시 줄어들어 종료는 보장된다.
+ */
+const DEFANG_PASSES = 4;
+
+/**
+ * 링크 문법이 **더 안 나올 때까지** 무력화한다.
+ *
+ * ⚠ **한 번만 돌리면 샌다** — 추론이 아니라 실측이다. 겹친 링크 하나가 한 패스를 통과해
+ *   **렌더되는 링크 모양 그대로** 남는다. 남은 것의 목적지에는 전각 괄호가 한 글자 섞여 있어
+ *   오늘의 VS Code 는 그것을 실행 가능한 명령으로 풀지 못하지만, 「한 글자 차이로 안 도는 링크」는
+ *   막았다고 할 수 있는 상태가 아니다. 목적지 끝의 문장부호를 다듬는 렌더러가 하나 끼는 순간
+ *   그대로 살아난다.
+ *
+ *   이 소독기가 표방하는 것은 「링크 문법을 무력화한다」다. 그러면 **더 나올 것이 없을 때까지**
+ *   돌아야 그 말이 참이 된다. 입력은 이미 유계(`cap * 4`)라 회수도 유계다.
+ *
+ * 상한 안에 고정점에 못 가면 **문법 글자 자체를 지운다.** 「아마 안전할 것」으로 넘기지 않는다 —
+ * 문장이 상해도 누르면 명령이 도는 링크보다 낫다.
+ */
+function defang(text: string): string {
+  let out = text;
+  for (let pass = 0; pass < DEFANG_PASSES; pass += 1) {
+    const next = out
+      .replace(LINK_SHAPE, (_m, inner: string) => `\uFF3D\uFF08${inner}\uFF09`)
+      .replace(AUTOLINK_SHAPE, (_m, inner: string) => `\uFF1C${inner}\uFF1E`);
+    if (next === out) return out;
+    out = next;
+  }
+  return out.replace(/[\]()<>]/g, " ");
+}
+
 export function plainNotice(text: unknown, limit = 300): string {
   if (typeof text !== "string") return "";
   const cap = Math.min(limit, MAX_CAP);
@@ -80,16 +117,7 @@ export function plainNotice(text: unknown, limit = 300): string {
     /[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028\u2029]+/g,
     " ",
   );
-  // `](스킴:...)` 만 전각으로 바꾼다. 링크가 아니게 되고 글자는 남는다.
-  const defanged = stripped.replace(
-    LINK_SHAPE,
-    (_m, inner: string) => `\uFF3D\uFF08${inner}\uFF09`,
-  );
-  const plain = defanged.replace(
-    AUTOLINK_SHAPE,
-    (_m, inner: string) => `\uFF1C${inner}\uFF1E`,
-  );
-  const tidy = plain.replace(/\s+/g, " ").trim();
+  const tidy = defang(stripped).replace(/\s+/g, " ").trim();
   return tidy.length > cap ? `${tidy.slice(0, cap)}\u2026` : tidy;
 }
 
