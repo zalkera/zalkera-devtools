@@ -163,11 +163,6 @@ const WIRES = [
     ],
     [
         "packages/vscode/src/extension.ts",
-        "await clearTenantSetting();",
-        "A 로 로그아웃하고 B 로 로그인해도 화면에 A 의 사이트 이름이 남는다 — B 는 권한이 없을 수 있고, 있으면 자기 것인 줄 알고 올린다",
-    ],
-    [
-        "packages/vscode/src/extension.ts",
         "vscode.ConfigurationTarget.Workspace,",
         "고른 사이트를 한 범위만 지우면 남은 쪽이 되살아난다",
     ],
@@ -220,6 +215,30 @@ const BANS = [
     ],
 ];
 
+/**
+ * **계정에 딸린 자리는 목록에서 유도한다.** 손으로 옮겨 적으면 목록과 배선이 갈리고, 그러면
+ * 목록이 「지운다」고 적어 둔 것을 아무도 안 지운다.
+ *
+ * `accountState.ts` 가 자리마다 집행 조각을 들고 있으므로, 여기서는 그것이 확장에 실재하는지만 본다.
+ * 목록에 자리를 더하면 배선도 같이 요구된다 — 그것이 이 유도의 요점이다.
+ */
+function accountWires() {
+    const src = read("packages/core/src/accountState.ts");
+    const body = src.slice(src.indexOf("export const ACCOUNT_SCOPED"), src.indexOf("export type AccountScoped"));
+    const out = [];
+    for (const m of body.matchAll(/what:\s*"([^"]+)"[\s\S]*?why:\s*"([^"]+)"[\s\S]*?enforcedBy:\s*"((?:[^"\\]|\\.)*)"/g)) {
+        // 목록은 JS 문자열이라 `\"` 로 이스케이프돼 있다 — 실제 소스에서 찾을 형태로 되돌린다.
+        out.push(["packages/vscode/src/extension.ts", m[3].replace(/\\"/g, '"'), `로그아웃이 ${m[1]} 를 안 지운다 — ${m[2]}`]);
+    }
+    if (out.length === 0) {
+        console.error("✗ 계정 자리 목록을 하나도 못 읽었습니다(통과가 아닙니다) — accountState.ts 의 형태를 확인하십시오.");
+        process.exit(2);
+    }
+    return out;
+}
+
+WIRES.push(...accountWires());
+
 const problems = [];
 for (const [pattern, shape, instead] of BANS) {
     const dir = join(root, dirname(pattern));
@@ -265,4 +284,4 @@ if (problems.length > 0) {
     console.error("  형태를 바꾸셨다면 이 검사기의 목록도 같이 고치십시오 — 조용히 통과하는 쪽이 훨씬 나쁩니다.");
     process.exit(1);
 }
-console.log(`✓ 배선 검사 — ${WIRES.length}자리가 제자리에 있고 금지 ${BANS.length}종이 안 쓰였다`);
+console.log(`✓ 배선 검사 — ${WIRES.length}자리가 제자리에 있고 금지 ${BANS.length}종이 안 쓰였다(계정 자리 ${accountWires().length}은 목록에서 유도)`);

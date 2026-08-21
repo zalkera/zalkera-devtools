@@ -17,16 +17,41 @@
  *   토큰 만료는 다른 길로 처리된다 — 만료마다 사이트 선택이 풀리면 쓰던 사람이 매번 다시 고른다.
  */
 
-/** 로그아웃이 지워야 하는 자리. **이름이 아니라 「무엇이 남는가」로 읽는다.** */
+/**
+ * 로그아웃이 지워야 하는 자리와 **그것을 실제로 지우는 코드 조각**.
+ *
+ * ⚠ **목록만 두면 아무것도 강제하지 않는다.** 종전 판은 이 배열을 아무도 소비하지 않아
+ *   번들에서 통째로 사라졌다(트리셰이킹). 「목록으로 두면 하나가 조용히 빠지는 것을 막는다」고
+ *   적어 놓고, 실제로 막고 있던 것은 배선 검사뿐이었다 — 목록은 문서였다.
+ *
+ *   그래서 각 자리가 **어느 조각으로 집행되는지**를 함께 든다. `check-wiring.mjs` 가 이 값을
+ *   읽어 그 조각이 확장에 있는지 본다 — 목록에 자리를 더하면 배선도 같이 요구된다.
+ */
 export const ACCOUNT_SCOPED = [
-    /** 액세스·리프레시 토큰(SecretStorage). */
-    "tokens",
-    /** 서버에 발급받은 미리보기 열쇠 — 남기면 TTL(최대 12시간)까지 산다. */
-    "issuedKeys",
-    /** 고른 사이트(`zalkera.tenant`) — 남기면 다음 사람에게 그 이름이 보인다. */
-    "tenant",
-    /** 받은 폴더의 `.env.local` 에 심어 둔 미리보기 키 줄. */
-    "envCredentials",
+    {
+        /** 액세스·리프레시 토큰(SecretStorage). */
+        what: "tokens",
+        why: "남기면 로그아웃했는데 계정이 살아 있다",
+        enforcedBy: "await logout(store);",
+    },
+    {
+        /** 서버에 발급받은 미리보기 열쇠. */
+        what: "issuedKeys",
+        why: "남기면 그 열쇠가 서버 TTL(최대 12시간)까지 상용 데이터를 읽는다",
+        enforcedBy: "await revokeRecordedKeys();",
+    },
+    {
+        /** 고른 사이트(`zalkera.tenant`). */
+        what: "tenant",
+        why: "남기면 다음 사람에게 앞사람의 사이트 이름이 보이고, 권한이 있으면 자기 것인 줄 알고 올린다",
+        enforcedBy: "await clearTenantSetting();",
+    },
+    {
+        /** 받은 폴더의 `.env.local` 에 심어 둔 미리보기 키 줄. */
+        what: "envCredentials",
+        why: "남기면 그 폴더를 연 사람이 앞사람의 키로 상용에 붙는다",
+        enforcedBy: "stripCredentials(await readFile(envPath, \"utf8\")),",
+    },
 ] as const;
 
-export type AccountScoped = (typeof ACCOUNT_SCOPED)[number];
+export type AccountScoped = (typeof ACCOUNT_SCOPED)[number]["what"];
