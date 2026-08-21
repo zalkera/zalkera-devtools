@@ -476,7 +476,11 @@ function assertNoIndirectNotify(rel) {
  * 알림 **문구를 만들어 돌려주는** 파일. 알림 API 를 부르지 않아 자동 탐색에 안 걸리므로 여기 적는다.
  * 이 파일들은 템플릿 전부를 본다 — 어느 문자열이 알림으로 갈지는 호출부가 정하기 때문이다.
  */
-const NOTICE_SOURCES = ["packages/core/src/tenantScope.ts", "packages/core/src/errorNotice.ts"];
+const NOTICE_SOURCES = [
+    "packages/core/src/tenantScope.ts",
+    "packages/core/src/errorNotice.ts",
+    "packages/core/src/whyBlocked.ts",
+];
 
 /**
  * 정본을 **정의하는** 파일. 여기서 그 이름이 나오는 것은 선언이지 섀도잉이 아니고,

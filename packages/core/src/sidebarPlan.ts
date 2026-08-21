@@ -18,6 +18,8 @@ export interface SidebarState {
     site: string | null;
     previewUrl: string | null;
     keyExpiresAt: string | null;
+    /** 열린 폴더가 속한 사이트. 모르면 `null` — 그때는 아무 말도 하지 않는다. */
+    folderTenant: string | null;
 }
 
 /**
@@ -103,7 +105,10 @@ export function sidebarPlan(state: SidebarState): PlanGroup[] {
         ];
     }
 
-    const {tenant, site, previewUrl, keyExpiresAt} = state;
+    const {tenant, site, previewUrl, keyExpiresAt, folderTenant} = state;
+    // 어긋난 폴더는 **화면에서도** 어긋나 보여야 한다. 게이트가 누를 때 막는 것만으로는,
+    // 누르기 전까지 이 창이 건강해 보인다.
+    const mismatched = folderTenant !== null && tenant !== "" && site !== null && folderTenant !== tenant;
     const groups: PlanGroup[] = [
         {
             id: "site",
@@ -114,6 +119,10 @@ export function sidebarPlan(state: SidebarState): PlanGroup[] {
                 tenant
                     ? live(tenant, "zalkera.site.choose", "circle-filled", "다른 사이트로 바꿉니다")
                     : act("사이트 선택", "zalkera.site.choose", "circle-outline", "작업할 사이트를 고릅니다"),
+                // 경고로 그치면 다음 할 일이 화면에 없다 — 누르면 그 사이트로 돌아간다.
+                ...(mismatched
+                    ? [act("이 폴더의 사이트로 돌아가기", "zalkera.site.useFolder", "warning")]
+                    : []),
                 act("로그아웃", "zalkera.signOut", "sign-out"),
             ],
         },

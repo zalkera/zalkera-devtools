@@ -15,8 +15,9 @@ import { ACCOUNT_SCOPED } from "./accountState.ts";
 
 const WHAT = ACCOUNT_SCOPED.map((e) => e.what);
 
-test("계정에 딸린 자리가 넷이다 — 하나라도 빠지면 다음 사람이 앞사람 것을 본다", () => {
-  assert.deepEqual([...WHAT].sort(), ["envCredentials", "issuedKeys", "tenant", "tokens"]);
+test("계정에 딸린 자리가 다섯이다 — 하나라도 빠지면 다음 사람이 앞사람 것을 본다", () => {
+  assert.deepEqual([...WHAT].sort(), ["envCredentials",
+    "folderRegistry", "issuedKeys", "tenant", "tokens"]);
 });
 
 test("`tenant` 가 목록에 있다 — 이것이 빠져서 A 의 사이트가 B 에게 보였다", () => {

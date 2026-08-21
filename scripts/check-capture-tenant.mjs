@@ -59,12 +59,17 @@ const DEFINITION = join("packages", "core", "src", "tenantScope.ts");
 const REEXPORT = join("packages", "core", "src", "index.ts");
 
 /**
- * 브랜드를 만드는 자리. 지금은 `ensureApiFor` 하나다.
+ * 브랜드를 만드는 자리. 둘이다.
+ *
+ * ⑴ `ensureApiFor` — 사이트를 고르는 일반 경로.
+ * ⑵ `offerFolderElsewhere` — 고른 사이트가 **이 폴더의 것이 아닐 때** 그 사이트의 소스를 받는 자리.
+ *    이 창의 유효 사이트는 아직 폴더의 것이라 라이브로 읽으면 **엉뚱한 사이트를 받는다.** 고르는
+ *    그 순간이 값이 API 에 묶일 값으로 고정되는 순간이므로, 거기서 잡아 `openSite` 로 넘긴다.
  *
  * ⚠ `core` 안의 정의 줄(`export function captureTenant`)은 세지 않는다 — **만드는 곳이 아니라
  * 쓰는 곳**을 센다. `core` 에 래퍼 헬퍼가 생기면 그것도 여기 잡힌다(그게 요점이다).
  */
-const EXPECTED = 1;
+const EXPECTED = 2;
 /** `as CapturedTenant` 는 **정의 한 줄**뿐이어야 한다. 늘면 함수를 안 거치고 브랜드가 난 것이다. */
 const EXPECTED_CASTS = 1;
 

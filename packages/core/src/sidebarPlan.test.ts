@@ -10,7 +10,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { sidebarPlan, type SidebarState } from "./sidebarPlan.ts";
-import { commandsWithNeeds } from "./whyBlocked.ts";
+import { commandsWithNeeds, decideBlocked } from "./whyBlocked.ts";
 
 const base: SidebarState = {
   signedIn: true,
@@ -18,6 +18,7 @@ const base: SidebarState = {
   site: null,
   previewUrl: null,
   keyExpiresAt: null,
+  folderTenant: null,
 };
 const plan = (patch: Partial<SidebarState> = {}) => sidebarPlan({ ...base, ...patch });
 const ids = (patch?: Partial<SidebarState>) => plan(patch).map((g) => g.id);
@@ -195,6 +196,50 @@ test("요건 목록에 사이드바 밖 명령이 섞이지 않았다", () => {
   );
   // 팔레트에만 있는 것도 정당하다(예제로 시작·폴더 연결은 소스가 있으면 사이드바에서 빠진다).
   const PALETTE_ONLY = new Set(["zalkera.site.create", "zalkera.site.link", "zalkera.preview.restart"]);
-  const stale = commandsWithNeeds().filter((c) => !all.has(c) && !PALETTE_ONLY.has(c));
+  // 차단 알림의 버튼으로만 닿는 명령도 정당하다 — 그 자리가 곧 탈출구다.
+  //
+  // ⚠ **손으로 열거하지 않는다.** 예외를 손에 들면 이름이 바뀐 진짜 흔적도 같이 덮인다.
+  //    `decideBlocked` 를 실제로 돌려 **버튼으로 나오는 것만** 인정한다 — 게이트에서 버튼이
+  //    사라지면 그 명령은 여기서도 인정을 잃고 이 시험이 선다.
+  const reachableByButton = new Set(
+    [
+      { signedIn: false, tenant: "", site: null, folderTenant: null },
+      { signedIn: true, tenant: "", site: null, folderTenant: null },
+      { signedIn: true, tenant: "a", site: null, folderTenant: null },
+      { signedIn: true, tenant: "a", site: "/tmp/x", folderTenant: "b" },
+    ].flatMap((ready) =>
+      commandsWithNeeds().flatMap((c) => {
+        const blocked = decideBlocked(c, ready);
+        return blocked === null
+          ? []
+          : [blocked.action?.command, blocked.alternative?.command].flatMap((x) => (x ? [x] : []));
+      }),
+    ),
+  );
+  const stale = commandsWithNeeds().filter(
+    (c) => !all.has(c) && !PALETTE_ONLY.has(c) && !reachableByButton.has(c),
+  );
   assert.deepEqual(stale, [], `요건 목록에 죽은 명령이 있다: ${stale.join(" ")}`);
+});
+
+test("어긋난 폴더는 사이드바에서도 어긋나 보인다", () => {
+  // 게이트가 누를 때 막는 것만으로는, 누르기 전까지 이 창이 건강해 보인다.
+  // 경고로 그치면 안 된다 — **누를 수 있어야** 다음 할 일이 화면에 있다.
+  const warned = sidebarPlan({ ...base, site: "/tmp/x", tenant: "bix", folderTenant: "credium" })
+    .flatMap((g) => g.items)
+    .filter((i) => i.kind === "action" && i.command === "zalkera.site.useFolder");
+  assert.equal(warned.length, 1, "어긋남 복귀 항목이 사이드바에 없다");
+
+  // 어긋나지 않은 상태에서는 조용하다 — 늘 경고하면 경고가 배경이 된다.
+  for (const state of [
+    { ...base, site: "/tmp/x", tenant: "bix", folderTenant: "bix" },
+    { ...base, site: "/tmp/x", tenant: "bix", folderTenant: null },
+    { ...base, site: null, tenant: "bix", folderTenant: "credium" },
+    { ...base, site: "/tmp/x", tenant: "", folderTenant: "credium" },
+  ]) {
+    const noise = sidebarPlan(state)
+      .flatMap((g) => g.items)
+      .filter((i) => i.kind === "action" && i.command === "zalkera.site.useFolder");
+    assert.equal(noise.length, 0, `조용해야 할 상태에서 경고가 떴다: ${JSON.stringify(state)}`);
+  }
 });

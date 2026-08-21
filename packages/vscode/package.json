@@ -1,6 +1,6 @@
 {
   "name": "zalkera-devtools",
-  "version": "0.2.3",
+  "version": "0.3.0",
   "private": true,
   "license": "MIT",
   "type": "module",
@@ -47,6 +47,11 @@
       {
         "command": "zalkera.site.link",
         "title": "폴더 연결",
+        "category": "잘커라"
+      },
+      {
+        "command": "zalkera.site.useFolder",
+        "title": "이 폴더의 사이트로 돌아가기",
         "category": "잘커라"
       },
       {
