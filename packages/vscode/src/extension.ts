@@ -374,7 +374,7 @@ async function announceIfBlocked(command: string): Promise<boolean> {
   const blocked = whyBlocked(command, {
     signedIn: (await store.read()) !== null,
     tenant: tenantCode(),
-    site: workspaceDir() ?? null,
+    site: siteDir(),
   });
   if (!blocked) return false;
   // ⚠ 문면은 core 가 만든 상수다 — 서버 값이 아니라 소독이 필요 없다(`ours` 로 그 판단을 남긴다).
@@ -502,6 +502,12 @@ async function signOut(options: { quiet?: boolean } = {}): Promise<boolean> {
       log(".env.local 의 미리보기 키를 지웠습니다(다른 설정은 그대로).");
     }
   }
+  // ⚠ **고른 사이트도 지운다**(`ACCOUNT_SCOPED` 의 `tenant`). 남기면 A 로 로그아웃하고 B 로
+  //    로그인해도 화면에 **A 의 사이트 이름이 보인다** — B 는 그 사이트에 권한이 없을 수 있고,
+  //    있으면 더 나쁘다(자기 사이트인 줄 알고 올린다). 남의 테넌트 코드가 새는 자리이기도 하다.
+  //
+  //    **두 범위 모두** 지운다 — 한쪽만 지우면 남은 쪽이 되살아난다(`resetAll` 과 같은 규율).
+  await clearTenantSetting();
   await refreshSidebar();
   // 초기화가 부를 때는 자기 문구로 끝낸다 — 알림이 두 번 뜨면 무엇이 끝난 건지 흐려진다.
   if (!options.quiet)
@@ -542,16 +548,7 @@ async function resetAll(): Promise<void> {
   // 살아 있고 미리보기는 뒤늦게 뜨는데 사이트 설정만 사라진, 주석이 스스로 최악이라 부른 그 상태다.
   if (!(await signOut({ quiet: true }))) return;
 
-  // 사이트 설정은 **두 범위 모두** 지운다 — 한쪽만 지우면 남은 쪽이 되살아난다.
-  const config = vscode.workspace.getConfiguration("zalkera");
-  await config.update("tenant", undefined, vscode.ConfigurationTarget.Global);
-  if ((vscode.workspace.workspaceFolders?.length ?? 0) > 0) {
-    await config.update(
-      "tenant",
-      undefined,
-      vscode.ConfigurationTarget.Workspace,
-    );
-  }
+  // 사이트 설정은 로그아웃이 이미 지웠다(`ACCOUNT_SCOPED`). 두 벌로 두면 한쪽만 고쳐진다.
 
   log("초기화했습니다 — 로그인·사이트 설정·미리보기 자격증명을 지웠습니다.");
   await refreshSidebar();
@@ -1976,6 +1973,35 @@ async function saveTenant(code: string): Promise<void> {
     .update("tenant", code, configTarget());
 }
 
+/**
+ * 고른 사이트를 지운다. **두 범위 모두** — 한쪽만 지우면 남은 쪽이 되살아난다.
+ *
+ * 워크스페이스 범위는 폴더가 열려 있을 때만 쓸 수 있다(없으면 VS Code 가 던진다).
+ */
+async function clearTenantSetting(): Promise<void> {
+  const config = vscode.workspace.getConfiguration("zalkera");
+  await config.update("tenant", undefined, vscode.ConfigurationTarget.Global);
+  if ((vscode.workspace.workspaceFolders?.length ?? 0) > 0) {
+    await config.update(
+      "tenant",
+      undefined,
+      vscode.ConfigurationTarget.Workspace,
+    );
+  }
+}
+
+/**
+ * 이 창에 **사이트 소스**가 열려 있는가. 폴더만 있는 것과 다르다.
+ *
+ * ⚠ **판정이 하나여야 한다.** 사이드바와 요건 게이트가 서로 다른 기준을 쓰면, 사이드바는
+ *   「소스 없음」으로 그리는데 게이트는 통과시켜 사람이 눌렀다가 안쪽에서 다른 말로 막힌다.
+ *   실제로 게이트만 `workspaceDir()` 을 봤다(심의 권고).
+ */
+function siteDir(): string | null {
+  const dir = workspaceDir();
+  return dir && existsSync(join(dir, "package.json")) ? dir : null;
+}
+
 function tenantCode(): string {
   return (
     vscode.workspace.getConfiguration("zalkera").get<string>("tenant") ?? ""
@@ -2004,7 +2030,7 @@ async function refreshSidebar(): Promise<void> {
   sidebar.update({
     signedIn: (await store.read()) !== null,
     tenant: tenantCode(),
-    site: dir && existsSync(join(dir, "package.json")) ? dir : null,
+    site: siteDir(),
   });
 }
 

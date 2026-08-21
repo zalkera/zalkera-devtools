@@ -65,6 +65,7 @@ const SANITIZER_HOME = new Map([["count", "packages/core/src/notice.ts"]]);
 /** 표기 `ours` 의 정의가 사는 자리. [assertMarkerIsIdentity] 가 그것을 확인한다. */
 const MARKER_HOME = "packages/core/src/notice.ts";
 
+
 const NOTIFY = new Set(["showInformationMessage", "showWarningMessage", "showErrorMessage"]);
 
 const findings = [];
@@ -164,6 +165,8 @@ function collectCanonicalImports(source) {
 
 /** 이 스캔이 보고 있는 파일이 정본 모듈에서 들여온 이름들. [scan] 이 파일마다 갈아 끼운다. */
 let currentImports = new Set();
+/** 지금 보는 파일이 정본을 **정의하는** 자리인가. 거기서는 이름이 곧 정의다(수입하지 않는다). */
+let currentIsHome = false;
 
 /** 이 스캔이 보고 있는 파일의 선언 표. [scan] 이 파일마다 갈아 끼운다. */
 let currentDecls = new Map();
@@ -217,8 +220,15 @@ function isAllowed(e) {
     ) {
         return currentImports.has(CANON_FACTORY);
     }
+    // 소독기·표기 — ⚠ **이름만으로 믿지 않는다.** 그 이름을 지역에서 다시 선언하면 서버값이
+    //    소독기를 가장해 통과한다. 섀도 검사(`assertNoCanonicalShadow`)가 선언 형태를 열거해
+    //    막고 있지만, 열거는 반드시 새는 형태를 남긴다 — 실측으로 구조분해·클래스 필드가 셌다.
+    //    그래서 `isCanonicalObject` 와 같은 기준을 쓴다: **어느 모듈에서 왔는지**를 본다.
+    //
+    //    정의하는 파일 자신은 import 하지 않는다 — 거기서는 이름이 곧 정의다.
     const callee = ts.isPropertyAccessExpression(e.expression) ? e.expression.name.getText() : e.expression.getText();
-    return SANITIZERS.has(callee) || callee === MARKER;
+    if (!SANITIZERS.has(callee) && callee !== MARKER) return false;
+    return currentIsHome || currentImports.has(callee);
 }
 
 function describe(e) {
@@ -269,6 +279,7 @@ function scan(rel, { allTemplates }) {
     const source = parse(path);
     currentDecls = collectDeclarations(source);
     currentImports = collectCanonicalImports(source);
+    currentIsHome = HOMES.has(rel);
 
     walk(source, (node) => {
         // ⑴ 사용자 문구 정본: 템플릿 전부
@@ -364,20 +375,55 @@ function assertMarkerIsIdentity() {
  *
  * 현재 코드에 걸리는 자리는 0건이다 — **지금 닫아 두는 것**이지 오늘의 결함이 아니다.
  */
+/** 이 바인딩이 **정본 모듈에서 들여온** 것인가. 그렇다면 가리는 것이 아니라 쓰는 것이다. */
+function isCanonicalImport(node) {
+    for (let at = node; at; at = at.parent) {
+        if (!ts.isImportDeclaration(at)) continue;
+        const spec = at.moduleSpecifier;
+        if (!ts.isStringLiteral(spec)) return false;
+        return (
+            CANON_MODULES.has(spec.text) ||
+            NOTICE_SOURCES.some((rel) => spec.text.endsWith(rel.slice(rel.lastIndexOf("/"))))
+        );
+    }
+    return false;
+}
+
+/**
+ * 이 노드가 **이름을 묶는가**(선언·바인딩). 속성 접근·객체 키는 아니다.
+ *
+ * `import` 는 포함한다 — 정본이 아닌 모듈에서 같은 이름을 들여오는 것도 가리는 것이다.
+ * 정본 모듈에서 들여오는 것은 부르는 쪽이 이미 걸러 낸다(정의 파일은 통째로 제외).
+ */
+function isBindingOfName(node) {
+    if (!node.name || !ts.isIdentifier(node.name)) return false;
+    return (
+        ts.isVariableDeclaration(node) ||
+        ts.isFunctionDeclaration(node) ||
+        ts.isParameter(node) ||
+        ts.isBindingElement(node) ||
+        ts.isPropertyDeclaration(node) ||
+        ts.isMethodDeclaration(node) ||
+        ts.isClassDeclaration(node) ||
+        ts.isImportSpecifier(node) ||
+        ts.isImportClause(node) ||
+        ts.isNamespaceImport(node)
+    );
+}
+
 function assertNoCanonicalShadow(rel) {
-    // 정본을 **정의**하는 파일. 여기서 그 이름이 나오는 것은 선언이지 섀도잉이 아니다.
-    const homes = new Set([...SANITIZER_HOME.values(), MARKER_HOME, ...NOTICE_SOURCES]);
-    if (homes.has(rel)) return;
+    if (HOMES.has(rel)) return;
     const source = parse(join(root, rel));
     const shadowed = new Set([CANON_FACTORY, ...SANITIZERS, MARKER]);
     walk(source, (node) => {
-        const named =
-            (ts.isVariableDeclaration(node) || ts.isFunctionDeclaration(node) || ts.isParameter(node)) &&
-            node.name &&
-            ts.isIdentifier(node.name)
-                ? node.name.getText()
-                : null;
-        if (named === null || !shadowed.has(named)) return;
+        // ⚠ **선언 형태를 넓게 잡는다.** 셋(변수·함수·매개변수)만 보던 판은 구조분해·클래스
+        //    필드로 샜다(심의 실증). 이름을 **묶는** 자리는 전부 본다 — 열거가 좁으면 다음 형태가
+        //    또 새고, 그 사이 소독기 이름을 가장한 값이 알림으로 나간다.
+        if (!isBindingOfName(node)) return;
+        const named = node.name.getText();
+        if (!shadowed.has(named)) return;
+        // **정본 모듈에서 들여오는 것은 가리는 것이 아니다** — 그것이 정본 그 자체다.
+        if (isCanonicalImport(node)) return;
         const {line} = source.getLineAndCharacterOfPosition(node.getStart());
         findings.push(
             `${rel}:${line + 1} — 정본 이름 \`${named}\` 을 지역에 다시 선언했습니다 — ` +
@@ -418,6 +464,12 @@ function assertNoIndirectNotify(rel) {
  * 이 파일들은 템플릿 전부를 본다 — 어느 문자열이 알림으로 갈지는 호출부가 정하기 때문이다.
  */
 const NOTICE_SOURCES = ["packages/core/src/tenantScope.ts", "packages/core/src/errorNotice.ts"];
+
+/**
+ * 정본을 **정의하는** 파일. 여기서 그 이름이 나오는 것은 선언이지 섀도잉이 아니고,
+ * import 도 하지 않으므로 출처 검사에서도 자기 자신을 인정해야 한다.
+ */
+const HOMES = new Set([...SANITIZER_HOME.values(), MARKER_HOME, ...NOTICE_SOURCES]);
 
 /**
  * 소스로 볼 확장자. ⚠ `.ts` 만 보면 `.mts`·`.cts`·`.tsx` 로 옮기는 순간 그 파일이 **관할 밖**이

@@ -162,6 +162,22 @@ const WIRES = [
         "사이드바가 여섯 묶음을 항상 보여 주는데 요건이 안 맞는 것을 눌러도 아무 말이 없다 — 「눌러도 아무 일이 없다」에 갇힌다",
     ],
     [
+        "packages/vscode/src/extension.ts",
+        "await clearTenantSetting();",
+        "A 로 로그아웃하고 B 로 로그인해도 화면에 A 의 사이트 이름이 남는다 — B 는 권한이 없을 수 있고, 있으면 자기 것인 줄 알고 올린다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "vscode.ConfigurationTarget.Workspace,",
+        "고른 사이트를 한 범위만 지우면 남은 쪽이 되살아난다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "site: siteDir(),",
+        "사이드바와 요건 게이트가 서로 다른 기준으로 「소스가 있나」를 판정한다 — 화면은 없다는데 게이트는 통과시킨다",
+        2,
+    ],
+    [
         "packages/core/src/fetchSource.ts",
         "if (!choice) throw noRevisionError(revisions);",
         "공개 API 로 판을 안 주고 부르면 BUILDING·FAILED 판을 받으러 가고, 「없다」 문면도 옛 사본이 나온다",

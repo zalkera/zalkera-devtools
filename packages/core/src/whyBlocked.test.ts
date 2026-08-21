@@ -79,3 +79,11 @@ test("데려다 주는 자리가 그 자체로 막히지 않는다 — 고리가
 test("목록이 비지 않았다 — 비면 위 시험이 전부 공허하게 초록이다", () => {
   assert.ok(commandsWithNeeds().length >= 8, `요건 있는 명령이 ${commandsWithNeeds().length}개`);
 });
+
+test("도는 것을 멈추는 명령에는 요건이 없다 — 폴더가 닫혀도 dev 서버를 끌 수 있어야 한다", () => {
+  // 요건을 걸면 미리보기가 도는 중에 폴더/사이트 선택이 풀렸을 때 **중지 단추가 무동작**이
+  // 되어, 발급된 자격증명을 들고 있는 dev 서버를 화면에서 끌 수 없다(심의 권고).
+  for (const state of [NOTHING, SIGNED, PICKED, READY]) {
+    assert.equal(whyBlocked("zalkera.preview.stop", state), null, "중지가 막혔다");
+  }
+});

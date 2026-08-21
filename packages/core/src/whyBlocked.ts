@@ -39,10 +39,13 @@ export interface Blocked {
  *
  * ⚠ 순서가 뜻을 가진다. 로그인이 없으면 사이트 선택도 못 하므로 로그인을 먼저 말한다.
  *   두 개를 한 번에 말하면 사람은 무엇부터 할지 모른다.
+ *
+ * ⚠ **「미리보기 중지」는 요건이 없다.** 도는 것을 멈추는 명령은 **탈출구**다. 요건을 걸면,
+ *   미리보기가 도는 중에 폴더가 닫히거나 사이트 선택이 풀렸을 때 **중지 단추가 무동작**이 되어
+ *   dev 서버(발급된 자격증명을 들고 있다)를 화면에서 끌 수 없다(심의 권고).
  */
 const NEEDS: Readonly<Record<string, ReadonlyArray<"signedIn" | "tenant" | "site">>> = {
     "zalkera.preview.start": ["signedIn", "tenant", "site"],
-    "zalkera.preview.stop": ["signedIn", "tenant", "site"],
     "zalkera.preview.restart": ["signedIn", "tenant", "site"],
     "zalkera.agent.connect": ["signedIn", "tenant", "site"],
     "zalkera.precheck": ["signedIn", "tenant", "site"],

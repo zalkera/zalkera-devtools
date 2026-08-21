@@ -166,6 +166,8 @@ test("사이드바가 보여 주는 명령은 요건 판정이 **알고 있다**
     "zalkera.help",
     "zalkera.doctor",
     "zalkera.reset",
+    // 도는 것을 멈추는 명령도 탈출구다 — 요건을 걸면 폴더가 닫혔을 때 dev 서버를 못 끈다.
+    "zalkera.preview.stop",
   ]);
   const known = new Set(commandsWithNeeds());
   const shown = new Set(
