@@ -161,7 +161,7 @@ export {
 export { BUSY, createReentrancyGuard } from "./reentrancy.ts";
 export { pickRevision, noRevisionError, suggestFolderName, nextAvailableName } from "./fetchTarget.ts";
 export { decideErrorNotice, isCancelled, type ErrorNotice } from "./errorNotice.ts";
-export { whyBlocked, commandsWithNeeds, type Blocked, type Readiness } from "./whyBlocked.ts";
+export { decideBlocked, commandsWithNeeds, type Blocked, type Readiness } from "./whyBlocked.ts";
 export { ACCOUNT_SCOPED, type AccountScoped } from "./accountState.ts";
 export {
   MAX_ISSUED_KEYS,
@@ -180,8 +180,17 @@ export {
     mergeTenantSetting,
     SOURCE_MARK_PATH,
     writeSourceMarkTo,
+    writeBindingMarkTo,
     linkFolderToTenant,
 } from "./localMark.ts";
 export type { SourceMark } from "./localMark.ts";
+export {
+    folderBinding,
+    decideTenantScope,
+    decideSiteChoice,
+    needsRelinkConsent,
+    type TenantScope,
+    type SiteChoice,
+} from "./siteBinding.ts";
 export { sidebarPlan } from "./sidebarPlan.ts";
 export type { PlanGroup, PlanItem, SidebarState } from "./sidebarPlan.ts";

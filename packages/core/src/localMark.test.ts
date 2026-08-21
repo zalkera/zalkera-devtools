@@ -20,7 +20,8 @@ test("표식은 읽고 쓴 것이 같다", () => {
   const text = buildSourceMark({ tenant: "credium", revisionNo: 13, sha256: "abc", fetchedAt: "2026-08-20T00:00:00.000Z" });
   const mark = parseSourceMark(text);
   assert.equal(mark?.tenant, "credium");
-  assert.equal(mark?.revisionNo, 13);
+  assert.equal(mark?.format, 1);
+  assert.equal(mark?.format === 1 ? mark.revisionNo : null, 13);
 });
 
 test("표식이 없거나 깨졌으면 「모른다」다 — 「받은 적 없다」가 아니다", () => {
@@ -165,7 +166,7 @@ test("표식 — 정상 경로는 읽어 되돌아온다", async () => {
   });
   assert.equal(r.ok, true, r.ok ? "" : r.reason);
   const mark = parseSourceMark(readFileSync(join(root, SOURCE_MARK_PATH), "utf8"));
-  assert.equal(mark?.revisionNo, 13);
+  assert.equal(mark?.format === 1 ? mark.revisionNo : null, 13);
 });
 
 test("폴더 연결 — 못 읽으면 안 쓴다. 「없다」와 「못 읽는다」는 다르다", async () => {
@@ -184,4 +185,48 @@ test("폴더 연결 — 못 읽으면 안 쓴다. 「없다」와 「못 읽는�
   } finally {
     chmodSync(path, 0o644);
   }
+});
+
+test("표식 format 2 — 발행본과 재연결본을 읽는다", () => {
+  const published = parseSourceMark(
+    JSON.stringify({ format: 2, origin: "published", tenant: "alpha", revisionNo: 7, publishedAt: "t" }),
+  );
+  assert.equal(published?.tenant, "alpha");
+  assert.equal(published?.format === 2 ? published.origin : null, "published");
+
+  const linked = parseSourceMark(
+    JSON.stringify({ format: 2, origin: "linked", tenant: "beta", linkedAt: "t" }),
+  );
+  assert.equal(linked?.tenant, "beta");
+  assert.equal(linked?.format === 2 ? linked.origin : null, "linked");
+});
+
+test("모르는 형식·결손 필드는 null — 거짓 확신을 만들지 않는다", () => {
+  // 파서 교체 실수 하나로 기존 표식 전체가 null 이 되면, 이미 보호되던 폴더의 게이트가
+  // 소리 없이 꺼진다. 양방향으로 고정한다.
+  assert.equal(parseSourceMark(JSON.stringify({ format: 3, tenant: "a" })), null);
+  assert.equal(parseSourceMark(JSON.stringify({ format: 2, origin: "wat", tenant: "a" })), null);
+  // origin 은 맞는데 그 형상의 필수 칸이 없다.
+  assert.equal(parseSourceMark(JSON.stringify({ format: 2, origin: "linked", tenant: "a" })), null);
+  assert.equal(
+    parseSourceMark(JSON.stringify({ format: 2, origin: "published", tenant: "a", publishedAt: "t" })),
+    null,
+  );
+  // 소속이 없는 표식은 어느 형상이든 쓸모가 없다.
+  assert.equal(parseSourceMark(JSON.stringify({ format: 2, origin: "linked", tenant: "", linkedAt: "t" })), null);
+});
+
+test("재연결 표식에는 「이미 받아 두셨습니다」가 뜨지 않는다 — 판 주장이 없다", () => {
+  const linked = parseSourceMark(
+    JSON.stringify({ format: 2, origin: "linked", tenant: "alpha", linkedAt: "t" }),
+  );
+  assert.equal(holdsSameRevision(linked, "alpha", 1), false);
+  assert.equal(holdsSameRevision(linked, "alpha", 0), false);
+  // 발행본은 판을 알므로 그 판에 한해 참이다.
+  const published = parseSourceMark(
+    JSON.stringify({ format: 2, origin: "published", tenant: "alpha", revisionNo: 7, publishedAt: "t" }),
+  );
+  assert.equal(holdsSameRevision(published, "alpha", 7), true);
+  assert.equal(holdsSameRevision(published, "alpha", 8), false);
+  assert.equal(holdsSameRevision(published, "beta", 7), false);
 });

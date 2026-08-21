@@ -103,6 +103,31 @@ export function decideReadyPrompt(uploaded: CapturedTenant, current: string, rev
 const shown = (tenant: CapturedTenant | string): string => plainNotice(tenant, 64);
 
 export const say = {
+    /**
+     * 소속이 다른 폴더에서 사이트를 골랐을 때. **「바꿨습니다」로 말하지 않는다** — 이 창의
+     * 사이트는 바뀌지 않았고, 화면과 실제가 갈리는 문장을 만들면 안 된다.
+     */
+    pickedElsewhere(picked: string, binding: string): string {
+        return (
+            `「${shown(picked)}」 를 고르셨습니다. ` +
+            `이 폴더는 「${shown(binding)}」 의 소스라서, 그 작업은 다른 폴더에서 합니다.`
+        );
+    },
+    /** 재연결 동의 — 무엇이 달라지는지 **결과로** 말한다. */
+    relinkConfirm(binding: string, picked: string): string {
+        return (
+            `이 폴더는 「${shown(binding)}」 의 소스입니다. ` +
+            `「${shown(picked)}」 로 다시 연결하면, 이 폴더의 소스가 그 사이트로 올라가게 됩니다.`
+        );
+    },
+    /** 이 폴더의 사이트로 돌아왔을 때. */
+    backToFolderSite(tenant: string): string {
+        return `사이트 「${shown(tenant)}」 — 이 폴더의 사이트로 돌아왔습니다.`;
+    },
+    /** 소속 없던 소스 폴더가 그 사이트를 입양했을 때. */
+    folderAdopted(tenant: string): string {
+        return `사이트 「${shown(tenant)}」 — 이 폴더를 이 사이트에 연결했습니다.`;
+    },
     /** 받기 — 어느 사이트의 어느 판을, 어디로. 「지금 폴더는 그대로」가 이 문장의 요점이다. */
     fetchTargetTitle(tenant: CapturedTenant, revisionNo: number): string {
         return `「${shown(tenant)}」 버전 ${count(revisionNo)} 를 받을 새 빈 폴더를 고르세요 — 지금 폴더는 그대로 둡니다`;

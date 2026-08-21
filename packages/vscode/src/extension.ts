@@ -46,7 +46,12 @@ import {
   createReentrancyGuard,
   pickRevision,
   decideErrorNotice,
-  whyBlocked,
+  decideBlocked,
+  folderBinding,
+  decideTenantScope,
+  decideSiteChoice,
+  needsRelinkConsent,
+  writeBindingMarkTo,
   isCancelled,
   readIssuedKeysWithOverflow,
   addIssuedKeyWithOverflow,
@@ -166,6 +171,61 @@ function reapDropped(dropped: readonly IssuedKey[]): void {
 }
 let persistedState: vscode.Memento;
 
+/** 사이트별 마지막 로컬본 폴더. 창 사이에 공유된다. */
+const FOLDER_REGISTRY_STATE = "zalkera.folderRegistry";
+
+/**
+ * 사이트 → 마지막 로컬본 절대경로.
+ *
+ * ⚠ **정본이 아니다.** 경로는 지워지고 옮겨지고 **재활용된다.** 제안 전에 반드시 그 폴더를 열어
+ *   소속을 확인한다(`confirmedFolderFor`) — 기억만 믿고 열어 주면, 다른 사이트를 담게 된 폴더를
+ *   「그 사이트 폴더」라고 내주는 바로 그 사고가 된다.
+ */
+function folderRegistry(): Record<string, string> {
+  const raw = persistedState.get(FOLDER_REGISTRY_STATE);
+  if (typeof raw !== "object" || raw === null) return {};
+  const out: Record<string, string> = {};
+  for (const [site, dir] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof dir === "string" && dir.length > 0) out[site] = dir;
+  }
+  return out;
+}
+
+function rememberFolder(tenant: string, dir: string): void {
+  void persistedState.update(FOLDER_REGISTRY_STATE, {...folderRegistry(), [tenant]: dir});
+}
+
+/** 계정이 바뀌면 통째로 버린다 — 앞사람의 사이트 코드와 폴더 경로가 남는 자리다. */
+async function clearFolderRegistry(): Promise<void> {
+  await persistedState.update(FOLDER_REGISTRY_STATE, undefined);
+}
+
+/**
+ * 레지스트리가 기억하는 그 사이트의 폴더 — **확증까지 마친 것만** 돌려준다.
+ * 폴더가 사라졌거나 그 사이 다른 사이트를 담게 됐으면 `null`.
+ */
+function confirmedFolderFor(tenant: string): string | null {
+  const dir = folderRegistry()[tenant];
+  if (dir === undefined || !existsSync(dir)) return null;
+  const linked = workspaceLinkAt(dir);
+  return folderBinding(readSourceMarkAt(dir), linked) === tenant ? dir : null;
+}
+
+/**
+ * 그 폴더가 **자기 `.vscode/settings.json` 에** 적어 둔 사이트. 지금 창의 설정이 아니다 —
+ * 다른 폴더를 확증하는 자리라 파일을 직접 읽는다.
+ */
+function workspaceLinkAt(dir: string): string | null {
+  try {
+    const raw: unknown = JSON.parse(readFileSync(join(dir, ".vscode", "settings.json"), "utf8"));
+    if (typeof raw !== "object" || raw === null) return null;
+    const value = (raw as Record<string, unknown>)["zalkera.tenant"];
+    return typeof value === "string" && value.length > 0 ? value : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * ⚠ **테넌트를 함께 들고 다닌다**(클로징 심의 차단 · 2026-08-10). 종전에는 keyId 만 캡처하고 폐기할 때
  * `tenantCode()` 를 **라이브로** 읽었다. 그런데 `zalkera.tenant` 는 워크스페이스 범위라 창마다 다르고,
@@ -256,6 +316,7 @@ export function activate(context: vscode.ExtensionContext): void {
     register("zalkera.site.create", () => withReceiveGuard(startFromExample)),
     register("zalkera.site.open", () => withReceiveGuard(openSite)),
     register("zalkera.site.link", linkFolder),
+    register("zalkera.site.useFolder", useFolderSite),
     register("zalkera.preview.start", startPreviewCommand),
     register("zalkera.preview.stop", stopPreview),
     register("zalkera.preview.restart", async () => {
@@ -371,21 +432,42 @@ async function openBundledHelp(): Promise<void> {
  * 막혔으면 `true` — 부르는 쪽은 손을 떼야 한다.
  */
 async function announceIfBlocked(command: string): Promise<boolean> {
-  const blocked = whyBlocked(command, {
+  const blocked = decideBlocked(command, {
     signedIn: (await store.read()) !== null,
     tenant: tenantCode(),
     site: siteDir(),
+    folderTenant: currentFolderBinding(),
   });
   if (!blocked) return false;
-  // ⚠ 문면은 core 가 만든 상수다 — 서버 값이 아니라 소독이 필요 없다(`ours` 로 그 판단을 남긴다).
-  const picked = await vscode.window.showInformationMessage(
-    ours(blocked.message),
-    ...(blocked.action ? [blocked.action.label] : []),
+  // ⚠ 어긋남 문면에는 폴더·서버가 정한 사이트 코드가 들어간다 — 소독은 core 안(`plainNotice`)에서
+  //    이미 끝났다. 그래서 여기에 `ours` 를 붙이면 그 표기가 거짓이 된다.
+  const buttons = [blocked.action, blocked.alternative].filter(
+    (b): b is {label: string; command: string} => b !== undefined,
   );
-  if (blocked.action && picked === blocked.action.label) {
-    await vscode.commands.executeCommand(blocked.action.command);
+  const picked = await vscode.window.showInformationMessage(
+    blocked.message,
+    ...buttons.map((b) => b.label),
+  );
+  const chosen = buttons.find((b) => b.label === picked);
+  if (chosen) {
+    await vscode.commands.executeCommand(chosen.command);
   }
   return true;
+}
+
+/**
+ * 열린 폴더가 속한 사이트. 표식이 이기고, 없으면 워크스페이스 링크다.
+ *
+ * ⚠ 링크는 **병합 조회로 읽으면 안 된다** — 전역 값과 구분이 안 돼, 폴더가 아무것도 안 적었는데
+ *   전역의 값을 그 폴더의 소속으로 오해한다.
+ */
+function currentFolderBinding(): string | null {
+  const dir = workspaceDir();
+  if (dir === undefined) return null;
+  const linked =
+    vscode.workspace.getConfiguration("zalkera").inspect<string>("tenant")
+      ?.workspaceValue ?? null;
+  return folderBinding(readSourceMarkAt(dir), linked);
 }
 
 function register(
@@ -493,6 +575,9 @@ async function signOut(options: { quiet?: boolean } = {}): Promise<boolean> {
   //    던질 수 있는데, 뒤에 두면 토큰은 지워졌는데 **사이트만 남는** 부분 실패가 된다(심의 관찰).
   //    지우는 순서는 「되돌릴 수 없는 것부터」가 아니라 「실패해도 다음이 도는 순서」다.
   await clearTenantSetting();
+  // 사이트별 로컬본 지도도 계정 것이다 — 남기면 다음 사람에게 앞사람의 사이트 코드와 폴더
+  // 경로가 보이고, 확장이 그 폴더를 열도록 **권한다.**
+  await clearFolderRegistry();
   // 로컬 자격증명도 함께 지운다(A4) — **키 줄만** 지우고 고객이 넣은 값은 남긴다.
   const dir = previewDir ?? workspaceDir();
   if (dir) {
@@ -637,10 +722,13 @@ async function revokeRecordedKeys(): Promise<void> {
  *   않는다 — 그 사실을 대화상자 제목과 완료 알림이 말한다. 고친 것을 옮기는 것은 사람 몫이고,
  *   우리는 병합하지 않는다.
  */
-async function openSite(): Promise<void> {
+async function openSite(pinned?: CapturedTenant): Promise<void> {
   // ⚠ `ensureApi()` 가 아니라 **`ensureApiFor()`** 다. 이 명령은 사이트 이름을 화면에 말하는데,
   //    표기와 동작이 같은 값을 보려면 캡처된 테넌트가 필요하다(`tenantScope.ts` 의 규율).
-  const { api, tenant } = await ensureApiFor();
+  //
+  // `pinned` 는 「고른 사이트가 이 폴더 것이 아니다」 흐름이 넘긴다. 그 창의 유효 사이트는 아직
+  // 폴더의 것이라, 붙들어 오지 않으면 **엉뚱한 사이트의 소스**를 받는다.
+  const { api, tenant } = await ensureApiFor(pinned);
 
   // 판을 **먼저 정한다.** 코어 폴백에 맡기면 ⑴ 받기 전에 판 번호를 말할 수 없고 ⑵ 화면에 말한
   // 판과 실제로 받는 판이 갈릴 수 있으며 ⑶ 켜진 판이 없을 때 목록 첫 줄(BUILDING 일 수 있다)을
@@ -680,6 +768,7 @@ async function openSite(): Promise<void> {
 
   await writeSourceMark(root, tenant, result);
   await linkFolderToSite(root, tenant);
+  rememberFolder(String(tenant), root);
 
   // ⚠ 받은 폴더가 **지금 열린 폴더**일 수 있다. 그때 갱신하지 않으면 사이드바가 계속 「불러오기」에
   //    머물러 미리보기·발행으로 가는 길이 화면에서 끊긴다.
@@ -1045,6 +1134,33 @@ async function precheckCommand(): Promise<void> {
 }
 
 /** B3 — 이미 가진 폴더를 이 테넌트에 붙인다. 지금은 테넌트 코드를 설정에 적는 것이 전부다. */
+/**
+ * 「이 폴더의 사이트로 돌아가기」 — 어긋난 상태의 **탈출구**.
+ *
+ * 「폴더 연결」과 다르다: **소속을 바꾸지 않고 링크만 소속에 맞춘다.** 그래서 동의 모달이 없다 —
+ * 이 폴더가 원래부터 속해 있던 사이트로 창을 되돌릴 뿐이다.
+ *
+ * ⚠ 표식이 그 사이 사라졌으면 **아무것도 쓰지 않는다.** 링크만 남은 폴더에서 이 명령이 그 링크를
+ *   자기 자신으로 다시 적어 봐야 하는 일이 없고, 없는 소속을 지어내면 그것이 오염이다.
+ */
+async function useFolderSite(): Promise<void> {
+  const dir = requireWorkspace();
+  const mark = readSourceMarkAt(dir);
+  if (mark === null) {
+    void vscode.window.showInformationMessage(
+      ours("이 폴더에는 사이트 표식이 없습니다 — 「폴더 연결」로 사이트를 정해 주세요."),
+    );
+    return;
+  }
+  await vscode.workspace
+    .getConfiguration("zalkera")
+    .update("tenant", mark.tenant, vscode.ConfigurationTarget.Workspace);
+  rememberFolder(mark.tenant, dir);
+  log(`작업 사이트를 이 폴더의 사이트(${mark.tenant})로 되돌렸습니다.`);
+  await refreshSidebar();
+  void vscode.window.showInformationMessage(say.backToFolderSite(mark.tenant));
+}
+
 async function linkFolder(): Promise<void> {
   // 폴더가 없으면 연결할 대상이 없다 — 종전에는 전역에 적어 놓고 "이 작업 공간을" 이라고 말했다.
   if (workspaceDir() === undefined) {
@@ -1061,7 +1177,33 @@ async function linkFolder(): Promise<void> {
     { title: "이 폴더를 어느 사이트로 연결할까요?" },
   );
   if (!choice?.description) return;
-  await saveTenant(choice.description);
+  const dir = requireWorkspace();
+  const binding = currentFolderBinding();
+  // ⚠ **소속을 바꾸는 것은 이 자리뿐이다.** 그래서 조용히 하지 않는다 — 이 폴더의 소스가 다른
+  //    사이트로 올라가게 되는 변경이다.
+  if (needsRelinkConsent(binding, choice.description)) {
+    const go = await vscode.window.showWarningMessage(
+      say.relinkConfirm(binding ?? "", choice.description),
+      { modal: true },
+      "다시 연결",
+    );
+    if (go !== "다시 연결") return;
+  }
+  // ⚠ **`saveTenant` 를 지나지 않는다.** 그 판정은 「사이트 선택이 남의 폴더를 덮지 못하게」 하는
+  //    것이고, 이 자리는 소속을 **정하는** 쓰기라 그 판정에 걸리면 재연결 자체가 불가능해진다.
+  await vscode.workspace
+    .getConfiguration("zalkera")
+    .update("tenant", choice.description, vscode.ConfigurationTarget.Workspace);
+  // 링크와 표식을 **같이** 쓴다 — 둘이 갈리면 「어긋남은 사고다」가 성립하지 않는다.
+  const marked = await writeBindingMarkTo(dir, {
+    origin: "linked",
+    tenant: choice.description,
+    linkedAt: new Date().toISOString(),
+  });
+  if (!marked.ok) {
+    log(`소속 표식을 남기지 못했습니다(${marked.reason}) — 연결 자체는 끝났습니다.`);
+  }
+  rememberFolder(choice.description, dir);
   log(
     `이 폴더를 ${plainNotice(choice.label, 64)}(${plainNotice(choice.description, 64)}) 에 연결했습니다.`,
   );
@@ -1412,6 +1554,24 @@ async function publishCommand(): Promise<void> {
   );
   // 서버가 보낸 한계·상태 안내는 **그대로 보여 준다**(memo66 §4 거짓 성공 차단).
   if (result.capabilityNote) log(result.capabilityNote);
+
+  // ⚠ **여기서 이 폴더의 소속이 사실이 된다.** 표식 없이 발행한 폴더(프리셋 시작·구판 받기·타
+  //    입구)는 그때까지 어느 사이트의 것도 아니었는데, 사이트 이름을 박은 확인 모달을 지난 이
+  //    발행이 그것을 정한다. 다음부터는 게이트가 이 폴더를 지킨다.
+  //
+  //    받기와 **동의의 성격이 다르다**: 받기의 표식은 사용자가 대상으로 고른 폴더에 생기지만,
+  //    이 표식은 파일 생성을 고른 적 없는 폴더에 부수효과로 생긴다. 비밀이 아니고 zip 제외·
+  //    `.gitignore` 가 걸려 있어 수용하지만, 그 차이는 여기 적어 둔다.
+  const marked = await writeBindingMarkTo(dir, {
+    origin: "published",
+    tenant: String(tenant),
+    revisionNo: result.revisionNo,
+    publishedAt: new Date().toISOString(),
+  });
+  if (!marked.ok) {
+    log(`소속 표식을 남기지 못했습니다(${marked.reason}) — 발행 자체는 끝났습니다.`);
+  }
+  rememberFolder(String(tenant), dir);
 
   // `STATIC` 은 올리는 즉시 READY 지만 `NEXT_SOURCE` 는 서버가 빌드해야 한다. 종전에는 여기서
   // 이야기가 끝나 **왜 못 켜는지 알 수 없었다.**
@@ -1856,18 +2016,69 @@ async function chooseTenant(force = false): Promise<string> {
 /** 사이드바·팔레트에서 부르는 사이트 선택. 취소는 조용히 끝낸다. */
 async function chooseSite(): Promise<void> {
   try {
+    // ⚠ **소속을 고르기 전에 읽는다.** `chooseTenant` 가 설정을 쓰고 나면 이 값이 오염된다.
+    const binding = currentFolderBinding();
     const code = await chooseTenant(true);
-    log(`작업 사이트를 ${code} 로 바꿨습니다.`);
+    const choice = decideSiteChoice({
+      picked: code,
+      binding,
+      siteFolderOpen: siteDir() !== null,
+      knownFolderConfirmed: confirmedFolderFor(code) !== null,
+    });
     await refreshSidebar();
-    // `code` 는 서버 응답(`/api/me` 의 `tenants[].code`)이다 — 소독 없이 알림에 넣으면
-    // 비-모달이 명령 링크로 렌더한다(재심의 실증).
-    void vscode.window.showInformationMessage(
-      `사이트: ${plainNotice(code, 64)}`,
-    );
+    // `code`·`binding` 은 서버·폴더가 정한 값이다 — 소독 없이 알림에 넣으면 비-모달이 명령
+    // 링크로 렌더한다(재심의 실증).
+    if (choice.kind === "switched") {
+      log(`작업 사이트를 ${code} 로 바꿨습니다.`);
+      void vscode.window.showInformationMessage(`사이트: ${plainNotice(code, 64)}`);
+      return;
+    }
+    if (choice.kind === "adopted") {
+      log(`이 폴더를 ${code} 사이트에 연결했습니다.`);
+      void vscode.window.showInformationMessage(say.folderAdopted(code));
+      return;
+    }
+    await offerFolderElsewhere(code, binding, choice.offer);
   } catch (error) {
     if (isCancelled(error)) return;
     throw error;
   }
+}
+
+/**
+ * 고른 사이트가 **이 폴더의 것이 아닐 때** 폴더 전환을 권한다.
+ *
+ * ⚠ **이 창의 사이트는 바뀌지 않았다**(`saveTenant` 가 아무것도 안 적었다). 그러니 「바꿨습니다」로
+ *   말하면 안 된다 — 화면과 실제가 갈린다.
+ */
+async function offerFolderElsewhere(
+  picked: string,
+  binding: string | null,
+  offer: "open" | "fetch",
+): Promise<void> {
+  log(`이 폴더는 ${binding ?? "다른"} 사이트의 소스라 ${picked} 작업은 다른 폴더에서 합니다.`);
+  const label = offer === "open" ? "그 사이트 폴더 열기" : "그 사이트 소스 받기";
+  const answer = await vscode.window.showInformationMessage(
+    say.pickedElsewhere(picked, binding ?? ""),
+    label,
+  );
+  if (answer !== label) return;
+  if (offer === "open") {
+    const dir = confirmedFolderFor(picked);
+    // 확증은 물어보기 전에도 했지만 **누른 시점에 다시 한다** — 그 사이 폴더가 사라지거나
+    // 다른 사이트를 담게 됐을 수 있고, 그때 여는 것이 이 설계가 막으려는 사고다.
+    if (dir === null) {
+      void vscode.window.showInformationMessage(
+        ours("그 사이트의 로컬본을 찾지 못했습니다 — 「불러오기」로 소스를 받아 주세요."),
+      );
+      return;
+    }
+    await vscode.commands.executeCommand("vscode.openFolder", vscode.Uri.file(dir));
+    return;
+  }
+  // ⚠ **고른 사이트를 붙들고 간다.** 이 창의 유효 사이트는 아직 이 폴더의 것이라, 그냥 부르면
+  //   받기가 **엉뚱한 사이트의 소스**를 내려받는다.
+  await withReceiveGuard(() => openSite(captureTenant(picked)));
 }
 
 async function ensureApi(): Promise<ZalkeraApi> {
@@ -1952,23 +2163,28 @@ function apiBase(): string {
 }
 
 /**
- * 작업 사이트를 어디에 적을지 고른다.
+ * 고른 사이트를 적는다. **범위 판정은 core 가 한다**(`decideTenantScope`).
  *
- * **폴더별로 다른 사이트를 다룰 수 있어야 하므로** 기본은 워크스페이스다. 그런데 폴더를 열지 않은
- * 창에서는 쓸 곳이 없어 VS Code 가 던진다 — `Unable to write to Workspace Settings because no
- * workspace is opened`(실사용 신고). 확장은 폴더 없이도 시작할 수 있으므로(사이트 선택 → 예제로
- * 시작 순서가 자연스럽다) 그때는 전역에 적는다. 뒤에 폴더를 열고 다시 고르면 그 폴더 값이 이긴다.
+ * ⚠ **소속이 다른 폴더에서는 아무것도 적지 않는다.** 폴더 링크를 덮으면 그 폴더가 자기를 남의
+ *   사이트라고 말하게 되고, 전역에 적으면 그 값이 표식도 링크도 없는 폴더를 여는 순간 되살아나
+ *   게이트가 설 수 없는 자리에서 교차 업로드가 된다.
  */
-function configTarget(): vscode.ConfigurationTarget {
-  return (vscode.workspace.workspaceFolders?.length ?? 0) > 0
-    ? vscode.ConfigurationTarget.Workspace
-    : vscode.ConfigurationTarget.Global;
-}
-
 async function saveTenant(code: string): Promise<void> {
+  const scope = decideTenantScope({
+    siteFolderOpen: siteDir() !== null,
+    binding: currentFolderBinding(),
+    chosen: code,
+  });
+  if (scope === "none") return;
   await vscode.workspace
     .getConfiguration("zalkera")
-    .update("tenant", code, configTarget());
+    .update(
+      "tenant",
+      code,
+      scope === "workspace"
+        ? vscode.ConfigurationTarget.Workspace
+        : vscode.ConfigurationTarget.Global,
+    );
 }
 
 /**
@@ -2029,6 +2245,9 @@ async function refreshSidebar(): Promise<void> {
     signedIn: (await store.read()) !== null,
     tenant: tenantCode(),
     site: siteDir(),
+    // ⚠ **게이트와 같은 값을 본다**(`announceIfBlocked`). 둘이 다른 기준을 쓰면 사이드바는
+    //    건강해 보이는데 누르면 막히는, 이 레포가 이미 한 번 겪은 형상이 된다.
+    folderTenant: currentFolderBinding(),
   });
 }
 

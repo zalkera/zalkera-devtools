@@ -22,7 +22,11 @@ import {writeOwnFile} from "./safeWrite.ts";
 
 export const SOURCE_MARK_PATH = ".zalkera/source.json";
 
-export interface SourceMark {
+/**
+ * 받기가 남기는 표식. **받기는 계속 이 형식을 쓴다** — 구판 확장의 판독기가 이것만 알므로,
+ * 가장 흔한 경로에서 회귀가 없다.
+ */
+export interface FetchedMark {
     /** 형식 판올림 자리. 모르는 값이면 읽는 쪽이 「모른다」로 다룬다. */
     format: 1;
     tenant: string;
@@ -32,8 +36,42 @@ export interface SourceMark {
     fetchedAt: string;
 }
 
-export function buildSourceMark(input: Omit<SourceMark, "format">): string {
-    const mark: SourceMark = {format: 1, ...input};
+/**
+ * 발행이 남기는 표식. sha256 칸이 없다 — 업로드 zip 의 지문은 정본 tar 의 지문과 **다른 물건**이라,
+ * 같은 칸에 넣으면 칸의 뜻이 거짓이 된다.
+ */
+export interface PublishedMark {
+    format: 2;
+    origin: "published";
+    tenant: string;
+    revisionNo: number;
+    publishedAt: string;
+}
+
+/** 명시 재연결이 남기는 표식. **판 주장을 하지 않는다.** */
+export interface LinkedMark {
+    format: 2;
+    origin: "linked";
+    tenant: string;
+    linkedAt: string;
+}
+
+/**
+ * 폴더의 사이트 소속과 그 근거. 어느 형상이든 `tenant` 는 있다 — 소속을 묻는 쪽은 그 칸만 본다.
+ *
+ * ⚠ **format 2 는 구판 확장에서 「모른다」로 강하한다**(구판 판독기가 `format !== 1` 을 null 로
+ *   다룬다). 막는 것도 없고 거짓 확신도 없으므로 그 강하는 안전한 방향이다.
+ */
+export type SourceMark = FetchedMark | PublishedMark | LinkedMark;
+
+export function buildSourceMark(input: Omit<FetchedMark, "format">): string {
+    const mark: FetchedMark = {format: 1, ...input};
+    return `${JSON.stringify(mark, null, 2)}\n`;
+}
+
+/** 발행·재연결이 쓰는 표식의 본문. 받기는 [buildSourceMark] 를 쓴다. */
+export function buildBindingMark(input: Omit<PublishedMark, "format"> | Omit<LinkedMark, "format">): string {
+    const mark: SourceMark = {format: 2, ...input} as SourceMark;
     return `${JSON.stringify(mark, null, 2)}\n`;
 }
 
@@ -51,17 +89,41 @@ export function parseSourceMark(text: string | null): SourceMark | null {
     }
     if (typeof raw !== "object" || raw === null) return null;
     const o = raw as Record<string, unknown>;
-    if (o.format !== 1) return null;
     if (typeof o.tenant !== "string" || o.tenant.length === 0) return null;
-    if (typeof o.revisionNo !== "number" || !Number.isInteger(o.revisionNo)) return null;
-    if (typeof o.sha256 !== "string" || o.sha256.length === 0) return null;
-    if (typeof o.fetchedAt !== "string") return null;
-    return {format: 1, tenant: o.tenant, revisionNo: o.revisionNo, sha256: o.sha256, fetchedAt: o.fetchedAt};
+    if (o.format === 1) {
+        if (typeof o.revisionNo !== "number" || !Number.isInteger(o.revisionNo)) return null;
+        if (typeof o.sha256 !== "string" || o.sha256.length === 0) return null;
+        if (typeof o.fetchedAt !== "string") return null;
+        return {format: 1, tenant: o.tenant, revisionNo: o.revisionNo, sha256: o.sha256, fetchedAt: o.fetchedAt};
+    }
+    if (o.format === 2 && o.origin === "published") {
+        if (typeof o.revisionNo !== "number" || !Number.isInteger(o.revisionNo)) return null;
+        if (typeof o.publishedAt !== "string") return null;
+        return {
+            format: 2,
+            origin: "published",
+            tenant: o.tenant,
+            revisionNo: o.revisionNo,
+            publishedAt: o.publishedAt,
+        };
+    }
+    if (o.format === 2 && o.origin === "linked") {
+        if (typeof o.linkedAt !== "string") return null;
+        return {format: 2, origin: "linked", tenant: o.tenant, linkedAt: o.linkedAt};
+    }
+    return null;
 }
 
-/** 이 폴더가 **같은 사이트의 같은 판**을 이미 담고 있는가. 모르면 `false`(사본을 막지 않는다). */
+/**
+ * 이 폴더가 **같은 사이트의 같은 판**을 이미 담고 있는가. 모르면 `false`(사본을 막지 않는다).
+ *
+ * ⚠ **`linked` 는 언제나 `false` 다** — 그 표식에는 판 칸이 없다. 소속만 아는 폴더에
+ *   「이미 받아 두셨습니다」가 뜨면 그것은 거짓이다.
+ */
 export function holdsSameRevision(mark: SourceMark | null, tenant: string, revisionNo: number): boolean {
-    return mark !== null && mark.tenant === tenant && mark.revisionNo === revisionNo;
+    if (mark === null || mark.tenant !== tenant) return false;
+    if (mark.format === 2 && mark.origin === "linked") return false;
+    return mark.revisionNo === revisionNo;
 }
 
 export type MergeResult = {ok: true; text: string} | {ok: false; reason: string};
@@ -101,10 +163,25 @@ export function mergeTenantSetting(existing: string | null, tenant: string): Mer
  *
  * 실패는 던지지 않고 사유로 돌려준다 — 표식은 편의지 받기의 조건이 아니다.
  */
-export async function writeSourceMarkTo(root: string, mark: Omit<SourceMark, "format">): Promise<MergeResult> {
+export async function writeSourceMarkTo(root: string, mark: Omit<FetchedMark, "format">): Promise<MergeResult> {
+    return writeMarkText(root, buildSourceMark(mark));
+}
+
+/**
+ * 소속을 정하는 표식을 쓴다 — 발행(`published`)·명시 재연결(`linked`).
+ * 받기는 [writeSourceMarkTo] 를 쓴다(형식이 다르다).
+ */
+export async function writeBindingMarkTo(
+    root: string,
+    mark: Omit<PublishedMark, "format"> | Omit<LinkedMark, "format">,
+): Promise<MergeResult> {
+    return writeMarkText(root, buildBindingMark(mark));
+}
+
+async function writeMarkText(root: string, text: string): Promise<MergeResult> {
     try {
         await mkdir(join(root, ".zalkera"), {recursive: true});
-        await writeOwnFile(join(root, SOURCE_MARK_PATH), buildSourceMark(mark));
+        await writeOwnFile(join(root, SOURCE_MARK_PATH), text);
         return {ok: true, text: ""};
     } catch (error) {
         return {ok: false, reason: error instanceof Error ? error.message : String(error)};

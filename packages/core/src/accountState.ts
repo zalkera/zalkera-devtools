@@ -47,6 +47,12 @@ export const ACCOUNT_SCOPED = [
         enforcedBy: "await clearTenantSetting();",
     },
     {
+        /** 사이트별 마지막 로컬본 폴더 경로(`globalState`). */
+        what: "folderRegistry",
+        why: "남기면 다음 계정에게 앞사람의 사이트 코드와 로컬 폴더 경로가 보이고, 그 폴더를 열도록 제안한다",
+        enforcedBy: "await clearFolderRegistry();",
+    },
+    {
         /** 받은 폴더의 `.env.local` 에 심어 둔 미리보기 키 줄. */
         what: "envCredentials",
         why: "남기면 그 폴더를 연 사람이 앞사람의 키로 상용에 붙는다",

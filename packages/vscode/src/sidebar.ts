@@ -32,6 +32,7 @@ export class ZalkeraSidebar implements vscode.TreeDataProvider<Node> {
         site: null,
         previewUrl: null,
         keyExpiresAt: null,
+        folderTenant: null,
     };
 
     update(patch: Partial<SidebarState>): void {

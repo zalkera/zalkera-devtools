@@ -32,6 +32,37 @@ const read = (p) => readFileSync(join(root, p), "utf8");
 /** [파일, 있어야 하는 조각, 사라지면 무슨 일이 나는가] */
 const WIRES = [
     [
+        "packages/vscode/src/extension.ts",
+        "folderTenant: currentFolderBinding()",
+        "게이트와 사이드바가 서로 다른 기준으로 소속을 판정해, 화면은 건강한데 누르면 막힌다",
+        2,
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "const scope = decideTenantScope({",
+        "사이트 선택이 다시 남의 폴더 링크를 덮는다 — 이 판을 만든 그 결함이 되살아난다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        'register("zalkera.site.useFolder", useFolderSite)',
+        "어긋난 폴더의 복귀 버튼이 아무 명령도 못 부르고, 그 폴더가 갇힌다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        'origin: "published"',
+        "발행이 소속을 결정화하지 않아, 표식 없는 폴더가 영원히 게이트 밖에 남는다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        'origin: "linked"',
+        "재연결이 표식을 안 남겨 링크와 표식이 갈리고, 「어긋남은 사고다」가 성립하지 않는다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "await withReceiveGuard(() => openSite(captureTenant(picked)))",
+        "제안 흐름의 받기가 겹쳐 돌거나, 라이브 사이트를 읽어 엉뚱한 사이트의 소스를 내려받는다",
+    ],
+    [
         "packages/core/src/dev.ts",
         "...engineArgs",
         "Node 없는 컴퓨터에서 미리보기 첫 화면이 500 으로 돌아간다(Turbopack 이 PATH 에서 node 를 못 찾는다)",

@@ -71,6 +71,10 @@ for (const [index, line] of text.split("\n").entries()) {
         }
     }
     for (const m of line.matchAll(/\("([^"]{12,})"\)/g)) quotes.push({ line: index + 1, text: m[1] });
+    // ⑶ `- 「…」 — 설명` 목록 — 화면의 **단추 이름**을 인용하는 자리. 단추 라벨은 짧아
+    //    ⑵ 의 12자 하한에 안 걸리고, 표제도 아니라 ⑴ 에도 안 걸린다. 그 사각을 메운다.
+    const bullet = line.match(/^-\s+(「[^」]+」)\s+—/);
+    if (bullet) quotes.push({ line: index + 1, text: bullet[1].replace(/^「|」$/g, "") });
 }
 if (quotes.length === 0) {
     console.error("❌ 매뉴얼 인용 검사 — 인용을 하나도 못 찾았습니다(통과가 아닙니다). 형식을 확인하십시오.");
