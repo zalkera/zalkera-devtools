@@ -489,6 +489,10 @@ async function signOut(options: { quiet?: boolean } = {}): Promise<boolean> {
   await revokeRecordedKeys();
 
   await logout(store);
+  // ⚠ **사이트 설정을 `.env.local` 재작성보다 **먼저** 지운다. 그 재작성은 읽기전용·권한 등으로
+  //    던질 수 있는데, 뒤에 두면 토큰은 지워졌는데 **사이트만 남는** 부분 실패가 된다(심의 관찰).
+  //    지우는 순서는 「되돌릴 수 없는 것부터」가 아니라 「실패해도 다음이 도는 순서」다.
+  await clearTenantSetting();
   // 로컬 자격증명도 함께 지운다(A4) — **키 줄만** 지우고 고객이 넣은 값은 남긴다.
   const dir = previewDir ?? workspaceDir();
   if (dir) {
@@ -502,12 +506,6 @@ async function signOut(options: { quiet?: boolean } = {}): Promise<boolean> {
       log(".env.local 의 미리보기 키를 지웠습니다(다른 설정은 그대로).");
     }
   }
-  // ⚠ **고른 사이트도 지운다**(`ACCOUNT_SCOPED` 의 `tenant`). 남기면 A 로 로그아웃하고 B 로
-  //    로그인해도 화면에 **A 의 사이트 이름이 보인다** — B 는 그 사이트에 권한이 없을 수 있고,
-  //    있으면 더 나쁘다(자기 사이트인 줄 알고 올린다). 남의 테넌트 코드가 새는 자리이기도 하다.
-  //
-  //    **두 범위 모두** 지운다 — 한쪽만 지우면 남은 쪽이 되살아난다(`resetAll` 과 같은 규율).
-  await clearTenantSetting();
   await refreshSidebar();
   // 초기화가 부를 때는 자기 문구로 끝낸다 — 알림이 두 번 뜨면 무엇이 끝난 건지 흐려진다.
   if (!options.quiet)

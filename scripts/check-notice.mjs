@@ -49,7 +49,7 @@
 import ts from "typescript";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
+import { dirname, join, sep } from "node:path";
 import { parse, walk } from "./lib/ast.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -145,16 +145,27 @@ function collectDeclarations(source) {
  *
  * 구조분해·별칭(`import {say as s}`)도 지역 이름 기준으로 담는다 — 별칭을 써도 출처는 그 모듈이다.
  */
-function collectCanonicalImports(source) {
+/**
+ * 이 지정자가 **정본**을 가리키는가.
+ *
+ * ⚠ **파일명 접미로 보면 가짜가 정본 행세를 한다.** `./fake/errorNotice.ts` 를 만들어 거기서
+ *   `shown` 을 내보내면, 접미 일치는 그것을 정본으로 받아 import 검사·섀도 면제를 다 지난다
+ *   (심의 실증). 상대 경로는 **실해석해서** 정본 파일과 같은 자리인지 본다.
+ */
+function isCanonicalSpecifier(fromRel, spec) {
+    if (CANON_MODULES.has(spec)) return true;
+    if (!spec.startsWith(".")) return false;
+    const resolved = join(dirname(fromRel), spec).split(sep).join("/");
+    return NOTICE_SOURCES.includes(resolved);
+}
+
+function collectCanonicalImports(source, rel) {
     const names = new Set();
     walk(source, (node) => {
         if (!ts.isImportDeclaration(node)) return;
         const spec = node.moduleSpecifier;
         if (!ts.isStringLiteral(spec)) return;
-        const fromCanon =
-            CANON_MODULES.has(spec.text) ||
-            NOTICE_SOURCES.some((rel) => spec.text.endsWith(rel.slice(rel.lastIndexOf("/"))));
-        if (!fromCanon) return;
+        if (!isCanonicalSpecifier(rel, spec.text)) return;
         const bindings = node.importClause?.namedBindings;
         if (bindings && ts.isNamedImports(bindings)) {
             for (const e of bindings.elements) names.add(e.name.getText());
@@ -226,7 +237,12 @@ function isAllowed(e) {
     //    그래서 `isCanonicalObject` 와 같은 기준을 쓴다: **어느 모듈에서 왔는지**를 본다.
     //
     //    정의하는 파일 자신은 import 하지 않는다 — 거기서는 이름이 곧 정의다.
-    const callee = ts.isPropertyAccessExpression(e.expression) ? e.expression.name.getText() : e.expression.getText();
+    // ⚠ **맨 식별자만 인정한다.** 속성 접근(`obj.count(...)`)을 받으면 **수신자를 아무도 안 본다** —
+    //    파일 어딘가에 진짜 `count` import 만 있으면 `{count: 서버값그대로}` 객체를 지어 통과한다
+    //    (심의 실증). 객체 속성은 바인딩이 아니라 섀도 검사도 침묵한다.
+    //    실측으로 현재 코드에 속성접근형 소독기 호출은 **0건**이라 좁혀도 오탐이 없다.
+    if (!ts.isIdentifier(e.expression)) return false;
+    const callee = e.expression.getText();
     if (!SANITIZERS.has(callee) && callee !== MARKER) return false;
     return currentIsHome || currentImports.has(callee);
 }
@@ -278,7 +294,7 @@ function scan(rel, { allTemplates }) {
     scanned += 1;
     const source = parse(path);
     currentDecls = collectDeclarations(source);
-    currentImports = collectCanonicalImports(source);
+    currentImports = collectCanonicalImports(source, rel);
     currentIsHome = HOMES.has(rel);
 
     walk(source, (node) => {
@@ -376,15 +392,12 @@ function assertMarkerIsIdentity() {
  * 현재 코드에 걸리는 자리는 0건이다 — **지금 닫아 두는 것**이지 오늘의 결함이 아니다.
  */
 /** 이 바인딩이 **정본 모듈에서 들여온** 것인가. 그렇다면 가리는 것이 아니라 쓰는 것이다. */
-function isCanonicalImport(node) {
+function isCanonicalImport(node, rel) {
     for (let at = node; at; at = at.parent) {
         if (!ts.isImportDeclaration(at)) continue;
         const spec = at.moduleSpecifier;
         if (!ts.isStringLiteral(spec)) return false;
-        return (
-            CANON_MODULES.has(spec.text) ||
-            NOTICE_SOURCES.some((rel) => spec.text.endsWith(rel.slice(rel.lastIndexOf("/"))))
-        );
+        return isCanonicalSpecifier(rel, spec.text);
     }
     return false;
 }
@@ -423,7 +436,7 @@ function assertNoCanonicalShadow(rel) {
         const named = node.name.getText();
         if (!shadowed.has(named)) return;
         // **정본 모듈에서 들여오는 것은 가리는 것이 아니다** — 그것이 정본 그 자체다.
-        if (isCanonicalImport(node)) return;
+        if (isCanonicalImport(node, rel)) return;
         const {line} = source.getLineAndCharacterOfPosition(node.getStart());
         findings.push(
             `${rel}:${line + 1} — 정본 이름 \`${named}\` 을 지역에 다시 선언했습니다 — ` +

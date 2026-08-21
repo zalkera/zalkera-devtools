@@ -225,13 +225,39 @@ const BANS = [
 function accountWires() {
     const src = read("packages/core/src/accountState.ts");
     const body = src.slice(src.indexOf("export const ACCOUNT_SCOPED"), src.indexOf("export type AccountScoped"));
+
+    // ⚠ **항목 블록으로 자른 뒤 필드를 따로 읽는다.** 한 정규식으로 세 필드를 이어 읽으면
+    //    lazy 매칭이 **항목 경계를 넘어** 두 항목을 하나로 삼킨다 — 필드 순서만 바꿔도 그렇게 된다
+    //    (심의 실증: `{what, enforcedBy, why}` 로 뒤집자 유도가 4→3 이 되고, 하필 빠진 것이
+    //    `clearTenantSetting()` 이라 그 호출을 지워도 전 검사가 초록이었다).
+    const blocks = body.split(/\n\s*\{/).slice(1);
+    const field = (block, name) => {
+        // 문자열 리터럴 하나를 통째로 — 이스케이프된 따옴표를 포함한다.
+        const m = new RegExp(`${name}:\\s*"((?:[^"\\\\]|\\\\.)*)"`).exec(block);
+        return m ? m[1] : null;
+    };
     const out = [];
-    for (const m of body.matchAll(/what:\s*"([^"]+)"[\s\S]*?why:\s*"([^"]+)"[\s\S]*?enforcedBy:\s*"((?:[^"\\]|\\.)*)"/g)) {
+    for (const block of blocks) {
+        const what = field(block, "what");
+        const why = field(block, "why");
+        const enforcedBy = field(block, "enforcedBy");
+        if (what === null && why === null && enforcedBy === null) continue; // 항목이 아닌 조각
+        if (what === null || why === null || enforcedBy === null) {
+            console.error(`✗ 계정 자리 항목에 빠진 필드가 있습니다(통과가 아닙니다): ${block.slice(0, 60).trim()}…`);
+            process.exit(2);
+        }
         // 목록은 JS 문자열이라 `\"` 로 이스케이프돼 있다 — 실제 소스에서 찾을 형태로 되돌린다.
-        out.push(["packages/vscode/src/extension.ts", m[3].replace(/\\"/g, '"'), `로그아웃이 ${m[1]} 를 안 지운다 — ${m[2]}`]);
+        out.push(["packages/vscode/src/extension.ts", enforcedBy.replace(/\\"/g, '"'), `로그아웃이 ${what} 를 안 지운다 — ${why}`]);
     }
-    if (out.length === 0) {
-        console.error("✗ 계정 자리 목록을 하나도 못 읽었습니다(통과가 아닙니다) — accountState.ts 의 형태를 확인하십시오.");
+
+    // ⚠ **부분 판독을 무경보로 넘기지 않는다.** `out.length === 0` 만 보면 **일부만** 읽힌 경우가
+    //    조용히 지나가고, 그때 잃은 자리는 아무도 안 지킨다. 목록이 스스로 선언한 개수와 맞춘다.
+    const declared = (body.match(/\bwhat:\s*"/g) ?? []).length;
+    if (declared === 0 || out.length !== declared) {
+        console.error(
+            `✗ 계정 자리 유도가 ${out.length}건인데 목록은 ${declared}건입니다(통과가 아닙니다) — ` +
+                "accountState.ts 의 형태를 확인하십시오.",
+        );
         process.exit(2);
     }
     return out;
