@@ -119,14 +119,9 @@ export function sidebarPlan(state: SidebarState): PlanGroup[] {
                 tenant
                     ? live(tenant, "zalkera.site.choose", "circle-filled", "다른 사이트로 바꿉니다")
                     : act("사이트 선택", "zalkera.site.choose", "circle-outline", "작업할 사이트를 고릅니다"),
+                // 경고로 그치면 다음 할 일이 화면에 없다 — 누르면 그 사이트로 돌아간다.
                 ...(mismatched
-                    ? [
-                          {
-                              kind: "info" as const,
-                              label: `이 폴더는 「${folderTenant}」 의 소스입니다`,
-                              icon: "warning",
-                          },
-                      ]
+                    ? [act("이 폴더의 사이트로 돌아가기", "zalkera.site.useFolder", "warning")]
                     : []),
                 act("로그아웃", "zalkera.signOut", "sign-out"),
             ],

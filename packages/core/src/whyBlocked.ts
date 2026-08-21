@@ -84,7 +84,14 @@ const NEEDS: Readonly<Record<string, ReadonlyArray<Need>>> = {
     "zalkera.site.create": ["signedIn", "tenant"],
     // ⚠ 「폴더 연결」과 「이 폴더의 사이트로 돌아가기」에는 `siteMatches` 를 달지 않는다 —
     //    둘이 곧 어긋난 상태의 정규 탈출구다. 달면 빠져나갈 수 없는 고리가 된다.
-    "zalkera.site.link": ["signedIn", "tenant", "site"],
+    // ⚠ **`tenant` 요건을 달지 마라.** 이 명령은 사이트를 **정하는** 자리이고, 목록을 스스로
+    //    받아 온다(`listMyTenants`) — 고른 사이트를 쓰지 않는다. 달면 고리가 생긴다:
+    //    로그아웃이 링크를 지우고 표식만 남긴 폴더에서 다른 계정이 사이트를 고르면 소속이
+    //    달라 아무것도 안 적히고(§4.3 넷째 행), 그러면 `tenant` 가 영원히 비어 재연결이 막힌다.
+    // `site`(= package.json 이 있는 소스 폴더)도 요건이 아니다. 이 명령이 필요로 하는 것은
+    // 「열린 폴더」뿐이고 그 판정은 `linkFolder` 자신이 한다. `site` 를 달면 소스가 없는 창에서
+    // 「소스를 먼저 받으세요 → 받기」로 보내는데, 그 받기가 다시 사이트 미선택으로 막힌다.
+    "zalkera.site.link": ["signedIn"],
     "zalkera.site.useFolder": [],
 };
 

@@ -50,6 +50,11 @@
         "category": "잘커라"
       },
       {
+        "command": "zalkera.site.useFolder",
+        "title": "이 폴더의 사이트로 돌아가기",
+        "category": "잘커라"
+      },
+      {
         "command": "zalkera.preview.start",
         "title": "미리보기 시작",
         "category": "잘커라"

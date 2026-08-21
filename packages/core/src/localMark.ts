@@ -22,6 +22,9 @@ import {writeOwnFile} from "./safeWrite.ts";
 
 export const SOURCE_MARK_PATH = ".zalkera/source.json";
 
+/** 사이트 코드의 모양. 서버가 받는 것과 같은 잣대다. */
+const TENANT_CODE = /^[a-z0-9][a-z0-9-]{0,62}$/;
+
 /**
  * 받기가 남기는 표식. **받기는 계속 이 형식을 쓴다** — 구판 확장의 판독기가 이것만 알므로,
  * 가장 흔한 경로에서 회귀가 없다.
@@ -89,7 +92,10 @@ export function parseSourceMark(text: string | null): SourceMark | null {
     }
     if (typeof raw !== "object" || raw === null) return null;
     const o = raw as Record<string, unknown>;
-    if (typeof o.tenant !== "string" || o.tenant.length === 0) return null;
+    // 모양을 본다. 표식은 폴더에 있고 폴더는 zip·git 으로 유통된다 — 남이 만든 표식이
+    // 제어문자·초장문을 워크스페이스 설정과 레지스트리 키로 나르게 두지 않는다.
+    // 사이트 코드를 손으로 받는 자리와 **같은 잣대**다.
+    if (typeof o.tenant !== "string" || !TENANT_CODE.test(o.tenant)) return null;
     if (o.format === 1) {
         if (typeof o.revisionNo !== "number" || !Number.isInteger(o.revisionNo)) return null;
         if (typeof o.sha256 !== "string" || o.sha256.length === 0) return null;
@@ -121,9 +127,10 @@ export function parseSourceMark(text: string | null): SourceMark | null {
  *   「이미 받아 두셨습니다」가 뜨면 그것은 거짓이다.
  */
 export function holdsSameRevision(mark: SourceMark | null, tenant: string, revisionNo: number): boolean {
-    if (mark === null || mark.tenant !== tenant) return false;
-    if (mark.format === 2 && mark.origin === "linked") return false;
-    return mark.revisionNo === revisionNo;
+    // 받기 표식(format 1)만 이 주장을 낼 수 있다. `linked` 는 판 칸이 없고, `published` 는
+    // **올린 것**의 판이라 그 폴더가 지금 그 판의 사본이라는 뜻이 아니다 — 올린 뒤로 계속
+    // 편집했을 수 있다. 「이미 받아 두셨습니다」는 사본이라는 주장이므로 둘 다 거짓이 된다.
+    return mark !== null && mark.format === 1 && mark.tenant === tenant && mark.revisionNo === revisionNo;
 }
 
 export type MergeResult = {ok: true; text: string} | {ok: false; reason: string};

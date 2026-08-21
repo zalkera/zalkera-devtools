@@ -49,6 +49,7 @@ import {
   decideBlocked,
   folderBinding,
   decideTenantScope,
+  type TenantScope,
   decideSiteChoice,
   needsRelinkConsent,
   writeBindingMarkTo,
@@ -70,7 +71,7 @@ import {
   SOURCE_MARK_PATH,
   type SourceMark,
 } from "@zalkera/devtools-core";
-import { readFileSync } from "node:fs";
+import { lstatSync, readFileSync } from "node:fs";
 import { mkdir, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
@@ -216,8 +217,10 @@ function confirmedFolderFor(tenant: string): string | null {
  * 다른 폴더를 확증하는 자리라 파일을 직접 읽는다.
  */
 function workspaceLinkAt(dir: string): string | null {
+  const text = readSmallOwnFile(join(dir, ".vscode", "settings.json"));
+  if (text === null) return null;
   try {
-    const raw: unknown = JSON.parse(readFileSync(join(dir, ".vscode", "settings.json"), "utf8"));
+    const raw: unknown = JSON.parse(text);
     if (typeof raw !== "object" || raw === null) return null;
     const value = (raw as Record<string, unknown>)["zalkera.tenant"];
     return typeof value === "string" && value.length > 0 ? value : null;
@@ -876,8 +879,24 @@ function suggestSibling(
 }
 
 function readSourceMarkAt(dir: string): SourceMark | null {
+  return parseSourceMark(readSmallOwnFile(join(dir, SOURCE_MARK_PATH)));
+}
+
+/** 표식·설정처럼 **작아야 정상인** 파일의 상한. 넘으면 그 파일은 우리 것이 아니다. */
+const SMALL_FILE_LIMIT = 64 * 1024;
+
+/**
+ * 이 자리들은 **모든 명령 진입점**에서 읽힌다(`announceIfBlocked`). 그래서 생 `readFileSync` 를
+ * 쓰지 않는다 — 표식이 심링크로 `/dev/zero` 류를 가리키면 확장이 통째로 멈춘다.
+ *
+ * `writeOwnFile` 이 쓰기에서 잎 심링크를 거부하는 것과 **같은 규율의 읽기 쪽**이다.
+ * 못 읽으면 `null` — 「없다」가 아니라 「모른다」이고, 모르는 폴더는 아무것도 막지 않는다.
+ */
+function readSmallOwnFile(path: string): string | null {
   try {
-    return parseSourceMark(readFileSync(join(dir, SOURCE_MARK_PATH), "utf8"));
+    const stat = lstatSync(path);
+    if (!stat.isFile() || stat.size > SMALL_FILE_LIMIT) return null;
+    return readFileSync(path, "utf8");
   } catch {
     return null;
   }
@@ -1195,13 +1214,18 @@ async function linkFolder(): Promise<void> {
     .getConfiguration("zalkera")
     .update("tenant", choice.description, vscode.ConfigurationTarget.Workspace);
   // 링크와 표식을 **같이** 쓴다 — 둘이 갈리면 「어긋남은 사고다」가 성립하지 않는다.
-  const marked = await writeBindingMarkTo(dir, {
-    origin: "linked",
-    tenant: choice.description,
-    linkedAt: new Date().toISOString(),
-  });
-  if (!marked.ok) {
-    log(`소속 표식을 남기지 못했습니다(${marked.reason}) — 연결 자체는 끝났습니다.`);
+  //
+  // ⚠ **소속이 안 바뀌면 표식은 그대로 둔다.** 같은 사이트를 다시 골랐을 뿐인데 덮으면,
+  //    받기 표식의 판 번호·sha256 이 사라져 「이미 받아 두셨습니다」 힌트가 죽는다.
+  if (binding !== choice.description) {
+    const marked = await writeBindingMarkTo(dir, {
+      origin: "linked",
+      tenant: choice.description,
+      linkedAt: new Date().toISOString(),
+    });
+    if (!marked.ok) {
+      log(`소속 표식을 남기지 못했습니다(${marked.reason}) — 연결 자체는 끝났습니다.`);
+    }
   }
   rememberFolder(choice.description, dir);
   log(
@@ -1425,6 +1449,18 @@ function scheduleRenewal(expiresAt: string, ttlSeconds: number): void {
       //    타이머다. 여기서 라이브 선택을 다시 읽으면, 사이드바에서 사이트를 바꿔 둔 사이에
       //    미리보기가 **말없이 다른 사이트의 키·env 로** 다시 선다(심의 지적).
       const pinned = session.tenant;
+      // ⚠ **이 자리는 `register()` 의 게이트 밖이다** — 사람이 누른 것이 아니라 타이머가 돈다.
+      //    그 사이에 이 폴더가 다른 사이트로 재연결됐으면, 다시 세우는 것은 **y 폴더에 x
+      //    자격증명을 쓰는 일**이 된다. 게이트가 막는 바로 그 형상이라 여기서도 막는다.
+      const boundTo = currentFolderBinding();
+      if (boundTo !== null && boundTo !== (pinned as string)) {
+        log(`이 폴더가 ${boundTo} 사이트로 바뀌어 미리보기 자격증명을 갱신하지 않습니다.`);
+        await stopPreview();
+        void vscode.window.showInformationMessage(
+          say.renewalStoppedAfterRelink(boundTo),
+        );
+        return;
+      }
       const drifted = tenantCode() !== (pinned as string);
       log(`미리보기 자격증명이 곧 만료되어 다시 세웁니다… (사이트 ${pinned})`);
       void vscode.window.showInformationMessage(
@@ -1568,7 +1604,9 @@ async function publishCommand(): Promise<void> {
     revisionNo: result.revisionNo,
     publishedAt: new Date().toISOString(),
   });
-  if (!marked.ok) {
+  if (marked.ok) {
+    log(`이 폴더를 ${tenant} 사이트의 소스로 표시했습니다.`);
+  } else {
     log(`소속 표식을 남기지 못했습니다(${marked.reason}) — 발행 자체는 끝났습니다.`);
   }
   rememberFolder(String(tenant), dir);
@@ -2073,6 +2111,15 @@ async function offerFolderElsewhere(
       );
       return;
     }
+    // 받기 흐름은 「폴더를 열면 지금 미리보기는 멈춥니다」를 말한다. 이쪽만 침묵하면 비대칭이다.
+    if (session !== null) {
+      const go = await vscode.window.showWarningMessage(
+        ours("폴더를 열면 지금 미리보기는 멈춥니다 — 새 폴더에서 다시 시작해 주세요."),
+        { modal: true },
+        "폴더 열기",
+      );
+      if (go !== "폴더 열기") return;
+    }
     await vscode.commands.executeCommand("vscode.openFolder", vscode.Uri.file(dir));
     return;
   }
@@ -2175,16 +2222,33 @@ async function saveTenant(code: string): Promise<void> {
     binding: currentFolderBinding(),
     chosen: code,
   });
-  if (scope === "none") return;
-  await vscode.workspace
-    .getConfiguration("zalkera")
-    .update(
-      "tenant",
-      code,
-      scope === "workspace"
-        ? vscode.ConfigurationTarget.Workspace
-        : vscode.ConfigurationTarget.Global,
-    );
+  const target = configTargetFor(scope);
+  if (target === undefined) return;
+  await vscode.workspace.getConfiguration("zalkera").update("tenant", code, target);
+}
+
+/**
+ * 범위 → VS Code 쓰기 대상. `none` 은 **대상이 없다**.
+ *
+ * ⚠ **삼항으로 쓰지 마라.** `scope === "workspace" ? Workspace : Global` 은 `none` 을 조용히
+ *   전역으로 흘려보낸다 — 판정을 부르고도 결과를 무시하는 형상이고, 그 한 줄이 §4.3 넷째 행이
+ *   막는 전역 오염을 통째로 되살린다(심의 실증: 그 변이가 전건 초록으로 살아남았다).
+ *   전수 `switch` 는 칸을 지우면 타입이 먼저 선다.
+ */
+function configTargetFor(scope: TenantScope): vscode.ConfigurationTarget | undefined {
+  switch (scope) {
+    case "workspace":
+      return vscode.ConfigurationTarget.Workspace;
+    case "global":
+      return vscode.ConfigurationTarget.Global;
+    case "none":
+      return undefined;
+    default: {
+      // 칸을 지우면 여기서 타입이 선다 — 남은 값이 `never` 가 아니게 된다.
+      const unreachable: never = scope;
+      return unreachable;
+    }
+  }
 }
 
 /**

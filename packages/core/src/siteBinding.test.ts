@@ -116,3 +116,22 @@ test("재연결 동의는 소속이 있고 다를 때만 받는다", () => {
   assert.equal(needsRelinkConsent("alpha", "alpha"), false);
   assert.equal(needsRelinkConsent("alpha", "beta"), true);
 });
+
+test("소스 아닌 폴더에 구판 링크가 남아 있어도 전역을 더럽히지 않는다", () => {
+  // 구판은 소스 아닌 폴더에도 링크를 적었다. 폴더 유무를 먼저 보면 이 창은 전역에 적히는데,
+  // 병합 조회는 그 링크가 이겨 — 토스트는 「y」, 실동작(이력·버전 전환)은 x 가 된다.
+  assert.equal(
+    decideTenantScope({ siteFolderOpen: false, binding: "x", chosen: "y" }),
+    "none",
+  );
+  // 같은 사이트면 그대로 확정한다(복원 경로).
+  assert.equal(
+    decideTenantScope({ siteFolderOpen: false, binding: "x", chosen: "x" }),
+    "workspace",
+  );
+  // 소속이 아예 없는 폴더 없는 창은 오늘처럼 전역이다.
+  assert.equal(
+    decideTenantScope({ siteFolderOpen: false, binding: null, chosen: "y" }),
+    "global",
+  );
+});

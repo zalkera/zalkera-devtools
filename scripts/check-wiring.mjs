@@ -44,6 +44,16 @@ const WIRES = [
     ],
     [
         "packages/vscode/src/extension.ts",
+        "if (target === undefined) return;",
+        "판정을 부르고도 결과를 무시해, 소속 다른 폴더의 선택이 전역에 적힌다 — 그 값은 표식 없는 폴더를 여는 순간 되살아나 게이트가 설 수 없는 자리에서 교차 업로드가 된다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        'case "none":',
+        "쓰기 대상 판정이 전수가 아니게 되어 `none` 이 전역으로 흘러간다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
         'register("zalkera.site.useFolder", useFolderSite)',
         "어긋난 폴더의 복귀 버튼이 아무 명령도 못 부르고, 그 폴더가 갇힌다",
     ],

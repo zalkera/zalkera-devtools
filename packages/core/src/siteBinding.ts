@@ -46,9 +46,10 @@ export interface ScopeInput {
  *   게이트가 설 근거가 없으므로(표식 부재로는 막지 않는다) 그대로 발행이 나간다.
  */
 export function decideTenantScope(input: ScopeInput): TenantScope {
-    if (!input.siteFolderOpen) return "global";
-    if (input.binding === null) return "workspace";
-    return input.binding === input.chosen ? "workspace" : "none";
+    // 소속이 **판정을 지배한다.** 폴더 유무를 먼저 보면, 구판이 소스 아닌 폴더에 적어 둔 링크가
+    // 있는 창에서 전역에 적히는데 병합 조회는 그 링크가 이겨 — 화면은 「y」, 실동작은 x 가 된다.
+    if (input.binding !== null) return input.binding === input.chosen ? "workspace" : "none";
+    return input.siteFolderOpen ? "workspace" : "global";
 }
 
 /** 사이트를 고른 뒤 화면이 할 일. */

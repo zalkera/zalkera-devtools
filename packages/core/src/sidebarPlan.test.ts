@@ -224,10 +224,11 @@ test("요건 목록에 사이드바 밖 명령이 섞이지 않았다", () => {
 
 test("어긋난 폴더는 사이드바에서도 어긋나 보인다", () => {
   // 게이트가 누를 때 막는 것만으로는, 누르기 전까지 이 창이 건강해 보인다.
+  // 경고로 그치면 안 된다 — **누를 수 있어야** 다음 할 일이 화면에 있다.
   const warned = sidebarPlan({ ...base, site: "/tmp/x", tenant: "bix", folderTenant: "credium" })
     .flatMap((g) => g.items)
-    .filter((i) => i.kind === "info" && i.label.includes("credium"));
-  assert.equal(warned.length, 1, "어긋남 경고가 사이드바에 없다");
+    .filter((i) => i.kind === "action" && i.command === "zalkera.site.useFolder");
+  assert.equal(warned.length, 1, "어긋남 복귀 항목이 사이드바에 없다");
 
   // 어긋나지 않은 상태에서는 조용하다 — 늘 경고하면 경고가 배경이 된다.
   for (const state of [
@@ -238,7 +239,7 @@ test("어긋난 폴더는 사이드바에서도 어긋나 보인다", () => {
   ]) {
     const noise = sidebarPlan(state)
       .flatMap((g) => g.items)
-      .filter((i) => i.kind === "info" && i.label.includes("소스입니다"));
+      .filter((i) => i.kind === "action" && i.command === "zalkera.site.useFolder");
     assert.equal(noise.length, 0, `조용해야 할 상태에서 경고가 떴다: ${JSON.stringify(state)}`);
   }
 });

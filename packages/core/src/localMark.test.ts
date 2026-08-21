@@ -222,11 +222,36 @@ test("재연결 표식에는 「이미 받아 두셨습니다」가 뜨지 않�
   );
   assert.equal(holdsSameRevision(linked, "alpha", 1), false);
   assert.equal(holdsSameRevision(linked, "alpha", 0), false);
-  // 발행본은 판을 알므로 그 판에 한해 참이다.
+  // 발행본도 마찬가지다. 판을 알기는 하지만 그것은 **올린 것**의 판이지, 그 폴더가 지금 그
+  // 판의 사본이라는 뜻이 아니다 — 올린 뒤로 계속 편집했을 수 있다.
   const published = parseSourceMark(
     JSON.stringify({ format: 2, origin: "published", tenant: "alpha", revisionNo: 7, publishedAt: "t" }),
   );
-  assert.equal(holdsSameRevision(published, "alpha", 7), true);
-  assert.equal(holdsSameRevision(published, "alpha", 8), false);
-  assert.equal(holdsSameRevision(published, "beta", 7), false);
+  assert.equal(holdsSameRevision(published, "alpha", 7), false);
+  // 받기 표식만 그 주장을 낼 수 있다.
+  const fetched = parseSourceMark(
+    JSON.stringify({ format: 1, tenant: "alpha", revisionNo: 7, sha256: "s", fetchedAt: "t" }),
+  );
+  assert.equal(holdsSameRevision(fetched, "alpha", 7), true);
+  assert.equal(holdsSameRevision(fetched, "alpha", 8), false);
+  assert.equal(holdsSameRevision(fetched, "beta", 7), false);
+});
+
+test("표식의 사이트 코드는 모양을 지켜야 읽힌다 — 폴더는 유통된다", () => {
+  const bad = ["", "UPPER", "a b", "a/b", "-lead", "x".repeat(64), "../../etc", "a\u0000b"];
+  for (const tenant of bad) {
+    assert.equal(
+      parseSourceMark(JSON.stringify({ format: 2, origin: "linked", tenant, linkedAt: "t" })),
+      null,
+      `모양이 틀린 코드가 통과했다: ${JSON.stringify(tenant)}`,
+    );
+  }
+  // 정상 코드는 그대로 읽힌다 — 조이다가 멀쩡한 표식을 죽이면 게이트가 통째로 꺼진다.
+  for (const tenant of ["credium", "a", "a-b-c", "x".repeat(63)]) {
+    assert.equal(
+      parseSourceMark(JSON.stringify({ format: 2, origin: "linked", tenant, linkedAt: "t" }))?.tenant,
+      tenant,
+      `정상 코드가 막혔다: ${tenant}`,
+    );
+  }
 });

@@ -137,3 +137,22 @@ test("어긋남 문면은 두 사이트 이름을 **둘 다** 담는다", () => 
   assert.ok(blocked?.message.includes("credium"), `폴더 사이트가 없다: ${blocked?.message}`);
   assert.ok(blocked?.message.includes("bix"), `고른 사이트가 없다: ${blocked?.message}`);
 });
+
+test("소속을 정하는 자리는 **어떤 상태에서도** 사이트 미선택으로 막히지 않는다", () => {
+  // ⚠ 이것은 고리 시험이 못 잡는 종류다. 고리 시험은 「같은 상태에서 버튼이 또 막히는가」만
+  //   보는데, 이 사고는 **선택이 아무것도 안 적어 상태가 안 바뀌는** 교차-함수 고리였다:
+  //   로그아웃이 링크를 지우고 표식만 남긴 폴더 → 다른 계정이 사이트를 골라도 소속이 달라
+  //   무기록 → tenant 가 영원히 비어 재연결이 막힘 → 사이트 선택으로 되돌려 보냄 → 무한.
+  for (const folderTenant of [null, "x"]) {
+    for (const tenant of ["", "y"]) {
+      const state = { signedIn: true, tenant, site: "/f", folderTenant };
+      for (const escape of ["zalkera.site.link", "zalkera.site.useFolder"]) {
+        assert.equal(
+          decideBlocked(escape, state),
+          null,
+          `${escape} 가 막혔다 — 폴더의 소속을 정할 길이 사라진다: ${JSON.stringify(state)}`,
+        );
+      }
+    }
+  }
+});

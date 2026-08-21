@@ -104,6 +104,13 @@ const shown = (tenant: CapturedTenant | string): string => plainNotice(tenant, 6
 
 export const say = {
     /**
+     * 미리보기가 도는 사이 폴더가 다른 사이트로 재연결됐다. **다시 세우지 않고 멈춘다** —
+     * 다시 세우면 이 폴더에 앞 사이트의 자격증명을 쓰게 된다.
+     */
+    renewalStoppedAfterRelink(binding: string): string {
+        return `이 폴더가 「${shown(binding)}」 사이트로 바뀌어 미리보기를 멈췄습니다 — 다시 시작해 주세요.`;
+    },
+    /**
      * 소속이 다른 폴더에서 사이트를 골랐을 때. **「바꿨습니다」로 말하지 않는다** — 이 창의
      * 사이트는 바뀌지 않았고, 화면과 실제가 갈리는 문장을 만들면 안 된다.
      */
