@@ -10,6 +10,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { sidebarPlan, type SidebarState } from "./sidebarPlan.ts";
+import { commandsWithNeeds } from "./whyBlocked.ts";
 
 const base: SidebarState = {
   signedIn: true,
@@ -33,9 +34,15 @@ test("순서는 사이트 · 미리보기 · 내보내기 · 불러오기 · 버
   assert.deepEqual(ids({ site: "/tmp/x" }), ["site", "preview", "export", "source", "version", "help"]);
 });
 
-test("소스가 없으면 할 수 없는 일을 권하지 않는다 — 순서는 그대로다", () => {
-  // 상태별로 순서를 따로 두지 않는다. 빠지는 묶음이 있을 뿐이다.
-  assert.deepEqual(ids(), ["site", "source", "help"]);
+test("소스가 없어도 여섯 묶음이 다 보인다 — 없으면 「갱신이 안 됐다」로 읽힌다", () => {
+  // 오너 확정. 종전에는 못 하는 것을 숨겼는데, 실사용에서 그 대가가 더 컸다 — 확장을 새로
+  // 깔았는데 메뉴가 셋뿐이니 갱신 실패로 읽혔다. 사람은 없는 것을 「조건이 안 됐다」로 읽지 않는다.
+  // 못 하는 이유는 **누를 때** 말한다(`whyBlocked`).
+  assert.deepEqual(ids(), ["site", "preview", "export", "source", "version", "help"]);
+});
+
+test("소스가 있으나 없으나 묶음과 순서가 같다 — 화면이 흔들리지 않는다", () => {
+  assert.deepEqual(ids(), ids({ site: "/tmp/x" }));
 });
 
 test("소스가 있으면 「예제로 시작」·「폴더 연결」은 사이드바에서 뺀다", () => {
@@ -144,4 +151,48 @@ test("툴팁이 세는 수와 실제 항목 수가 같다", () => {
     }
   }
   assert.ok(checked > 0, "세는 툴팁을 하나도 못 찾았다 — 이 시험이 아무것도 안 재고 있다");
+});
+
+test("사이드바가 보여 주는 명령은 요건 판정이 **알고 있다**", () => {
+  // 여섯 묶음이 항상 보이므로, 요건 목록에 없는 명령은 조건이 안 맞아도 **그냥 돈다.**
+  // 그것이 의도인지 빠뜨린 것인지 목록만 보면 모른다 — 여기서 그 차이를 못 박는다.
+  //
+  // 요건이 **없어야 하는** 것: 막힌 사람의 탈출구(로그인·사이트 선택·도움말·진단·초기화·로그아웃)
+  // 와, 미리보기가 도는 동안에만 보이는 중지.
+  const EXITS = new Set([
+    "zalkera.signIn",
+    "zalkera.signOut",
+    "zalkera.site.choose",
+    "zalkera.help",
+    "zalkera.doctor",
+    "zalkera.reset",
+  ]);
+  const known = new Set(commandsWithNeeds());
+  const shown = new Set(
+    [{}, { tenant: "" }, { site: "/tmp/x" }, { site: "/tmp/x", previewUrl: "http://x" }, { signedIn: false }]
+      .flatMap((s) => plan(s))
+      .flatMap((g) => g.items)
+      .flatMap((i) => (i.kind === "action" ? [i.command] : [])),
+  );
+  const unknown = [...shown].filter((c) => !known.has(c) && !EXITS.has(c)).sort();
+  assert.deepEqual(
+    unknown,
+    [],
+    `요건 판정이 모르는 명령이 사이드바에 있다 — whyBlocked.ts 에 적거나 탈출구로 선언하십시오: ${unknown.join(" ")}`,
+  );
+});
+
+test("요건 목록에 사이드바 밖 명령이 섞이지 않았다", () => {
+  // 목록이 낡으면 「막는다」고 적힌 것이 아무것도 안 막는다. 사이드바·팔레트 어디에도 없는
+  // 명령이 목록에 있으면 그것은 이름이 바뀐 흔적이다.
+  const all = new Set(
+    [{}, { tenant: "" }, { site: "/tmp/x" }, { site: "/tmp/x", previewUrl: "http://x" }, { signedIn: false }]
+      .flatMap((s) => plan(s))
+      .flatMap((g) => g.items)
+      .flatMap((i) => (i.kind === "action" ? [i.command] : [])),
+  );
+  // 팔레트에만 있는 것도 정당하다(예제로 시작·폴더 연결은 소스가 있으면 사이드바에서 빠진다).
+  const PALETTE_ONLY = new Set(["zalkera.site.create", "zalkera.site.link", "zalkera.preview.restart"]);
+  const stale = commandsWithNeeds().filter((c) => !all.has(c) && !PALETTE_ONLY.has(c));
+  assert.deepEqual(stale, [], `요건 목록에 죽은 명령이 있다: ${stale.join(" ")}`);
 });

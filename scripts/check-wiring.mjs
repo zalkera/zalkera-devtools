@@ -157,6 +157,11 @@ const WIRES = [
         "tar 쪽에서 「원래 있던 파일」과 「아카이브 중복 항목」이 다시 뭉친다 — 후자에 「빈 폴더를 만드세요」는 무한 고리다",
     ],
     [
+        "packages/vscode/src/extension.ts",
+        "if (await announceIfBlocked(command)) return;",
+        "사이드바가 여섯 묶음을 항상 보여 주는데 요건이 안 맞는 것을 눌러도 아무 말이 없다 — 「눌러도 아무 일이 없다」에 갇힌다",
+    ],
+    [
         "packages/core/src/fetchSource.ts",
         "if (!choice) throw noRevisionError(revisions);",
         "공개 API 로 판을 안 주고 부르면 BUILDING·FAILED 판을 받으러 가고, 「없다」 문면도 옛 사본이 나온다",

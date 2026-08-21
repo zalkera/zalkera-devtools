@@ -161,6 +161,7 @@ export {
 export { BUSY, createReentrancyGuard } from "./reentrancy.ts";
 export { pickRevision, noRevisionError, suggestFolderName, nextAvailableName } from "./fetchTarget.ts";
 export { decideErrorNotice, isCancelled, type ErrorNotice } from "./errorNotice.ts";
+export { whyBlocked, commandsWithNeeds, type Blocked, type Readiness } from "./whyBlocked.ts";
 export {
   MAX_ISSUED_KEYS,
   addIssuedKey,

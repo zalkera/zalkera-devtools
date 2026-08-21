@@ -73,8 +73,19 @@ const live = (label: string, command: string, icon: string, tooltip?: string): P
  * 지금 상태에서 보일 묶음들. 순서가 그대로 화면 순서다.
  *
  * 순서(오너 확정): 사이트 · 미리보기 · 내보내기 · 불러오기 · 버전 · 도움.
- * 소스가 없으면 미리보기·내보내기·버전이 빠져 자연히 `사이트 · 불러오기 · 도움` 이 된다 —
- * 상태별로 순서를 따로 두지 않는다.
+ *
+ * ■ **여섯은 항상 보인다**(오너 확정)
+ *   종전에는 소스가 없으면 미리보기·내보내기·버전을 **숨겼다.** 「할 수 없는 일을 권하지
+ *   않는다」는 뜻이었는데, 실사용에서 그 대가가 더 컸다 — 확장을 새로 깔았는데 메뉴가 셋뿐이니
+ *   **「갱신이 안 됐다」로 읽혔다.** 사람은 없는 것을 「아직 조건이 안 됐다」로 읽지 않고
+ *   「고장」이나 「이 도구엔 그 기능이 없다」로 읽는다.
+ *
+ *   그래서 **있다는 것은 늘 보이고**, 못 하는 이유는 **누를 때 말한다.** 그 문면은 확장이
+ *   낸다(`whyBlocked`) — 여기는 무엇이 막혔는지만 표시한다.
+ *
+ * ■ 못 하는 항목을 `info` 로 바꾸지 않는다
+ *   회색 글자로 두면 왜 안 되는지 물을 자리가 없어진다. **누를 수 있게 두고 눌렀을 때 말하는**
+ *   편이 낫다 — 그 말이 곧 다음에 할 일이다.
  */
 export function sidebarPlan(state: SidebarState): PlanGroup[] {
     if (!state.signedIn) {
@@ -108,7 +119,7 @@ export function sidebarPlan(state: SidebarState): PlanGroup[] {
         },
     ];
 
-    if (site) {
+    {
         const making: PlanItem[] = [
             previewUrl
                 ? live(`미리보기 열기 — ${previewUrl}`, "zalkera.preview.start", "browser", "실행 중")
@@ -122,12 +133,22 @@ export function sidebarPlan(state: SidebarState): PlanGroup[] {
             making.push({kind: "info", label: `미리보기 자격증명 만료: ${keyExpiresAt}`, icon: "key"});
         }
         groups.push(
-            {id: "preview", label: "미리보기", icon: "tools", tooltip: "내 컴퓨터에서 확인하고, AI 를 붙입니다", items: making},
+            {
+                id: "preview",
+                label: "미리보기",
+                icon: "tools",
+                tooltip: site
+                    ? "내 컴퓨터에서 확인하고, AI 를 붙입니다"
+                    : "소스를 먼저 받아야 씁니다 — 눌러 보시면 무엇이 필요한지 알려 드립니다",
+                items: making,
+            },
             {
                 id: "export",
                 label: "내보내기",
                 icon: "package",
-                tooltip: "살펴보고 올립니다",
+                tooltip: site
+                    ? "살펴보고 올립니다"
+                    : "소스를 먼저 받아야 씁니다 — 눌러 보시면 무엇이 필요한지 알려 드립니다",
                 // 순서가 이름의 약속과 같아야 한다 — 검사가 먼저, 발행이 나중.
                 items: [
                     act("배포 전 검사", "zalkera.precheck", "checklist", "조언입니다 — 발행을 막지 않습니다"),
@@ -169,7 +190,7 @@ export function sidebarPlan(state: SidebarState): PlanGroup[] {
               },
     );
 
-    if (site) {
+    {
         groups.push({
             id: "version",
             label: "버전",

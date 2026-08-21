@@ -46,6 +46,7 @@ import {
   createReentrancyGuard,
   pickRevision,
   decideErrorNotice,
+  whyBlocked,
   isCancelled,
   readIssuedKeysWithOverflow,
   addIssuedKeyWithOverflow,
@@ -361,12 +362,39 @@ async function openBundledHelp(): Promise<void> {
 }
 
 /** 모든 명령을 한 자리에서 감싼다 — 오류를 **사람 말로** 보여 주는 곳이 여기 하나여야 한다. */
+/**
+ * 지금 상태에서 요건이 안 갖춰진 명령이면 **왜인지 말하고 다음에 할 일을 준다.**
+ *
+ * 사이드바는 여섯 묶음을 항상 보여 준다 — 숨기면 「갱신이 안 됐다」로 읽히기 때문이다(오너 확정).
+ * 그 대신 못 하는 이유를 **누를 때** 말한다. 판정은 core 가 하고(`whyBlocked`) 여기는 그린다.
+ *
+ * 막혔으면 `true` — 부르는 쪽은 손을 떼야 한다.
+ */
+async function announceIfBlocked(command: string): Promise<boolean> {
+  const blocked = whyBlocked(command, {
+    signedIn: (await store.read()) !== null,
+    tenant: tenantCode(),
+    site: workspaceDir() ?? null,
+  });
+  if (!blocked) return false;
+  // ⚠ 문면은 core 가 만든 상수다 — 서버 값이 아니라 소독이 필요 없다(`ours` 로 그 판단을 남긴다).
+  const picked = await vscode.window.showInformationMessage(
+    ours(blocked.message),
+    ...(blocked.action ? [blocked.action.label] : []),
+  );
+  if (blocked.action && picked === blocked.action.label) {
+    await vscode.commands.executeCommand(blocked.action.command);
+  }
+  return true;
+}
+
 function register(
   command: string,
   handler: () => Promise<void>,
 ): vscode.Disposable {
   return vscode.commands.registerCommand(command, async () => {
     try {
+      if (await announceIfBlocked(command)) return;
       await handler();
     } catch (error) {
       // 판정은 core 가 한다(`errorNotice.ts`) — 이 자리는 시험도 검사기도 못 닿아서, 「취소는
