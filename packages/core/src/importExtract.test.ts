@@ -151,3 +151,48 @@ test("목록이 디렉터리 항목도 돌려준다 — 계획이 그것까지 �
   assert.ok(names.includes("src/"), `디렉터리 항목이 목록에 없다: ${names.join(",")}`);
   assert.ok(names.includes("node_modules/"), `제외 대상 디렉터리가 목록에 없다: ${names.join(",")}`);
 });
+
+/**
+ * **실물 zip 이 취하는 모양을 전수로 돈다.**
+ *
+ * ⚠ 이 표가 있는 이유: 「실물 zip 으로 확인했다」가 두 판 연속 부족했다. 한 모양만 짚어
+ *   고치면 옆 모양이 깨진다 — 감싸기 깊이 × 디렉터리 항목 유무 × macOS 부스러기 유무가
+ *   서로 독립이라, 한 축만 보면 나머지 축의 조합이 그대로 남는다.
+ *   여기서 세는 것은 **표식이 뿌리에 올라오는가** 하나다. 그것이 「사이트로 인식되는가」다.
+ */
+const WRAPS = [[], ["site"], ["outer", "site"]];
+const WITH_DIRS = [false, true];
+const WITH_MACOSX = [false, true];
+
+for (const wrap of WRAPS) {
+  for (const dirs of WITH_DIRS) {
+    for (const macosx of WITH_MACOSX) {
+      const label = `감싸기 ${wrap.length}겹 · 디렉터리항목 ${dirs ? "있음" : "없음"} · __MACOSX ${macosx ? "있음" : "없음"}`;
+      test(`실물 형상 — ${label}`, async () => {
+        const under = wrap.length === 0 ? "" : `${wrap.join("/")}/`;
+        const files: Record<string, string> = {
+          [`${under}package.json`]: '{"name":"x"}',
+          [`${under}src/app/page.tsx`]: "export default null;",
+          [`${under}node_modules/pkg/index.js`]: "module.exports={}",
+          [`${under}.env.local`]: "ZALKERA_STOREFRONT_KEY=oqsk_live_LEAK",
+        };
+        if (macosx) files["__MACOSX/._x"] = "junk";
+        const dirEntries: string[] = [];
+        if (dirs) {
+          for (let i = 1; i <= wrap.length; i += 1) dirEntries.push(`${wrap.slice(0, i).join("/")}/`);
+          dirEntries.push(`${under}src/`, `${under}src/app/`, `${under}node_modules/`, `${under}node_modules/pkg/`);
+        }
+        const zip = await zipWithDirs(files, dirEntries);
+        const dir = await tempDir("zalkera-shape-");
+        const plan = decideImportPlan(listZipEntries(zip));
+        await extractZip(zip, dir, plan);
+
+        assert.ok(existsSync(join(dir, "package.json")), `표식이 뿌리에 없다 — ${label}`);
+        assert.ok(existsSync(join(dir, "src/app/page.tsx")), `소스가 안 풀렸다 — ${label}`);
+        assert.ok(!existsSync(join(dir, "node_modules")), `제외 폴더가 생겼다 — ${label}`);
+        assert.ok(!existsSync(join(dir, ".env.local")), `자격증명이 들어왔다 — ${label}`);
+        assert.ok(!existsSync(join(dir, "__MACOSX")), `OS 부스러기가 들어왔다 — ${label}`);
+      });
+    }
+  }
+}
