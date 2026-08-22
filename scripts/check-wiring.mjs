@@ -83,6 +83,16 @@ const WIRES = [
         "확인 «뒤»에 멈춰야 한다 — 동의도 안 받고 남의 미리보기를 끊으면 안 된다",
     ],
     [
+        "packages/core/src/publish.ts",
+        "provenanceTenant: options.tenant,",
+        "발행이 출처를 안 찍으면 그 사이트에서 나온 소스가 영원히 «모름»으로 남는다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "const provenanceTenant = currentFolderBinding() ?? undefined;",
+        "내보내기의 출처가 폴더 소속에서 안 오면 남의 사이트 이름을 찍거나 아무것도 안 찍는다",
+    ],
+    [
         "packages/vscode/src/extension.ts",
         "const prov = await readProvenance(zip, plan);",
         "출처 판정이 사라지면 다른 사이트의 zip 을 무경고로 갈아 끼운다 — 다중 사이트의 최대 사고다",

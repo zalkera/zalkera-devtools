@@ -1168,21 +1168,21 @@ function provenanceNotice(verdict: UpdateVerdict, zipTenant: string | null, bind
   switch (verdict) {
     case "match":
       // ⚠ 「검증됨」이라 쓰지 않는다 — 표시는 서명 없는 **선언**이지 증명이 아니다.
-      return {line: `출처 표시: 이 사이트(${binding})에서 내보낸 소스로 표시되어 있습니다.`, action: "갈아 끼우기"};
+      return {line: `출처 표시: 이 사이트(${plainNotice(binding ?? "", 64)})에서 내보낸 소스로 표시되어 있습니다.`, action: "갈아 끼우기"};
     case "mismatch":
       // 버튼 문구를 바꿔 **클릭 자체가 고지된 진술**이 되게 한다. 막지는 않는다.
       return {
-        line: `⚠ 이 zip 은 다른 사이트(${zipTenant})에서 내보낸 것으로 표시되어 있습니다. 이 폴더의 사이트: ${binding}.`,
+        line: `⚠ 이 zip 은 다른 사이트(${plainNotice(zipTenant ?? "", 64)})에서 내보낸 것으로 표시되어 있습니다. 이 폴더의 사이트: ${plainNotice(binding ?? "", 64)}.`,
         action: "다른 사이트 표시를 알고 갈아 끼우기",
       };
     case "unbound":
       return {
-        line: zipTenant === null ? "이 폴더는 아직 사이트에 연결되어 있지 않습니다." : `이 zip 은 ${zipTenant} 사이트에서 내보낸 것으로 표시되어 있습니다. 이 폴더는 아직 어느 사이트에도 연결되어 있지 않습니다.`,
+        line: zipTenant === null ? "이 폴더는 아직 사이트에 연결되어 있지 않습니다." : `이 zip 은 ${plainNotice(zipTenant, 64)} 사이트에서 내보낸 것으로 표시되어 있습니다. 이 폴더는 아직 어느 사이트에도 연결되어 있지 않습니다.`,
         action: "갈아 끼우기",
       };
     default:
       return {
-        line: `출처 표시 없음 — 이 zip 이 어느 사이트의 것인지 도구는 알 수 없습니다. 이 폴더의 사이트: ${binding}. 파일 이름과 보낸 곳으로 확인해 주세요.`,
+        line: `출처 표시 없거나 읽을 수 없음 — 이 zip 이 어느 사이트의 것인지 도구는 알 수 없습니다. 이 폴더의 사이트: ${plainNotice(binding ?? "", 64)}. 파일 이름과 보낸 곳으로 확인해 주세요.`,
         action: "갈아 끼우기",
       };
   }
@@ -1214,7 +1214,10 @@ async function updateZipCommand(): Promise<void> {
   //    표시돼 있는가」를 알고 있어야 한다 — 되돌릴 수 없는 조작의 동의는 그 재료 위에서 받는다.
   const {zip, plan} = await readZipWithPlan(zipPath);
   const prov = await readProvenance(zip, plan);
-  const binding = currentFolderBinding();
+  // ⚠ **소속이 없으면 «고른 사이트»와 견준다.** 소속 없는 폴더에서 올리면 그 사이트가 소속이
+  //    되므로(발행이 표식을 만든다), 비교를 건너뛰면 「D 를 골라 두고 C 의 zip 을 넣는」 경로가
+  //    무경고로 통과한다 — 이 게이트가 막으려는 그 사고다(심의 실측).
+  const binding = currentFolderBinding() ?? tenantCode() ?? null;
   const verdict = judgeUpdate(prov, binding);
   const provNotice = provenanceNotice(verdict, prov?.tenant ?? null, binding);
 

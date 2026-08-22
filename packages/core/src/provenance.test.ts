@@ -54,3 +54,46 @@ test("⑤ 62자 경계 — 규격 안은 살고 밖은 죽는다(과잉 차단�
   assert.notEqual(parseProvenance(buildProvenance(ok)), null);
   assert.equal(parseProvenance(JSON.stringify({ format: 1, claim: "site-export", tenant: ok + "c" })), null);
 });
+
+/*
+ * 아래 둘은 provenance.ts 밖의 성질이지만 **이 파일이 존재하는 이유**다.
+ * 심의 실측: 둘 다 시험이 없어 변이가 살아남았다 — 제외 목록을 지워도, 발행이 안 찍어도 초록이었다.
+ */
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { packProject } from "./zip.ts";
+import { decideImportPlan } from "./importZip.ts";
+import { listZipEntries } from "./unzip.ts";
+import { tempDir } from "./testing/tempDir.ts";
+
+async function project(files: Record<string, string>): Promise<string> {
+  const root = await tempDir("zalkera-prov-pack-");
+  for (const [rel, body] of Object.entries(files)) {
+    await mkdir(join(root, rel, ".."), { recursive: true });
+    await writeFile(join(root, rel), body);
+  }
+  return root;
+}
+
+test("⑥ 디스크의 표시는 절대 안 실린다 — 지금 소속으로 새로 찍는다", async () => {
+  // 이것이 없으면 남의 표시가 따라다니며 «틀린 확신»을 만든다. 그리고 EXCLUDED_PATHS 에서
+  // 한 줄을 지워도 아무도 빨개지지 않았다(심의 실측).
+  const dir = await project({
+    "package.json": "{}",
+    ".zalkera/provenance.json": JSON.stringify({ format: 1, claim: "site-export", tenant: "evil" }),
+  });
+  const { buffer } = await packProject({ projectDir: dir, provenanceTenant: "credium" });
+  const names = listZipEntries(buffer).filter((n) => n.endsWith("provenance.json"));
+  assert.equal(names.length, 1, "표시는 정확히 하나여야 한다");
+  const plan = decideImportPlan(listZipEntries(buffer));
+  assert.ok(plan.dropped.some((n) => n.endsWith("provenance.json")), "들여오기가 떨궈야 한다");
+  assert.ok(!plan.keep.some((n) => n.endsWith("provenance.json")), "디스크에 남기면 안 된다");
+  await rm(dir, { recursive: true, force: true });
+});
+
+test("⑦ 소속을 안 주면 아예 안 찍는다 — 없는 정체성을 지어내지 않는다", async () => {
+  const dir = await project({ "package.json": "{}" });
+  const { buffer } = await packProject({ projectDir: dir });
+  assert.equal(listZipEntries(buffer).filter((n) => n.endsWith("provenance.json")).length, 0);
+  await rm(dir, { recursive: true, force: true });
+});
