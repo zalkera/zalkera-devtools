@@ -74,18 +74,23 @@ const WIRES = [
     ],
     [
         "packages/vscode/src/extension.ts",
-        'if (ok !== "갈아 끼우기") return;',
+        "if (ok !== provNotice.action) return;",
         "되돌릴 수 없는 조작의 **유일한 동의 관문**이다. 지우면 zip 을 고르는 순간 폴더가 사라진다",
     ],
     [
         "packages/vscode/src/extension.ts",
-        "await stopPreview();\n\n  // ⚠ **읽기·판정을 먼저 끝낸다.**",
-        "미리보기가 파일을 물고 있으면 지우기가 갈아 끼우기 한복판에서 실패한다 — 되돌리기에 기대게 된다",
+        "if (ok !== provNotice.action) return;\n\n  // ⚠ **먼저 멈춘다.**",
+        "확인 «뒤»에 멈춰야 한다 — 동의도 안 받고 남의 미리보기를 끊으면 안 된다",
     ],
     [
         "packages/vscode/src/extension.ts",
-        "const {zip, plan} = await readZipWithPlan(zipPath);\n\n  const result",
-        "읽기·판정이 교체 뒤로 가면 폴더를 비운 다음에 zip 이 상했음을 알게 된다 — 순서가 곧 안전이다",
+        "const prov = await readProvenance(zip, plan);",
+        "출처 판정이 사라지면 다른 사이트의 zip 을 무경고로 갈아 끼운다 — 다중 사이트의 최대 사고다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "const provNotice = provenanceNotice(verdict",
+        "판정을 내고도 안 보여 주면 사람이 동의할 재료가 없다 — 확인 창이 이 게이트의 표면이다",
     ],
     [
         "packages/vscode/src/extension.ts",
@@ -104,7 +109,7 @@ const WIRES = [
     ],
     [
         "packages/vscode/src/extension.ts",
-        "() => packProject({projectDir: dir, onProgress: log}),",
+        "() => packProject({projectDir: dir, provenanceTenant, onProgress: log}),",
         "내보내기가 발행과 다른 포장기를 쓰면 규칙이 갈리고, 손 압축과 같아져 자격증명이 딸려 나간다",
     ],
     [

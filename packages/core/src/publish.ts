@@ -13,6 +13,13 @@ import { packProject } from "./zip.ts";
 export interface PublishOptions {
     projectDir: string;
     api: ZalkeraApi;
+    /**
+     * 이 소스가 나가는 사이트. **출처 표시**로 zip 에 찍힌다(`provenance.ts`).
+     *
+     * 부르는 쪽이 아는 값을 그대로 받는다 — 여기서 폴더 소속을 다시 읽으면 판정이 두 벌이 되고,
+     * 발행 게이트(`siteMatches`)가 이미 「폴더 소속 = 고른 사이트」를 보장한 뒤다.
+     */
+    tenant: string;
     onProgress?: (message: string) => void;
     fetchImpl?: typeof fetch;
     /**
@@ -75,7 +82,13 @@ export async function publish(options: PublishOptions): Promise<PublishResult> {
     const fetchImpl = options.fetchImpl ?? fetch;
 
     report("소스를 묶는 중…");
-    const packed = await packProject({ projectDir: options.projectDir, onProgress: report });
+    // 출처 표시를 찍는다 — 이 zip 이 어느 사이트에서 나왔는지 말할 수 있게 한다.
+    // 발행 게이트가 `siteMatches` 로 「폴더 소속 = 고른 사이트」를 이미 보장한 자리다.
+    const packed = await packProject({
+        projectDir: options.projectDir,
+        provenanceTenant: options.tenant,
+        onProgress: report,
+    });
     if (packed.fileCount === 0) {
         throw new DevtoolsError("PACK_FAILED", "올릴 파일이 없습니다.", "폴더를 다시 확인해 주세요.");
     }

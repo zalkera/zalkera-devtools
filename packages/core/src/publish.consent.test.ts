@@ -80,6 +80,7 @@ test("동의하면 같은 storageKey 로 다시 부른다 — 다시 묶지 않�
   const result = await publish({
     projectDir: await project(),
     api,
+    tenant: "t",
     fetchImpl,
     onConsent: async (message) => {
       asked.push(message);
@@ -99,6 +100,7 @@ test("동의하지 않으면 취소로 끝난다 — 오류창을 띄우지 않�
   const error = await publish({
     projectDir: await project(),
     api,
+    tenant: "t",
     fetchImpl,
     onConsent: async () => false,
   }).then(
@@ -113,7 +115,7 @@ test("물을 자리를 안 주면 **조용히 동의하지 않는다** — 그�
   // 이미 정산된 토큰이 실린 작업이 사람 모르게 사라지면 안 된다. 화면 없는 자리(CLI·시험)는
   // 그 문을 안 열면 되고, 그때는 서버 거절이 그대로 올라온다.
   const { api, confirms, fetchImpl } = server();
-  const error = await publish({ projectDir: await project(), api, fetchImpl }).then(
+  const error = await publish({ projectDir: await project(), api, tenant: "t", fetchImpl }).then(
     () => null,
     (e: unknown) => e as DevtoolsError,
   );
@@ -149,6 +151,7 @@ test("동의로 못 넘어가는 거절에는 묻지 않는다", async () => {
   const error = await publish({
     projectDir: await project(),
     api,
+    tenant: "t",
     fetchImpl,
     onConsent: async () => {
       asked += 1;

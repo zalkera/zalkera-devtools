@@ -23,7 +23,7 @@ import {writeOwnFile} from "./safeWrite.ts";
 export const SOURCE_MARK_PATH = ".zalkera/source.json";
 
 /** 사이트 코드의 모양. 서버가 받는 것과 같은 잣대다. */
-const TENANT_CODE = /^[a-z0-9][a-z0-9-]{0,62}$/;
+export const TENANT_CODE = /^[a-z0-9][a-z0-9-]{0,62}$/;
 
 /**
  * 받기가 남기는 표식. **받기는 계속 이 형식을 쓴다** — 구판 확장의 판독기가 이것만 알므로,

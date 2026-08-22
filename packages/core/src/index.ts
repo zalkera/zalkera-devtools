@@ -94,6 +94,14 @@ export {
 export { extractZip, listZipEntries, type UnzipResult } from "./unzip.ts";
 export { decideImportPlan, readZipFile, type ImportPlan } from "./importZip.ts";
 export { keepNames, replaceContents, type ReplaceResult } from "./replaceDir.ts";
+export {
+  PROVENANCE_PATH,
+  buildProvenance,
+  judgeUpdate,
+  parseProvenance,
+  type Provenance,
+  type UpdateVerdict,
+} from "./provenance.ts";
 export { isReceivable, meaningfulEntries, removeAdded, snapshotEntries } from "./emptyDir.ts";
 
 export { waitForBuild, type BuildOutcome, type WaitOptions } from "./build.ts";
