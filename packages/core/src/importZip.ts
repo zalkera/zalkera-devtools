@@ -11,7 +11,7 @@
  */
 import {readFile, stat} from "node:fs/promises";
 import {DevtoolsError} from "./errors.ts";
-import {MAX_DOWNLOAD_BYTES} from "./limits.ts";
+import {MAX_DOWNLOAD_BYTES, MAX_NAME_BYTES} from "./limits.ts";
 import {isExcludedEntry} from "./zip.ts";
 
 export interface ImportPlan {
@@ -50,6 +50,9 @@ export function decideImportPlan(names: readonly string[]): ImportPlan {
     if (names.length === 0) {
         throw new DevtoolsError("NOT_A_SITE", "압축 파일이 비어 있습니다.", "받으신 파일을 다시 확인해 주세요.");
     }
+    // 이름 총량 상한은 **판독기가 이미 걸었다**(`listZipEntries`·`extractZip` 이 중앙 디렉터리의
+    // 원바이트로 끊는다) — 여기서 다시 세면 같은 값을 두 벌로 재는 것이고, 그 둘은 갈린다.
+
     // ⚠ **깊이를 먼저 본다.** 아래 훑기가 항목 × 세그먼트라, 재기 전에 끊어야 한다.
     const tooDeep = names.find((n) => segmentCount(n) > MAX_PATH_SEGMENTS);
     if (tooDeep !== undefined) {

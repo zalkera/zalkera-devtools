@@ -1,5 +1,6 @@
 import { writeExclusive } from "./safeWrite.ts";
 import type { ImportPlan } from "./importZip.ts";
+import { MAX_NAME_BYTES } from "./limits.ts";
 import { join, resolve } from "node:path";
 import { inflateRaw } from "node:zlib";
 import { promisify } from "node:util";
@@ -56,6 +57,15 @@ export interface UnzipResult {
  *   남는다. 그래서 못 읽으면 멈추고, **다음에 할 일을 이름 대고 말한다** — 「최신 도구로」라고만
  *   하면 같은 도구로 다시 해서 또 막힌다.
  */
+/** 이름 총량 상한을 넘었을 때. 두 판독 경로가 **같은 말**을 하도록 한 곳에서 만든다. */
+function tooManyNameBytes(): DevtoolsError {
+    return new DevtoolsError(
+        "NOT_A_SITE",
+        "압축 파일의 파일 목록이 지나치게 큽니다.",
+        "사이트 소스 zip 이 맞는지 확인해 주세요 — 정상 소스에는 이런 목록이 없습니다.",
+    );
+}
+
 function decodeEntryName(raw: Buffer, flags: number): string {
     // ASCII 뿐이면 어느 인코딩이든 같다 — 가장 흔한 경우를 먼저 끝낸다.
     let ascii = true;
@@ -87,7 +97,13 @@ function decodeEntryName(raw: Buffer, flags: number): string {
         );
     }
     try {
-        return new TextDecoder("utf-8", {fatal: true}).decode(raw);
+        // ⚠ **NFC 로 모은다.** 맥은 파일명을 NFD(분해형)로 적는다 — 「가.jpg」가 `ᄀ`+`ᅡ` 두
+        //    글자로 저장된다. 그 이름은 표시도 있고 유효 UTF-8 이라 여기까지 통과하는데,
+        //    소스가 NFC(조합형)로 그 파일을 가리키면 **다른 문자열**이라 안 맞는다 —
+        //    「이미지가 404 인데 원인이 화면에 없는」 바로 그 증상이다.
+        //    두 형태가 한 zip 에 같이 있으면 이름이 겹치는데, 그것은 `writeExclusive` 가
+        //    「같은 파일을 두 번 담고 있습니다」로 **보이게** 끊는다.
+        return new TextDecoder("utf-8", {fatal: true}).decode(raw).normalize("NFC");
     } catch {
         throw new DevtoolsError(
             "SERVER_REJECTED",
@@ -115,6 +131,7 @@ export function listZipEntries(zip: Buffer): string[] {
         );
     }
     const names: string[] = [];
+    let nameBytes = 0;
     for (let i = 0; i < entryCount; i += 1) {
         if (offset < 0 || offset + 46 > zip.length || zip.readUInt32LE(offset) !== 0x02014b50) {
             throw new DevtoolsError("SERVER_REJECTED", "받은 압축 파일이 손상되었습니다(목록 오류).");
@@ -123,6 +140,11 @@ export function listZipEntries(zip: Buffer): string[] {
         const extraLength = zip.readUInt16LE(offset + 30);
         const commentLength = zip.readUInt16LE(offset + 32);
         const flags = zip.readUInt16LE(offset + 8);
+        // ⚠ **디코드 전에 원바이트로 끊는다.** 이름 길이는 중앙 디렉터리에 적혀 있으므로 읽기
+        //    전에 알 수 있다 — 다 읽고 나서 재면 그 훑기 자체가 이미 비용이고(실측: 130MB 에서
+        //    0.6~0.7초 동기 구간), 「읽기 전에 멈춘다」는 말도 거짓이 된다.
+        nameBytes += nameLength;
+        if (nameBytes > MAX_NAME_BYTES) throw tooManyNameBytes();
         const name = decodeEntryName(zip.subarray(offset + 46, offset + 46 + nameLength), flags);
         offset += 46 + nameLength + extraLength + commentLength;
         // ⚠ **디렉터리 항목도 돌려준다.** 실물 zip(탐색기·Finder·`zip -r`)은 디렉터리 항목을
@@ -150,6 +172,7 @@ export async function extractZip(zip: Buffer, targetDir: string, plan?: ImportPl
      * 같은 경로를 두 번 담음」을 가르는 데 쓴다 — 다음에 할 일이 정반대라 뭉치면 안 된다.
      */
     const written = new Set<string>();
+    let totalNameBytes = 0;
     let totalBytes = 0;
     /** 계획이 허락한 이름만 쓴다. 배열 조회를 반복하지 않으려고 한 번만 만든다. */
     const allowed = plan ? new Set(plan.keep) : null;
@@ -181,6 +204,9 @@ export async function extractZip(zip: Buffer, targetDir: string, plan?: ImportPl
         const commentLength = zip.readUInt16LE(offset + 32);
         const localOffset = zip.readUInt32LE(offset + 42);
         const flags = zip.readUInt16LE(offset + 8);
+        // 받기·예제로 시작도 이 문을 지난다 — 서버가 준 zip 이라도 상한은 같다.
+        totalNameBytes += nameLength;
+        if (totalNameBytes > MAX_NAME_BYTES) throw tooManyNameBytes();
         const entryName = decodeEntryName(zip.subarray(offset + 46, offset + 46 + nameLength), flags);
         offset += 46 + nameLength + extraLength + commentLength;
 
