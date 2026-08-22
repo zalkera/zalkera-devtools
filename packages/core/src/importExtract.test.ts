@@ -247,30 +247,39 @@ function crc32(buf: Buffer): number {
   return ~c >>> 0;
 }
 
-test("CP949 파일명 zip 이 이름 그대로 들어온다 — 국내 도구가 만드는 형상", async () => {
-  // ⚠ 무조건 UTF-8 로 읽으면 이름이 전부 U+FFFD 로 접힌다. 한글 파일이 둘 이상이면 같은
-  //   이름이 되어 「같은 파일을 두 번 담고 있습니다」로 **정상 zip 이 통째로 거절**되고,
-  //   하나면 깨진 이름으로 조용히 풀린다(이미지 404 인데 원인이 화면에 없다).
-  //   국내 개발사가 소스를 넘기는 것이 이 제품의 정본 시나리오다.
-  const cp949 = (text: string): Buffer =>
-    Buffer.from(new TextEncoder().encode(text)) as Buffer; // ASCII 부분용
-  const ko = (bytes: number[]): Buffer => Buffer.from(bytes);
-  const zip = storedZipRaw([
-    [cp949("site/package.json"), Buffer.from('{"name":"x"}')],
-    // `site/public/가.jpg` — 「가」 = CP949 B0A1
-    [Buffer.concat([cp949("site/public/"), ko([0xb0, 0xa1]), cp949(".jpg")]), Buffer.from("A")],
-    // `site/public/나.jpg` — 「나」 = CP949 B3AA
-    [Buffer.concat([cp949("site/public/"), ko([0xb3, 0xaa]), cp949(".jpg")]), Buffer.from("B")],
-  ]);
-  const names = listZipEntries(zip);
-  assert.ok(names.includes("site/public/가.jpg"), `이름이 안 읽혔다: ${names.join(",")}`);
-  assert.ok(names.includes("site/public/나.jpg"), `둘째 이름이 안 읽혔다: ${names.join(",")}`);
+test("UTF-8 이 아닌 파일 이름은 **읽지 않고 멈춘다** — 조용히 틀리지 않는다", async () => {
+  // ⚠ EFS 플래그가 없으면 이름의 인코딩은 **진짜로 모호**하다. CP949 를 받아 주면 GB2312 이름이
+  //   엉뚱한 한자로 조용히 읽힌다(실측: 中 → 櫓). 소스가 서버로 올라가 파일명이 곧 주소가 되고
+  //   그 아래는 전부 UTF-8 을 전제하므로, 경계에서 안 막으면 틀린 이름이 그대로 흘러간다.
+  //   거절은 보이고 되돌릴 수 있지만, 오독은 「이미지가 404 인데 원인이 화면에 없는」 상태다.
+  const ascii = (text: string): Buffer => Buffer.from(text, "latin1");
+  const shapes: [string, number[]][] = [
+    ["CP949 한글", [0xb0, 0xa1]],
+    ["GB2312 한자", [0xd6, 0xd0]],
+    ["Latin-1 악센트", [0xe9]],
+    ["Shift_JIS 가나", [0x82, 0xa0]],
+  ];
+  for (const [label, bytes] of shapes) {
+    const zip = storedZipRaw([
+      [ascii("site/package.json"), Buffer.from('{"name":"x"}')],
+      [Buffer.concat([ascii("site/public/"), Buffer.from(bytes), ascii(".jpg")]), Buffer.from("A")],
+    ]);
+    assert.throws(() => listZipEntries(zip), /이름을 읽지 못했습니다/, `${label}: 조용히 통과했다`);
+  }
 
-  const dir = await tempDir("zalkera-cp949-");
+  // UTF-8 한글은 플래그가 없어도 그대로 읽힌다 — 유효한 UTF-8 이면 받는다.
+  const utf8Zip = storedZipRaw([
+    [ascii("site/package.json"), Buffer.from('{"name":"x"}')],
+    [Buffer.from("site/public/가.jpg", "utf8"), Buffer.from("A")],
+  ]);
+  const names = listZipEntries(utf8Zip);
+  assert.ok(names.includes("site/public/가.jpg"), `UTF-8 한글이 막혔다: ${names.join(",")}`);
+
+  const dir = await tempDir("zalkera-utf8-");
   const plan = decideImportPlan(names);
-  const { fileCount } = await extractZip(zip, dir, plan);
-  assert.equal(fileCount, 3);
-  assert.ok(existsSync(join(dir, "public/가.jpg")), "한글 이름이 깨진 채 풀렸다");
+  const { fileCount } = await extractZip(utf8Zip, dir, plan);
+  assert.equal(fileCount, 2);
+  assert.ok(existsSync(join(dir, "public/가.jpg")));
 });
 
 test("겹 자리의 부스러기가 접두 계산을 끊지 않는다", async () => {

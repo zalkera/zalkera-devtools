@@ -43,40 +43,30 @@ export interface UnzipResult {
  * 들여오기가 쓴다 — 무엇을 풀지(`decideImportPlan`)는 **쓰기 전에** 정해져야 한다.
  */
 /**
- * zip 항목의 **파일 이름을 읽는다.**
+ * zip 항목의 **파일 이름을 읽는다 — UTF-8 만 받는다.**
  *
- * ⚠ **무조건 UTF-8 로 읽으면 국내 도구가 만든 zip 이 깨진다.** 범용 플래그 11번(EFS)을 세운
- *   zip 만 UTF-8 을 보장한다. 알집·구형 윈도 탐색기는 그 플래그 없이 **CP949** 로 적는데,
- *   그것을 UTF-8 로 읽으면 이름이 전부 `U+FFFD` 로 접힌다. 그러면 ⑴ 한글 파일이 둘 이상일 때
- *   같은 이름이 되어 「같은 파일을 두 번 담고 있습니다」로 **정상 zip 이 통째로 거절**되고
- *   ⑵ 하나면 이름이 깨진 채 조용히 풀린다(이미지 404 인데 원인이 화면에 없다).
- *   국내 개발사가 오너에게 소스를 넘기는 것이 이 제품의 정본 시나리오다.
+ * ⚠ **인코딩을 추측하지 않는다.** 범용 플래그 11번(EFS)을 안 세운 zip 은 이름이 어느 인코딩인지
+ *   **진짜로 모호하다.** CP949 를 받아 주면 GB2312 이름이 엉뚱한 한자로 조용히 읽히고, 거기에
+ *   Shift_JIS 를 더하면 또 다른 충돌이 생긴다 — 사다리를 늘릴수록 「조용히 틀리는」 조합이 는다.
+ *
+ *   그리고 이 이름은 여기서 끝나지 않는다. 소스가 서버로 올라가고 파일명이 곧 주소가 되는데,
+ *   그 아래는 전부 UTF-8 을 전제한다. 경계에서 안 막으면 틀린 이름이 그대로 흘러간다.
+ *
+ *   거절은 **보이고 되돌릴 수 있다.** 오독은 「이미지가 404 인데 원인이 화면에 없는」 상태로
+ *   남는다. 그래서 못 읽으면 멈추고, **다음에 할 일을 이름 대고 말한다** — 「최신 도구로」라고만
+ *   하면 같은 도구로 다시 해서 또 막힌다.
  */
 function decodeEntryName(raw: Buffer): string {
-    // ASCII 뿐이면 어느 인코딩이든 같다 — 가장 흔한 경우를 먼저 끝낸다.
-    let ascii = true;
-    for (const byte of raw) {
-        if (byte >= 0x80) {
-            ascii = false;
-            break;
-        }
+    try {
+        return new TextDecoder("utf-8", {fatal: true}).decode(raw);
+    } catch {
+        throw new DevtoolsError(
+            "SERVER_REJECTED",
+            "압축 파일 안의 파일 이름을 읽지 못했습니다.",
+            "7-Zip 이나 반디집으로 다시 압축하시거나, 파일 이름을 영문으로 바꿔 주세요 — " +
+                "윈도 기본 「압축」은 한글 이름을 옛 방식으로 저장합니다.",
+        );
     }
-    if (ascii) return raw.toString("latin1");
-
-    // 플래그를 안 세우고 UTF-8 로 적는 도구가 많다 — 유효하면 그것이다.
-    const utf8 = new TextDecoder("utf-8").decode(raw);
-    if (!utf8.includes("\uFFFD")) return utf8;
-
-    // 남은 현실적 후보는 CP949 다.
-    const euckr = new TextDecoder("euc-kr").decode(raw);
-    if (!euckr.includes("\uFFFD")) return euckr;
-
-    // 어느 쪽으로도 안 읽힌다. **깨진 이름으로 풀지 않는다** — 조용한 훼손보다 멈추는 편이 낫다.
-    throw new DevtoolsError(
-        "SERVER_REJECTED",
-        "압축 파일 안의 이름을 읽지 못했습니다.",
-        "옛 방식으로 압축된 파일로 보입니다 — 최신 압축 도구로 다시 압축해 주세요.",
-    );
 }
 
 export function listZipEntries(zip: Buffer): string[] {
