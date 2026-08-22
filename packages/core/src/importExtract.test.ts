@@ -389,3 +389,42 @@ test("이름 목록이 지나치게 크면 **디코드 전에** 거절한다", a
   ]);
   assert.deepEqual(listZipEntries(ok), ["package.json", "src/app/page.tsx"]);
 });
+
+test("상한은 **이름을 읽기 전에** 선다 — 순서가 주석에만 있으면 조용히 되돌아간다", async () => {
+  // ⚠ 이 델타의 존재 이유가 그 순서다. 검사를 디코드 뒤로 옮겨도 다른 시험은 전부 초록이라
+  //   (심의 실증), 나중 편집이 소리 없이 되돌리면 배송 문서의 「읽기 전에 멈춥니다」가 다시
+  //   거짓이 되면서 아무도 안 막는다.
+  //
+  //   기법: 상한을 넘기는 자리에 **EFS 표시 + 깨진 UTF-8** 이름을 둔다.
+  //   상한이 먼저면 「목록이 지나치게 큽니다」, 디코드가 먼저면 「이름을 읽지 못했습니다」.
+  const ascii = (text: string): Buffer => Buffer.from(text, "latin1");
+  const seg = "s".repeat(120);
+  const dir3 = `${seg}/${seg}/${seg}/`;
+  const broken = Buffer.concat([ascii(dir3), Buffer.from([0xff, 0xfe]), ascii(".txt")]);
+
+  // ⚠ **깨진 이름이 상한을 «넘기는 바로 그» 항목이어야 한다.** 뒤에 두면 상한이 그 전에 이미
+  //   넘어서 어느 순서든 상한 오류가 나고, 시험이 판별을 못 한다(자체 변이로 확인).
+  const CAP = 8 * 1024 * 1024;
+  const entries: [Buffer, Buffer][] = [[ascii("package.json"), Buffer.from("{}")]];
+  let used = "package.json".length;
+  for (let i = 0; used + broken.length <= CAP; i += 1) {
+    const name = ascii(`${dir3}f${i}`);
+    entries.push([name, Buffer.from("x")]);
+    used += name.length;
+  }
+  entries.push([broken, Buffer.from("x")]);
+  assert.ok(used <= CAP && used + broken.length > CAP, `깨진 이름이 경계에 안 놓였다(${used})`);
+  assert.throws(
+    () => listZipEntries(storedZipRaw(entries, 0x800)),
+    /목록이 지나치게 큽니다/,
+    "상한이 디코드보다 뒤로 갔다 — 이름을 다 읽은 뒤에 끊고 있다",
+  );
+
+  // 대조군: 같은 깨진 이름이 **상한 안**에 있으면 디코드 오류가 난다.
+  //   이것이 없으면 위 단언이 「깨진 이름이 애초에 오류를 못 낸다」로도 통과한다.
+  assert.throws(
+    () => listZipEntries(storedZipRaw([[ascii("package.json"), Buffer.from("{}")], [broken, Buffer.from("x")]], 0x800)),
+    /이름을 읽지 못했습니다/,
+    "대조군이 성립하지 않는다 — 이 시험은 아무것도 안 재고 있다",
+  );
+});
