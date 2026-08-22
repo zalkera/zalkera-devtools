@@ -31,15 +31,15 @@ test("사이트가 붙어도 받기 진입점이 보인다", () => {
   assert.ok(commands().includes("zalkera.site.open"), "처음 쓰는 사람에게도 보여야 한다");
 });
 
-test("순서는 사이트 · 미리보기 · 내보내기 · 불러오기 · 버전 · 도움", () => {
-  assert.deepEqual(ids({ site: "/tmp/x" }), ["site", "preview", "export", "source", "version", "help"]);
+test("순서는 사이트 · 미리보기 · 내보내기 · 불러오기 · 갈아끼우기 · 버전 · 도움", () => {
+  assert.deepEqual(ids({ site: "/tmp/x" }), ["site", "preview", "export", "source", "replace", "version", "help"]);
 });
 
 test("소스가 없어도 여섯 묶음이 다 보인다 — 없으면 「갱신이 안 됐다」로 읽힌다", () => {
   // 오너 확정. 종전에는 못 하는 것을 숨겼는데, 실사용에서 그 대가가 더 컸다 — 확장을 새로
   // 깔았는데 메뉴가 셋뿐이니 갱신 실패로 읽혔다. 사람은 없는 것을 「조건이 안 됐다」로 읽지 않는다.
   // 못 하는 이유는 **누를 때** 말한다(`whyBlocked`).
-  assert.deepEqual(ids(), ["site", "preview", "export", "source", "version", "help"]);
+  assert.deepEqual(ids(), ["site", "preview", "export", "source", "replace", "version", "help"]);
 });
 
 test("소스가 있으나 없으나 묶음과 순서가 같다 — 화면이 흔들리지 않는다", () => {
@@ -205,7 +205,6 @@ test("요건 목록에 사이드바 밖 명령이 섞이지 않았다", () => {
   const PALETTE_ONLY = new Set([
     "zalkera.site.create",
     "zalkera.site.link",
-    "zalkera.site.updateZip",
     "zalkera.preview.restart",
   ]);
   // 차단 알림의 버튼으로만 닿는 명령도 정당하다 — 그 자리가 곧 탈출구다.
