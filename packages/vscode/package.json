@@ -50,6 +50,11 @@
         "category": "잘커라"
       },
       {
+        "command": "zalkera.site.updateZip",
+        "title": "zip 으로 갱신",
+        "category": "잘커라"
+      },
+      {
         "command": "zalkera.export",
         "title": "zip 으로 내보내기",
         "category": "잘커라"

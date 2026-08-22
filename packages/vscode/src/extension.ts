@@ -53,6 +53,7 @@ import {
   extractZip,
   listZipEntries,
   meaningfulEntries,
+  replaceContents,
   removeAdded,
   snapshotEntries,
   readZipFile,
@@ -158,7 +159,7 @@ const ISSUED_KEY_STATE = "zalkera.issuedKey";
  * 요약하면 이 저장소는 창 사이에 공유되는데 미리보기는 창마다 켜기 때문이다.
  */
 function recordedKeys(): IssuedKey[] {
-  const {list, dropped} = readIssuedKeysWithOverflow(
+  const { list, dropped } = readIssuedKeysWithOverflow(
     persistedState.get(ISSUED_KEY_STATE),
   );
   // 상한을 넘은 것은 **조용히 버리지 않는다** — 그 열쇠는 서버에서 살아 있고, 도움말은
@@ -175,7 +176,9 @@ function recordedKeys(): IssuedKey[] {
  */
 function reapDropped(dropped: readonly IssuedKey[]): void {
   for (const key of dropped) {
-    log(`미리보기 자격증명이 목록 상한을 넘어 밀려났습니다 — 서버에서 지웁니다(#${count(key.keyId)}).`);
+    log(
+      `미리보기 자격증명이 목록 상한을 넘어 밀려났습니다 — 서버에서 지웁니다(#${count(key.keyId)}).`,
+    );
     void revokeKeyQuietly(key.keyId, key.tenant);
   }
 }
@@ -202,7 +205,10 @@ function folderRegistry(): Record<string, string> {
 }
 
 function rememberFolder(tenant: string, dir: string): void {
-  void persistedState.update(FOLDER_REGISTRY_STATE, {...folderRegistry(), [tenant]: dir});
+  void persistedState.update(FOLDER_REGISTRY_STATE, {
+    ...folderRegistry(),
+    [tenant]: dir,
+  });
 }
 
 /** 계정이 바뀌면 통째로 버린다 — 앞사람의 사이트 코드와 폴더 경로가 남는 자리다. */
@@ -327,7 +333,12 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     register("zalkera.site.create", () => withReceiveGuard(startFromExample)),
     register("zalkera.site.open", () => withReceiveGuard(openSite)),
-    register("zalkera.site.importZip", () => withReceiveGuard(importZipCommand)),
+    register("zalkera.site.importZip", () =>
+      withReceiveGuard(importZipCommand),
+    ),
+    register("zalkera.site.updateZip", () =>
+      withReceiveGuard(updateZipCommand),
+    ),
     register("zalkera.export", exportZipCommand),
     register("zalkera.site.link", linkFolder),
     register("zalkera.site.useFolder", useFolderSite),
@@ -456,7 +467,7 @@ async function announceIfBlocked(command: string): Promise<boolean> {
   // ⚠ 어긋남 문면에는 폴더·서버가 정한 사이트 코드가 들어간다 — 소독은 core 안(`plainNotice`)에서
   //    이미 끝났다. 그래서 여기에 `ours` 를 붙이면 그 표기가 거짓이 된다.
   const buttons = [blocked.action, blocked.alternative].filter(
-    (b): b is {label: string; command: string} => b !== undefined,
+    (b): b is { label: string; command: string } => b !== undefined,
   );
   const picked = await vscode.window.showInformationMessage(
     blocked.message,
@@ -824,7 +835,13 @@ async function chooseFetchTarget(
   if (suggestion) {
     // 같은 판을 이미 받아 둔 폴더가 있으면 사본을 하나 더 만들기 전에 그 사실을 말한다.
     // **막지는 않는다** — 사본이 망가져서 다시 받는 경우가 있다.
-    if (holdsSameRevision(readSourceMarkAt(suggestion.preferred), tenant, revisionNo)) {
+    if (
+      holdsSameRevision(
+        readSourceMarkAt(suggestion.preferred),
+        tenant,
+        revisionNo,
+      )
+    ) {
       const answer = await vscode.window.showInformationMessage(
         ours(say.alreadyFetchedAt(tenant, revisionNo, suggestion.preferred)),
         "그 폴더 열기",
@@ -882,7 +899,9 @@ function suggestSibling(
 ): { preferred: string; free: string | null } {
   const parent = dirname(openDir);
   const base = suggestFolderName(basename(openDir), revisionNo);
-  const free = nextAvailableName(base, (name) => existsSync(join(parent, name)));
+  const free = nextAvailableName(base, (name) =>
+    existsSync(join(parent, name)),
+  );
   return {
     preferred: join(parent, base),
     free: free === null ? null : join(parent, free),
@@ -930,7 +949,9 @@ async function writeSourceMark(
     fetchedAt: new Date().toISOString(),
   });
   if (!done.ok) {
-    log(`출처 표식을 남기지 못했습니다(${done.reason}) — 받기 자체는 끝났습니다.`);
+    log(
+      `출처 표식을 남기지 못했습니다(${done.reason}) — 받기 자체는 끝났습니다.`,
+    );
   }
 }
 
@@ -941,14 +962,15 @@ async function linkFolderToSite(
 ): Promise<void> {
   const done = await linkFolderToTenant(root, String(tenant));
   if (done.ok) {
-    log("이 폴더를 지금 사이트에 연결해 두었습니다 — 폴더를 열면 바로 이어집니다.");
+    log(
+      "이 폴더를 지금 사이트에 연결해 두었습니다 — 폴더를 열면 바로 이어집니다.",
+    );
     return;
   }
   log(
     `폴더 연결을 적지 못했습니다(${done.reason}). 새 폴더를 연 뒤 「폴더 연결」을 눌러 주세요.`,
   );
 }
-
 
 /**
  * B1「예제로 시작」 — 시작 소스 팩을 골라 빈 폴더에 푼다.
@@ -968,10 +990,16 @@ async function linkFolderToSite(
 async function openSiteFolder(dir: string): Promise<void> {
   const dirty = vscode.workspace.textDocuments.some((d) => d.isDirty);
   if (session === null && !dirty) {
-    await vscode.commands.executeCommand("vscode.openFolder", vscode.Uri.file(dir));
+    await vscode.commands.executeCommand(
+      "vscode.openFolder",
+      vscode.Uri.file(dir),
+    );
     return;
   }
-  const reason = session !== null ? "미리보기가 돌고 있습니다" : "저장하지 않은 편집기가 있습니다";
+  const reason =
+    session !== null
+      ? "미리보기가 돌고 있습니다"
+      : "저장하지 않은 편집기가 있습니다";
   const picked = await vscode.window.showWarningMessage(
     ours(`${reason} — 새 창에서 열면 지금 창은 그대로 둡니다.`),
     { modal: true },
@@ -979,9 +1007,13 @@ async function openSiteFolder(dir: string): Promise<void> {
     "이 창에서 열기",
   );
   if (picked === undefined) return;
-  await vscode.commands.executeCommand("vscode.openFolder", vscode.Uri.file(dir), {
-    forceNewWindow: picked === "새 창에서 열기",
-  });
+  await vscode.commands.executeCommand(
+    "vscode.openFolder",
+    vscode.Uri.file(dir),
+    {
+      forceNewWindow: picked === "새 창에서 열기",
+    },
+  );
 }
 
 /**
@@ -1000,17 +1032,22 @@ async function exportZipCommand(): Promise<void> {
   const saveAt = await vscode.window.showSaveDialog({
     title: "넘기실 zip 을 저장할 곳",
     defaultUri: vscode.Uri.file(join(dirname(dir), suggested)),
-    filters: {"사이트 소스": ["zip"]},
+    filters: { "사이트 소스": ["zip"] },
   });
   if (!saveAt) return;
 
   const result = await vscode.window.withProgress(
-    {location: vscode.ProgressLocation.Notification, title: "사이트 소스를 포장하는 중"},
-    () => packProject({projectDir: dir, onProgress: log}),
+    {
+      location: vscode.ProgressLocation.Notification,
+      title: "사이트 소스를 포장하는 중",
+    },
+    () => packProject({ projectDir: dir, onProgress: log }),
   );
   await writeOwnFile(saveAt.fsPath, result.buffer);
 
-  log(`파일 ${count(result.fileCount)}개 · ${Math.round(result.buffer.length / 1024)}KB 로 포장했습니다.`);
+  log(
+    `파일 ${count(result.fileCount)}개 · ${Math.round(result.buffer.length / 1024)}KB 로 포장했습니다.`,
+  );
   log(`sha256: ${result.sha256}`);
   void vscode.window.showInformationMessage(
     // ⚠ **「전부 뺐다」고 말하지 않는다.** `isSecretFile` 이 스스로 보증을 좁혀 뒀다 — 우리가
@@ -1036,7 +1073,7 @@ async function importZipCommand(): Promise<void> {
     canSelectFiles: true,
     canSelectFolders: false,
     canSelectMany: false,
-    filters: {"사이트 소스": ["zip"]},
+    filters: { "사이트 소스": ["zip"] },
     openLabel: "이 zip 으로 시작",
     title: "받으신 사이트 소스 zip 을 고르세요",
   });
@@ -1053,19 +1090,26 @@ async function importZipCommand(): Promise<void> {
   if (!target) return;
 
   const result = await vscode.window.withProgress(
-    {location: vscode.ProgressLocation.Notification, title: "사이트 소스를 푸는 중"},
+    {
+      location: vscode.ProgressLocation.Notification,
+      title: "사이트 소스를 푸는 중",
+    },
     () => importZipInto(zipPath, target),
   );
 
   log(`파일 ${count(result.fileCount)}개를 풀었습니다: ${target}`);
   if (result.dropped.length > 0) {
     // **무엇이 빠졌는지 말한다.** 조용히 빼면 「보낸 파일이 없다」는 문의가 우리에게 온다.
-    log(`정본에 싣지 않는 ${count(result.dropped.length)}개는 빼고 풀었습니다: ${result.dropped.join(", ")}`);
+    log(
+      `정본에 싣지 않는 ${count(result.dropped.length)}개는 빼고 풀었습니다: ${result.dropped.join(", ")}`,
+    );
   }
   await refreshSidebar();
 
   const open = await vscode.window.showInformationMessage(
-    ours("사이트 소스를 풀었습니다. 폴더를 열고 「폴더 연결」로 사이트에 붙이면 미리보기·올리기가 됩니다."),
+    ours(
+      "사이트 소스를 풀었습니다. 폴더를 열고 「폴더 연결」로 사이트에 붙이면 미리보기·올리기가 됩니다.",
+    ),
     "폴더 열기",
   );
   if (open === "폴더 열기") {
@@ -1079,12 +1123,12 @@ async function importZipCommand(): Promise<void> {
 async function importZipInto(
   zipPath: string,
   targetDir: string,
-): Promise<{fileCount: number; dropped: string[]}> {
+): Promise<{ fileCount: number; dropped: string[] }> {
   const zip = await readZipFile(zipPath);
   const plan = decideImportPlan(listZipEntries(zip));
   // ⚠ **빈 폴더 강제는 해제기 밖이다**(형제 `startFromPreset` 과 같은 규율) — 있는 파일을
   //    덮어쓰지 않는다. `meaningfulEntries` 가 편집기·OS 부스러기는 「비어 있음」으로 본다.
-  await mkdir(targetDir, {recursive: true});
+  await mkdir(targetDir, { recursive: true });
   if ((await meaningfulEntries(targetDir)).length > 0) {
     throw new DevtoolsError(
       "NOT_A_SITE",
@@ -1100,12 +1144,103 @@ async function importZipInto(
   const before = await snapshotEntries(targetDir);
   let fileCount: number;
   try {
-    ({fileCount} = await extractZip(zip, targetDir, plan));
+    ({ fileCount } = await extractZip(zip, targetDir, plan));
   } catch (cause) {
     await removeAdded(targetDir, before);
     throw cause;
   }
-  return {fileCount, dropped: plan.dropped};
+  return { fileCount, dropped: plan.dropped };
+}
+
+/**
+ * **받은 zip 으로 지금 폴더를 갈아 끼운다.**
+ *
+ * 대행사가 새 판을 보내오는 것은 예외가 아니라 정상 흐름인데, `zip 으로 시작`은 빈 폴더만
+ * 받으므로 갱신하려면 사람이 손으로 폴더를 비워야 했다. 그 조작에 함정이 둘이다 —
+ * `rm -rf 폴더/*` 는 dot 파일(`.gitignore`·`.github/`·`.zalkera/`)을 하나도 못 지워 다음 시도가
+ * 「비어 있지 않습니다」로 막히고, 중간에 실패하면 되돌릴 길이 없다.
+ *
+ * 그래서 옆에 치워 두고 채운 뒤 성공했을 때만 버린다([replaceContents]). 그리고 **소속 표식은
+ * 보존한다** — zip 에는 그 파일이 없으므로(정본 도구가 `.zalkera` 를 빼고 압축한다) 그냥 풀면
+ * 이 폴더가 어느 사이트 것인지 잃는다.
+ */
+async function updateZipCommand(): Promise<void> {
+  const dir = siteDir();
+  if (dir === null) {
+    throw new DevtoolsError(
+      "NOT_A_SITE",
+      "지금 창에 사이트 소스가 열려 있지 않습니다.",
+      "갈아 끼울 폴더를 먼저 여세요 — 새로 시작하는 것이면 「zip 으로 시작」입니다.",
+    );
+  }
+
+  const chosen = await vscode.window.showOpenDialog({
+    canSelectFiles: true,
+    canSelectFolders: false,
+    canSelectMany: false,
+    filters: { "사이트 소스": ["zip"] },
+    openLabel: "이 zip 으로 갈아 끼우기",
+    title: "새로 받으신 사이트 소스 zip 을 고르세요",
+  });
+  const zipPath = chosen?.[0]?.fsPath;
+  if (!zipPath) return;
+
+  // ⚠ **되돌릴 수 없는 조작이라 한 번 묻는다.** 실패하면 되돌리지만, 성공하면 옛 소스는 없다.
+  const ok = await vscode.window.showWarningMessage(
+    ours(
+      `이 폴더의 소스를 고르신 zip 으로 갈아 끼웁니다. 지금 내용은 사라집니다.\n${dir}`,
+    ),
+    { modal: true },
+    "갈아 끼우기",
+  );
+  if (ok !== "갈아 끼우기") return;
+
+  // ⚠ **먼저 멈춘다.** 미리보기가 파일을 물고 있으면 지우기가 실패하고, 그 실패는 갈아 끼우기
+  //    한복판에서 난다 — 되돌리기가 도는 자리지만 애초에 거기까지 안 가는 편이 낫다.
+  await stopPreview();
+
+  // ⚠ **읽기·판정을 먼저 끝낸다.** 폴더를 비운 뒤에 zip 이 상했다는 걸 알면 되돌리기에
+  //    기대게 된다 — 기댈 필요가 없게 순서를 잡는다.
+  const zip = await readZipFile(zipPath);
+  const plan = decideImportPlan(listZipEntries(zip));
+
+  const result = await vscode.window.withProgress(
+    {
+      location: vscode.ProgressLocation.Notification,
+      title: "사이트 소스를 갈아 끼우는 중",
+    },
+    async () => {
+      let fileCount = 0;
+      const { preserved } = await replaceContents(
+        dir,
+        [SOURCE_MARK_PATH],
+        async () => {
+          ({ fileCount } = await extractZip(zip, dir, plan));
+        },
+      );
+      return { fileCount, preserved };
+    },
+  );
+
+  log(`파일 ${count(result.fileCount)}개로 갈아 끼웠습니다: ${dir}`);
+  if (plan.dropped.length > 0) {
+    log(
+      `정본에 싣지 않는 ${count(plan.dropped.length)}개는 빼고 풀었습니다: ${plan.dropped.join(", ")}`,
+    );
+  }
+  if (result.preserved.length === 0) {
+    // 표식이 없었다는 것은 이 폴더가 아직 사이트에 안 붙었다는 뜻이다 — 조용히 넘기지 않는다.
+    log(
+      "이 폴더에는 사이트 소속 표식이 없었습니다 — 「폴더 연결」로 붙이면 미리보기·올리기가 됩니다.",
+    );
+  }
+  await refreshSidebar();
+
+  await vscode.window.showInformationMessage(
+    ours(
+      "소스를 갈아 끼웠습니다. 「미리보기 시작」으로 확인한 뒤 「새 버전 올리기」로 올리세요.",
+    ),
+  );
 }
 
 async function startFromExample(): Promise<void> {
@@ -1331,7 +1466,9 @@ async function useFolderSite(): Promise<void> {
   const mark = readSourceMarkAt(dir);
   if (mark === null) {
     void vscode.window.showInformationMessage(
-      ours("이 폴더에는 사이트 표식이 없습니다 — 「폴더 연결」로 사이트를 정해 주세요."),
+      ours(
+        "이 폴더에는 사이트 표식이 없습니다 — 「폴더 연결」로 사이트를 정해 주세요.",
+      ),
     );
     return;
   }
@@ -1388,7 +1525,9 @@ async function linkFolder(): Promise<void> {
       linkedAt: new Date().toISOString(),
     });
     if (!marked.ok) {
-      log(`소속 표식을 남기지 못했습니다(${marked.reason}) — 연결 자체는 끝났습니다.`);
+      log(
+        `소속 표식을 남기지 못했습니다(${marked.reason}) — 연결 자체는 끝났습니다.`,
+      );
     }
   }
   rememberFolder(choice.description, dir);
@@ -1617,7 +1756,9 @@ function scheduleRenewal(expiresAt: string, ttlSeconds: number): void {
       //    자격증명을 쓰는 일**이 된다. 게이트가 막는 바로 그 형상이라 여기서도 막는다.
       const boundTo = currentFolderBinding();
       if (boundTo !== null && boundTo !== (pinned as string)) {
-        log(`이 폴더가 ${boundTo} 사이트로 바뀌어 미리보기 자격증명을 갱신하지 않습니다.`);
+        log(
+          `이 폴더가 ${boundTo} 사이트로 바뀌어 미리보기 자격증명을 갱신하지 않습니다.`,
+        );
         await stopPreview();
         void vscode.window.showInformationMessage(
           say.renewalStoppedAfterRelink(boundTo),
@@ -1769,7 +1910,9 @@ async function publishCommand(): Promise<void> {
   if (marked.ok) {
     log(`이 폴더를 ${tenant} 사이트의 소스로 표시했습니다.`);
   } else {
-    log(`소속 표식을 남기지 못했습니다(${marked.reason}) — 발행 자체는 끝났습니다.`);
+    log(
+      `소속 표식을 남기지 못했습니다(${marked.reason}) — 발행 자체는 끝났습니다.`,
+    );
   }
   rememberFolder(String(tenant), dir);
 
@@ -2235,7 +2378,9 @@ async function chooseSite(): Promise<void> {
     // 링크로 렌더한다(재심의 실증).
     if (choice.kind === "switched") {
       log(`작업 사이트를 ${code} 로 바꿨습니다.`);
-      void vscode.window.showInformationMessage(`사이트: ${plainNotice(code, 64)}`);
+      void vscode.window.showInformationMessage(
+        `사이트: ${plainNotice(code, 64)}`,
+      );
       return;
     }
     if (choice.kind === "adopted") {
@@ -2261,8 +2406,11 @@ async function offerFolderElsewhere(
   binding: string | null,
   offer: "open" | "fetch",
 ): Promise<void> {
-  log(`이 폴더는 ${binding ?? "다른"} 사이트의 소스라 ${picked} 작업은 다른 폴더에서 합니다.`);
-  const label = offer === "open" ? "그 사이트 폴더 열기" : "그 사이트 소스 받기";
+  log(
+    `이 폴더는 ${binding ?? "다른"} 사이트의 소스라 ${picked} 작업은 다른 폴더에서 합니다.`,
+  );
+  const label =
+    offer === "open" ? "그 사이트 폴더 열기" : "그 사이트 소스 받기";
   const answer = await vscode.window.showInformationMessage(
     say.pickedElsewhere(picked, binding ?? ""),
     label,
@@ -2274,7 +2422,9 @@ async function offerFolderElsewhere(
     // 다른 사이트를 담게 됐을 수 있고, 그때 여는 것이 이 설계가 막으려는 사고다.
     if (dir === null) {
       void vscode.window.showInformationMessage(
-        ours("그 사이트의 로컬본을 찾지 못했습니다 — 「불러오기」로 소스를 받아 주세요."),
+        ours(
+          "그 사이트의 로컬본을 찾지 못했습니다 — 「불러오기」로 소스를 받아 주세요.",
+        ),
       );
       return;
     }
@@ -2382,7 +2532,9 @@ async function saveTenant(code: string): Promise<void> {
   });
   const target = configTargetFor(scope);
   if (target === undefined) return;
-  await vscode.workspace.getConfiguration("zalkera").update("tenant", code, target);
+  await vscode.workspace
+    .getConfiguration("zalkera")
+    .update("tenant", code, target);
 }
 
 /**
@@ -2393,7 +2545,9 @@ async function saveTenant(code: string): Promise<void> {
  *   막는 전역 오염을 통째로 되살린다(심의 실증: 그 변이가 전건 초록으로 살아남았다).
  *   전수 `switch` 는 칸을 지우면 타입이 먼저 선다.
  */
-function configTargetFor(scope: TenantScope): vscode.ConfigurationTarget | undefined {
+function configTargetFor(
+  scope: TenantScope,
+): vscode.ConfigurationTarget | undefined {
   switch (scope) {
     case "workspace":
       return vscode.ConfigurationTarget.Workspace;
@@ -2493,7 +2647,9 @@ function showIdleStatus(): void {
   status.backgroundColor = plan.warning
     ? new vscode.ThemeColor("statusBarItem.warningBackground")
     : undefined;
-  status.command = plan.warning ? "zalkera.site.useFolder" : "zalkera.preview.start";
+  status.command = plan.warning
+    ? "zalkera.site.useFolder"
+    : "zalkera.preview.start";
 }
 
 function setStatus(text: string): void {
