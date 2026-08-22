@@ -144,7 +144,7 @@ export async function assertNotSymlink(path: string, name: string): Promise<void
  *   **그 전제를 안 지나는 호출부가 생기면 이 갭이 살아난다.** 「심링크를 안 따라간다」는 주장은
  *   그 한정 안에서만 참이다.
  */
-export async function writeOwnFile(path: string, data: string, mode = 0o644): Promise<void> {
+export async function writeOwnFile(path: string, data: string | Uint8Array, mode = 0o644): Promise<void> {
     const info = await lstat(path).catch(() => null);
     if (info?.isSymbolicLink()) {
         throw new DevtoolsError(
@@ -156,7 +156,9 @@ export async function writeOwnFile(path: string, data: string, mode = 0o644): Pr
     const tmp = `${path}.zalkera-${randomBytes(6).toString("hex")}.tmp`;
     try {
         // `wx` — 이미 있으면 실패한다. 남의 파일을 우연히 덮지 않는다.
-        await writeFile(tmp, data, {encoding: "utf8", mode, flag: "wx"});
+        // ⚠ **인코딩은 문자열일 때만 준다.** 바이너리에 `utf8` 을 붙이면 조용히 망가진다 —
+        //    zip 이 그 경로로 나가면 「열리지 않는 파일」이 되고 원인이 안 보인다.
+        await writeFile(tmp, data, typeof data === "string" ? {encoding: "utf8", mode, flag: "wx"} : {mode, flag: "wx"});
         await rename(tmp, path);
     } catch (error) {
         await rm(tmp, {force: true}).catch(() => undefined);

@@ -34,8 +34,8 @@ const WIRES = [
     [
         "packages/vscode/src/extension.ts",
         "folderTenant: currentFolderBinding()",
-        "게이트와 사이드바가 서로 다른 기준으로 소속을 판정해, 화면은 건강한데 누르면 막힌다",
-        2,
+        "게이트·사이드바·상태바가 서로 다른 기준으로 소속을 판정해, 화면마다 다른 말을 한다",
+        3,
     ],
     [
         "packages/vscode/src/extension.ts",
@@ -66,6 +66,21 @@ const WIRES = [
         "packages/vscode/src/extension.ts",
         'origin: "linked"',
         "재연결이 표식을 안 남겨 링크와 표식이 갈리고, 「어긋남은 사고다」가 성립하지 않는다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "const plan = decideImportPlan(listZipEntries(zip));",
+        "들여오기가 판정을 안 지나 아무 zip 이나 풀리고, 보낸 쪽 .vscode 가 들어와 그 폴더가 남의 사이트라고 주장한다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "() => packProject({projectDir: dir, onProgress: log}),",
+        "내보내기가 발행과 다른 포장기를 쓰면 규칙이 갈리고, 손 압축과 같아져 자격증명이 딸려 나간다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "const plan = idleStatusPlan({",
+        "상태바가 core 판정을 안 지나 어긋남 술어가 세 벌이 된다",
     ],
     [
         "packages/vscode/src/extension.ts",
@@ -210,8 +225,8 @@ const WIRES = [
     [
         "packages/vscode/src/extension.ts",
         "site: siteDir(),",
-        "사이드바와 요건 게이트가 서로 다른 기준으로 「소스가 있나」를 판정한다 — 화면은 없다는데 게이트는 통과시킨다",
-        2,
+        "사이드바·요건 게이트·상태바가 서로 다른 기준으로 「소스가 있나」를 판정한다 — 화면은 없다는데 게이트는 통과시킨다",
+        3,
     ],
     [
         "packages/core/src/fetchSource.ts",

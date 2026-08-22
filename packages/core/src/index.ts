@@ -72,6 +72,7 @@ export {
 } from "./dev.ts";
 export {
   createZip,
+  isExcludedEntry,
   packProject,
   writeZip,
   type PackResult,
@@ -90,7 +91,8 @@ export {
   type FetchSourceOptions,
   type FetchSourceResult,
 } from "./fetchSource.ts";
-export { extractZip, type UnzipResult } from "./unzip.ts";
+export { extractZip, listZipEntries, type UnzipResult } from "./unzip.ts";
+export { decideImportPlan, readZipFile, type ImportPlan } from "./importZip.ts";
 export { isReceivable, meaningfulEntries } from "./emptyDir.ts";
 
 export { waitForBuild, type BuildOutcome, type WaitOptions } from "./build.ts";
@@ -193,4 +195,5 @@ export {
     type SiteChoice,
 } from "./siteBinding.ts";
 export { sidebarPlan } from "./sidebarPlan.ts";
+export { idleStatusPlan, type StatusPlan } from "./statusPlan.ts";
 export type { PlanGroup, PlanItem, SidebarState } from "./sidebarPlan.ts";

@@ -1,6 +1,6 @@
 {
   "name": "zalkera-devtools",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "license": "MIT",
   "type": "module",
@@ -42,6 +42,16 @@
       {
         "command": "zalkera.site.open",
         "title": "사이트 소스 받기",
+        "category": "잘커라"
+      },
+      {
+        "command": "zalkera.site.importZip",
+        "title": "zip 으로 시작",
+        "category": "잘커라"
+      },
+      {
+        "command": "zalkera.export",
+        "title": "zip 으로 내보내기",
         "category": "잘커라"
       },
       {

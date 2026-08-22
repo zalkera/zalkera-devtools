@@ -106,6 +106,9 @@ export async function createZip(entries: ZipEntry[]): Promise<Buffer> {
 const ALWAYS_EXCLUDED = new Set([
     "node_modules",
     ".git",
+    // macOS 기본 압축이 만드는 부스러기. 발행에도 들여오기에도 실릴 이유가 없다.
+    // ⚠ 조회가 소문자라 **항목도 소문자여야 한다**(위 .ds_store 와 같은 함정).
+    "__macosx",
     ".next",
     "dist",
     "out",
@@ -218,6 +221,23 @@ export interface PackResult {
  *   배송 문서가 가리키는 실물이다 — 폴더째 빼면 그 참조가 매달린다.
  */
 const EXCLUDED_PATHS = new Set([".zalkera/source.json"]);
+
+/**
+ * zip 항목 하나(`a/b/c.ts` 꼴 상대 경로)가 **정본에 실리지 않는 것**인가.
+ *
+ * ⚠ **들여오기가 이 판정을 같이 쓴다**(`importZip.ts`). 목록을 사본으로 들고 가면 두 목록이
+ *   갈리고, 갈린 날 「발행에서는 빠지는데 들여올 때는 들어오는」 파일이 생긴다. 보낸 쪽
+ *   `.vscode/settings.json` 이 정확히 그런 파일이다 — 들어오면 그 폴더가 **보낸 사람의 사이트라고
+ *   주장**한다.
+ */
+export function isExcludedEntry(entryPath: string): boolean {
+    const path = entryPath.split(sep).join("/").toLowerCase();
+    if (EXCLUDED_PATHS.has(path)) return true;
+    // 이름 기준 제외는 **어느 층에 있든** 걸린다 — 뿌리의 `node_modules` 만 보면 중첩된 것이 샌다.
+    const segments = path.split("/").filter((s) => s !== "");
+    if (segments.some((segment) => ALWAYS_EXCLUDED.has(segment))) return true;
+    return segments.some((segment) => isSecretFile(segment));
+}
 
 /** 프로젝트를 zip 으로 묶는다. 제외 규칙은 위 목록 + 호출부 추가분. */
 export async function packProject(options: PackOptions): Promise<PackResult> {

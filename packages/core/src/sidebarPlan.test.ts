@@ -119,14 +119,17 @@ test("누를 수 있어야 하는 항목이 info 로 바뀌면 잡는다", () =>
   }
 });
 
-test("사이트가 붙으면 「불러오기」에는 받기 하나만 남는다 — 매뉴얼이 그렇게 적혀 있다", () => {
-  // help.md 가 「사이트가 연결된 뒤에는 사이드바의 **불러오기** 에 「사이트 소스 받기」만 보입니다」
-  // 라고 단정한다. 그 문장을 지키는 것이 여기밖에 없다 — 항목이 하나 더 늘어도 문서만 거짓이 된다.
+test("사이트가 붙으면 「불러오기」에는 새 폴더로 가는 둘만 남는다 — 매뉴얼이 그렇게 적혀 있다", () => {
+  // help.md 가 「…「사이트 소스 받기」와 「zip 으로 시작」이 보입니다. 둘 다 **새 빈 폴더**로만
+  // 가므로 지금 폴더는 바뀌지 않습니다」라고 단정한다. 그 문장을 지키는 것이 여기밖에 없다.
+  //
+  // ⚠ **여기에 항목을 더할 때는 그것도 「새 빈 폴더로만 간다」가 참이어야 한다.** 지금 폴더를
+  //   건드리는 항목이 이 묶음에 들어오면 문서가 거짓이 되고, 사람은 누르기 전에 그걸 알 방법이 없다.
   const attached = plan({ site: "/tmp/x" }).find((g) => g.id === "source");
   assert.ok(attached, "「불러오기」 묶음이 사라졌다");
   assert.deepEqual(
     attached.items.map((i) => (i.kind === "action" ? i.command : `info:${i.label}`)),
-    ["zalkera.site.open"],
+    ["zalkera.site.open", "zalkera.site.importZip"],
   );
 
   // 붙기 **전**도 함께 못 박는다 — 한쪽만 재면 다른 갈래에 항목이 늘어도 아무도 안 본다.
@@ -134,7 +137,7 @@ test("사이트가 붙으면 「불러오기」에는 받기 하나만 남는다
   assert.ok(fresh, "처음 쓰는 사람에게 「불러오기」가 없다");
   assert.deepEqual(
     fresh.items.map((i) => (i.kind === "action" ? i.command : `info:${i.label}`)),
-    ["zalkera.site.create", "zalkera.site.open", "zalkera.site.link"],
+    ["zalkera.site.create", "zalkera.site.open", "zalkera.site.importZip", "zalkera.site.link"],
   );
 });
 
