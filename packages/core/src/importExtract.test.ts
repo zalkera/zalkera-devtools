@@ -360,3 +360,32 @@ test("맥이 만든 NFD 한글 이름은 NFC 로 모아 푼다", async () => {
   // 소스가 조합형으로 가리키는 그 이름으로 실제 파일이 있어야 한다.
   assert.ok(existsSync(join(dir, "public/여름사진.jpg")), "조합형 이름으로 안 풀렸다");
 });
+
+test("이름 목록이 지나치게 크면 **디코드 전에** 거절한다", async () => {
+  // ⚠ 이름 길이는 중앙 디렉터리에 적혀 있으니 **읽기 전에** 알 수 있다. 다 읽고 나서 재면
+  //   그 훑기 자체가 이미 비용이고(심의 실측: 이름 130MB 에서 판독만 0.6~0.7초), 배송 문서의
+  //   「읽기 전에 멈춥니다」도 거짓이 된다. 항목 수·깊이 상한은 이 축을 못 막는다 —
+  //   둘 다 지키면서 긴 이름으로만 채울 수 있다.
+  const ascii = (text: string): Buffer => Buffer.from(text, "latin1");
+  // ⚠ 이름 **한 개**를 길게 하면 파일시스템의 이름 길이 제한(ENAMETOOLONG)에 먼저 걸려
+  //   엉뚱한 오류를 재게 된다. 깊이 상한(64) 안에서 **경로를 나눠** 총량만 키운다.
+  const seg = "s".repeat(120);
+  const dir3 = `${seg}/${seg}/${seg}/`;
+  const entries: [Buffer, Buffer][] = [[ascii("package.json"), Buffer.from("{}")]];
+  for (let i = 0; i < 25_000; i += 1) entries.push([ascii(`${dir3}f${i}`), Buffer.from("x")]);
+  const bytes = entries.reduce((sum, [name]) => sum + name.length, 0);
+  assert.ok(bytes > 8 * 1024 * 1024, `시험 입력이 상한을 안 넘는다(${bytes}) — 아무것도 안 재고 있다`);
+
+  const zip = storedZipRaw(entries);
+  // 두 판독 경로가 **같은 말**을 해야 한다 — 하나만 막으면 다른 문으로 들어온다.
+  assert.throws(() => listZipEntries(zip), /목록이 지나치게 큽니다/);
+  const dir = await tempDir("zalkera-cap-");
+  await assert.rejects(() => extractZip(zip, dir), /목록이 지나치게 큽니다/);
+
+  // 정상 소스는 막지 않는다 — 실물 최대 트리의 이름 총량이 2.0MB 다(심의 실측).
+  const ok = storedZipRaw([
+    [ascii("package.json"), Buffer.from("{}")],
+    [ascii("src/app/page.tsx"), Buffer.from("x")],
+  ]);
+  assert.deepEqual(listZipEntries(ok), ["package.json", "src/app/page.tsx"]);
+});
