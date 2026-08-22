@@ -107,9 +107,9 @@ function commonRoot(names: readonly string[]): string {
     //    표식이 뿌리에 안 올라와 「사이트가 아니다」가 된다(심의 실증). 받은 zip 을 풀고 상위
     //    폴더를 다시 압축하는 것이 두 겹 zip 의 전형적 생성 경로라, 이 형상이 흔하다.
     //    디렉터리 항목·`__MACOSX` 와 **같은 잣대**다 — 어차피 안 들여올 것은 뿌리도 못 정한다.
-    const rest = names.filter(
-        (n) => !n.endsWith("/") && !n.toLowerCase().startsWith("__macosx/") && !isExcludedEntry(n),
-    );
+    // `__MACOSX/` 는 따로 적지 않는다 — `isExcludedEntry` 가 이미 그것을 판정한다(`ALWAYS_EXCLUDED`).
+    // 두 벌로 적으면 한쪽을 지워도 아무 시험이 안 서고, 그 상태가 「지켜지고 있다」로 읽힌다.
+    const rest = names.filter((n) => !n.endsWith("/") && !isExcludedEntry(n));
     const first = rest[0];
     if (first === undefined) return "";
 
