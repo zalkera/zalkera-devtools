@@ -55,14 +55,14 @@ test("한 번도 안 올린 사람에게 「빌드 중이거나 실패했다」�
     // 놓고 사람을 엉뚱한 곳으로 보내는 것이다.
     const empty = noRevisionError([]);
     assert.match(empty.message, /올린 사이트 소스가 없/);
-    assert.match(empty.hint ?? "", /예제로 시작/);
+    assert.match(empty.hint ?? "", /예제 zip 다운로드/);
     assert.doesNotMatch(empty.hint ?? "", /만들어지는 중|실패/);
 });
 
 test("올렸는데 아직 못 켜는 경우는 그렇게 말한다", () => {
     const notReady = noRevisionError([rev(3, "BUILDING"), rev(2, "FAILED")]);
     assert.match(notReady.hint ?? "", /만들어지는 중이거나 실패/);
-    assert.doesNotMatch(notReady.hint ?? "", /예제로 시작/);
+    assert.doesNotMatch(notReady.hint ?? "", /예제 zip 다운로드/);
 });
 
 test("두 문장은 서로 달라야 한다 — 같으면 가른 뜻이 없다", () => {

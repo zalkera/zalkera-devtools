@@ -154,8 +154,34 @@ const ALWAYS_EXCLUDED = new Set([
  * `.env.local.bak`·`.Env.Local` 에서 **`oqsk_` 키가 zip 에 실리는 것**을 확인했다 — 앞의 둘은 Next 가 실제로
  * 읽는 표준 파일명이다. 자격증명이 새는 자리는 정확 일치로 막을 수 없다.
  */
+/**
+ * **값이 없는 서식.** `.env.example`·`.env.sample`·`.env.template` — 채워 넣으라고 배포하는 안내문이다.
+ *
+ * ■ 왜 예외인가
+ *   이 예외가 없을 때, 정본 팩의 `.env.example` 이 들여오기에서 **말없이 빠졌다**(실측: 팩 4종 전부
+ *   172→171·188→187·183→182·177→176). 그 파일은 장식이 아니다 — 팩의 `README.md` 첫 명령이
+ *   `cp .env.example .env.local` 이라 **README 자신이 그 폴더 안에서 실패했다.** 그리고 「비우면
+ *   기동·빌드가 실패한다」·「안 바꾸면 검색엔진에 localhost 가 색인된다」는 두 경고가 이 파일에만
+ *   있었다(팩의 다른 문서 전수 대조).
+ *
+ * ■ 왜 안전한가
+ *   덮기로 **약속한 것**은 «우리가 발급한 비밀»이고, 그것이 사는 자리는 `.env.local` 이다. 서식
+ *   파일에는 우리가 아무것도 안 넣는다.
+ *
+ * ■ 자를 새로 만들지 않는다
+ *   정본 팩 게이트(`zalkera-storefront-examples/scripts/verify-zip.mjs` 의 `ENV_KEEP`)가 이미 같은
+ *   규칙을 「값이 없어 허용」으로 쓴다. 여기서 다르게 적으면 두 자가 갈리고, 갈린 날 「팩 게이트는
+ *   통과했는데 들여오면 사라지는」 파일이 생긴다.
+ *
+ * ⚠ **접미만 본다.** `.env.example.bak` 은 여기 안 걸리고 위 `.env` 접두 규칙에 걸려 그대로 빠진다.
+ */
+function isValueLessTemplate(lower: string): boolean {
+    return lower.startsWith(".env") && /\.(example|sample|template)$/.test(lower);
+}
+
 function isSecretFile(name: string): boolean {
     const lower = name.toLowerCase();
+    if (isValueLessTemplate(lower)) return false;
     // ⚠ **접두는 `.env` 다, `.env.` 가 아니다**(클로징 심의 · Fable·Opus 공통 차단 · 실측 유출).
     // 주석과 도움말은 처음부터 "`.env` 로 **시작**하는 것은 전부"라고 적었는데 코드만 점을 하나 더
     // 요구했다. 그 한 글자 틈으로 `.envrc`(direnv — `export AWS_SECRET_ACCESS_KEY=…` 가 관례)와
@@ -301,7 +327,7 @@ export async function packProject(options: PackOptions): Promise<PackResult> {
                 // ⚠ **누적을 여기서 본다 — 다 담고 나서가 아니라.** 파일당 상한만 있고 총량이
                 //    없어서, 150MB 짜리 폴더는 **전부 메모리에 올린 뒤에야** 「너무 큽니다」로
                 //    거절됐다(실측 VmHWM 445MB ≈ 원본의 3배, 3.2초). 사진·영상이 섞인 1GB 폴더에
-                //    「새 버전 올리기」를 한 번 누르면 확장 호스트가 그만큼 부푼다 — 그리고 이 자리에는
+                //    「새 버전 배포」를 한 번 누르면 확장 호스트가 그만큼 부푼다 — 그리고 이 자리에는
                 //    취소 단추가 없다. 상한은 **메모리 예산**이다 — 업로드 상한과 다른 양이다([MAX_RAW_BYTES]).
                 totalBytes += info.size;
                 if (totalBytes > MAX_RAW_BYTES) {

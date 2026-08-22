@@ -1,8 +1,8 @@
 /**
- * **출처 표식과 폴더 연결 쓰기의 시험.**
+ * **출처 표식과 사이트에 연결 쓰기의 시험.**
  *
  * 두 가지를 문다 — 표식이 **올라가지 않는가**(그 보증은 `zip.test.ts` 가 함께 진다), 그리고
- * 폴더 연결 쓰기가 **남의 설정을 지우지 않는가**.
+ * 사이트에 연결 쓰기가 **남의 설정을 지우지 않는가**.
  *
  * 재현: `npm test -w @zalkera/devtools-core`
  */
@@ -45,7 +45,7 @@ test("경로 상수는 한 곳에서만 온다", () => {
   assert.equal(SOURCE_MARK_PATH, ".zalkera/source.json");
 });
 
-test("폴더 연결 쓰기가 남의 키를 지우지 않는다", () => {
+test("사이트에 연결 쓰기가 남의 키를 지우지 않는다", () => {
   const existing = JSON.stringify({ "editor.fontSize": 14, "zalkera.tenant": "old" }, null, 2);
   const r = mergeTenantSetting(existing, "credium");
   assert.equal(r.ok, true);
@@ -83,7 +83,7 @@ test.after(() => {
   for (const r of roots) rmSync(r, { recursive: true, force: true });
 });
 
-test("폴더 연결 — 파일이 없으면 만든다", async () => {
+test("사이트에 연결 — 파일이 없으면 만든다", async () => {
   const root = fresh();
   const r = await linkFolderToTenant(root, "credium");
   assert.equal(r.ok, true, r.ok ? "" : r.reason);
@@ -92,7 +92,7 @@ test("폴더 연결 — 파일이 없으면 만든다", async () => {
   });
 });
 
-test("폴더 연결 — 남의 키를 지우지 않는다", async () => {
+test("사이트에 연결 — 남의 키를 지우지 않는다", async () => {
   const root = fresh();
   mkdirSync(join(root, ".vscode"));
   writeFileSync(join(root, ".vscode", "settings.json"), JSON.stringify({ "editor.fontSize": 14 }, null, 2));
@@ -102,7 +102,7 @@ test("폴더 연결 — 남의 키를 지우지 않는다", async () => {
   assert.equal(after["zalkera.tenant"], "credium");
 });
 
-test("폴더 연결 — settings.json 이 링크면 쓰지 않는다", async () => {
+test("사이트에 연결 — settings.json 이 링크면 쓰지 않는다", async () => {
   // 링크를 따라가면 **고객 폴더 밖**의 공유 설정을 고쳐 놓고 「연결해 두었습니다」를 찍는다.
   // dotfiles·모노레포 공유 설정에서 흔한 배치다.
   const root = fresh();
@@ -117,7 +117,7 @@ test("폴더 연결 — settings.json 이 링크면 쓰지 않는다", async () 
   assert.deepEqual(JSON.parse(readFileSync(shared, "utf8")), { "editor.fontSize": 15 }, "폴더 밖 파일이 바뀌었다");
 });
 
-test("폴더 연결 — 끊어진 링크에도 쓰지 않는다", async () => {
+test("사이트에 연결 — 끊어진 링크에도 쓰지 않는다", async () => {
   const root = fresh();
   const outside = fresh();
   mkdirSync(join(root, ".vscode"));
@@ -128,7 +128,7 @@ test("폴더 연결 — 끊어진 링크에도 쓰지 않는다", async () => {
   assert.equal(existsSync(join(outside, "없는파일.json")), false, "폴더 밖에 파일이 생겼다");
 });
 
-test("폴더 연결 — 주석이 섞인 settings.json 은 안 쓴다", async () => {
+test("사이트에 연결 — 주석이 섞인 settings.json 은 안 쓴다", async () => {
   const root = fresh();
   mkdirSync(join(root, ".vscode"));
   const jsonc = '{\n  // 주석\n  "editor.fontSize": 14\n}';
@@ -169,7 +169,7 @@ test("표식 — 정상 경로는 읽어 되돌아온다", async () => {
   assert.equal(mark?.format === 1 ? mark.revisionNo : null, 13);
 });
 
-test("폴더 연결 — 못 읽으면 안 쓴다. 「없다」와 「못 읽는다」는 다르다", async () => {
+test("사이트에 연결 — 못 읽으면 안 쓴다. 「없다」와 「못 읽는다」는 다르다", async () => {
   // 접어 버리면 읽기 실패가 「빈 파일」로 둔갑해 고객 설정을 통째로 날린다.
   const root = fresh();
   mkdirSync(join(root, ".vscode"));

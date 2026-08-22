@@ -15,7 +15,9 @@ import {
   publish,
   registerMcpServer,
   runDoctor,
-  startFromPreset,
+  downloadSourceZip,
+  fetchPresetZip,
+  safeFileName,
   startPreview,
   stripCredentials,
   ZalkeraApi,
@@ -41,7 +43,6 @@ import {
   type Handshake,
   type PreviewSession,
   type PublishResult,
-  type StartFromPresetResult,
   BUSY,
   createReentrancyGuard,
   pickRevision,
@@ -89,7 +90,7 @@ import {
 } from "@zalkera/devtools-core";
 import { lstatSync, readFileSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { existsSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { SecretTokenStore } from "./secretStore.ts";
@@ -129,10 +130,10 @@ const previewGuard = createReentrancyGuard();
  * **소스 받기 재진입 가드.** 판정은 `createReentrancyGuard`(core)가 하고 여기서는 **문면만** 정한다 —
  * 확장 안에 판정을 두면 시험도 검사기도 못 닿는다(실측: 조건을 무력화해도 297건 전부 초록이었다).
  *
- * 「예제로 시작」과 「사이트 소스 받기」가 **같은 가드**를 쓴다 — 둘 다 같은 폴더에 아카이브를 푸는
+ * 「소스 다운로드」와 「zip 으로 시작」이 **같은 가드**를 쓴다 — 둘 다 같은 폴더에 아카이브를 푸는
  * 일이라 어느 조합이든 겹치면 안 된다. 겹쳤을 때 나는 일은 core 쪽 KDoc 에 적혀 있다.
  *
- * 취소 단추는 별건이다: `fetchSiteSource`·`startFromPreset` 이 아직 취소 신호를 안 받으므로,
+ * 취소 단추는 별건이다: `fetchSiteSource`·`fetchPresetZip` 이 아직 취소 신호를 안 받으므로,
  * 단추만 달면 눌러도 아무 일이 없는 **거짓 단추**가 된다.
  */
 const receiveGuard = createReentrancyGuard();
@@ -333,7 +334,12 @@ export function activate(context: vscode.ExtensionContext): void {
     register("zalkera.signOut", async () => {
       await signOut();
     }),
-    register("zalkera.site.create", () => withReceiveGuard(startFromExample)),
+    // ⚠ **파일로 받는 둘은 `withReceiveGuard` 를 안 쓴다.** 그 가드가 막는 것은 «같은 폴더에
+    //    두 아카이브를 동시에 푸는 것»이다(`reentrancy.ts`). 이 둘은 폴더를 안 풀고 고르신 자리에
+    //    파일 하나를 놓으며, 그 쓰기는 `writeOwnFile` 이 임시 파일 + `rename` 으로 원자적으로 한다.
+    //    가드를 달면 15분짜리 소스 받기가 도는 동안 예제 zip 받기가 **이유 없이 거절**된다.
+    register("zalkera.preset.download", downloadPresetZipCommand),
+    register("zalkera.site.downloadZip", downloadSourceZipCommand),
     register("zalkera.site.open", () => withReceiveGuard(openSite)),
     register("zalkera.site.importZip", () => withReceiveGuard(importZipCommand)),
     register("zalkera.site.updateZip", () => withReceiveGuard(updateZipCommand)),
@@ -449,7 +455,7 @@ async function openBundledHelp(): Promise<void> {
 /**
  * 지금 상태에서 요건이 안 갖춰진 명령이면 **왜인지 말하고 다음에 할 일을 준다.**
  *
- * 사이드바는 여섯 묶음을 항상 보여 준다 — 숨기면 「갱신이 안 됐다」로 읽히기 때문이다(오너 확정).
+ * 사이드바는 일곱 묶음을 항상 보여 준다 — 숨기면 「갱신이 안 됐다」로 읽히기 때문이다(오너 확정).
  * 그 대신 못 하는 이유를 **누를 때** 말한다. 판정은 core 가 하고(`whyBlocked`) 여기는 그린다.
  *
  * 막혔으면 `true` — 부르는 쪽은 손을 떼야 한다.
@@ -954,16 +960,10 @@ async function linkFolderToSite(
     return;
   }
   log(
-    `폴더 연결을 적지 못했습니다(${done.reason}). 새 폴더를 연 뒤 「폴더 연결」을 눌러 주세요.`,
+    `사이트에 연결을 적지 못했습니다(${done.reason}). 새 폴더를 연 뒤 「사이트에 연결」을 눌러 주세요.`,
   );
 }
 
-
-/**
- * B1「예제로 시작」 — 시작 소스 팩을 골라 빈 폴더에 푼다.
- *
- * 목록에 **공개된 팩만** 온다(서버 판정). 고를 수 없는 것을 보여 주지 않는 편이 정직하다.
- */
 /**
  * 그 사이트 폴더를 연다.
  *
@@ -1036,9 +1036,145 @@ async function exportZipCommand(): Promise<void> {
 }
 
 /**
+ * 파일로 내놓을 때 **처음 보여 줄 자리.** 열린 폴더의 옆, 없으면 홈.
+ *
+ * ⚠ 이름은 **서버 값에서 그대로 짓지 않는다** — `safeFileName` 을 지난 것만 쓴다. 팩 코드나
+ *   사이트 코드에 `../` 가 섞이면 기본 경로가 폴더 밖을 가리키고, 사람은 대화상자에 이미
+ *   채워진 그 경로를 읽지 않는다.
+ */
+function suggestSavePath(name: string): vscode.Uri {
+  const dir = workspaceDir();
+  return vscode.Uri.file(join(dir === undefined ? homedir() : dirname(dir), name));
+}
+
+/**
+ * 「예제 zip 다운로드」 — 시작 소스 팩을 **파일 하나로** 받는다.
+ *
+ * ⚠ **풀지 않는다.** 종전에는 빈 폴더를 골라 바로 풀었는데, 그러면 소스가 있는 창에서는 쓸 수
+ *   없어(빈 폴더가 필요하다) 이 항목이 화면에서 사라졌다. 파일로 받으면 어느 상태에서나 안전해
+ *   늘 보일 수 있고, 받은 zip 은 「zip 으로 시작」·「zip 으로 교체」 둘 다에 그대로 들어간다.
+ *
+ * 무결성 대조는 `fetchPresetZip` 이 한다 — 검증 안 된 zip 을 디스크에 남기면 그것이 그대로
+ * 「zip 으로 교체」의 재료가 된다.
+ */
+async function downloadPresetZipCommand(): Promise<void> {
+  const api = await ensureApi();
+  const presets = await api.listPresets();
+  if (presets.length === 0) {
+    throw new DevtoolsError(
+      "NOT_A_SITE",
+      "지금 고를 수 있는 시작 소스가 없습니다.",
+      "잘커라 콘솔에서 시작 소스를 확인해 주세요.",
+    );
+  }
+
+  const choice = await vscode.window.showQuickPick(
+    presets.map((p) => ({
+      label: p.name,
+      description: `${p.code} · ${p.version}`,
+      detail: p.description,
+    })),
+    {title: "어떤 예제를 받을까요?"},
+  );
+  const preset = presets.find((p) => `${p.code} · ${p.version}` === choice?.description);
+  if (!preset) return;
+
+  const suggested = `${safeFileName(preset.code, "preset")}-${safeFileName(preset.version, "0")}.zip`;
+  const saveAt = await vscode.window.showSaveDialog({
+    title: "예제 zip 을 저장할 곳",
+    defaultUri: suggestSavePath(suggested),
+    filters: {"사이트 소스": ["zip"]},
+  });
+  if (!saveAt) return;
+
+  const pack = await vscode.window.withProgress(
+    {
+      location: vscode.ProgressLocation.Notification,
+      title: `${plainNotice(preset.name, 64)} 를 받는 중`,
+    },
+    () => fetchPresetZip({api, presetCode: preset.code, onProgress: log}),
+  );
+  await writeOwnFile(saveAt.fsPath, pack.bytes);
+
+  log(`예제 ${pack.presetCode}@${pack.version} · ${Math.round(pack.bytes.length / 1024)}KB`);
+  log(`sha256: ${pack.sha256}`);
+  log(`받은 곳: ${saveAt.fsPath}`);
+  void vscode.window.showInformationMessage(
+    // ⚠ `preset.name` 은 서버 응답이다. 소독 없이 넣으면 비-모달 알림이 `[글](command:…)` 를
+    //   클릭 링크로 렌더한다(심의 실증).
+    ours(
+      `${plainNotice(preset.name, 64)} 예제를 zip 으로 받았습니다. ` +
+        "「zip 으로 시작」으로 새 빈 폴더에 푸시면 됩니다.",
+    ),
+  );
+}
+
+/**
+ * 「소스 zip 다운로드」 — 배포 중인 판을 **파일 하나로** 받는다. 폴더에 풀지 않는다.
+ *
+ * ⚠ **서버 정본은 tar.gz 이고 우리 들여오기 문은 zip 만 받는다.** 그래서 `downloadSourceZip` 이
+ *   받아서 「zip 으로 내보내기」와 **같은 포장기**로 다시 싼다. 그 결과 여기서 받은 파일은
+ *   「zip 으로 시작」·「zip 으로 교체」에 그대로 들어간다 — 안 그러면 「받았는데 못 넣는 파일」이 된다.
+ *
+ * ⚠ **두 해시는 다른 물건의 것이다.** `sourceSha256` 은 서버 정본 tar.gz 의 것이라 서버에 대조할 수
+ *   있고, `zipSha256` 은 우리가 방금 만든 zip 의 것이라 서버는 모른다. 한 줄로 뭉쳐 적으면 받는
+ *   사람이 서버에 맞춰 보려다 못 맞춘다.
+ */
+async function downloadSourceZipCommand(): Promise<void> {
+  const {api, tenant} = await ensureApiFor();
+
+  // `openSite` 와 같은 규율 — 판을 **먼저 정한다.** 코어 폴백에 맡기면 화면에 말한 판과 받는 판이
+  // 갈릴 수 있고, 켜진 판이 없을 때 목록 첫 줄(BUILDING 일 수 있다)을 잡는다.
+  const revisions = await api.listRevisions();
+  const choice = pickRevision(revisions);
+  if (!choice) throw noRevisionError(revisions);
+  if (choice.why === "latest-ready") log(say.pickedLatestReady(tenant, choice.revisionNo));
+
+  const suggested = `${safeFileName(String(tenant), "site")}-r${safeFileName(String(choice.revisionNo), "0")}.zip`;
+  const saveAt = await vscode.window.showSaveDialog({
+    title: "소스 zip 을 저장할 곳",
+    defaultUri: suggestSavePath(suggested),
+    filters: {"사이트 소스": ["zip"]},
+  });
+  if (!saveAt) return;
+
+  const result = await vscode.window.withProgress(
+    {
+      location: vscode.ProgressLocation.Notification,
+      title: say.fetchProgress(tenant, choice.revisionNo),
+    },
+    () =>
+      downloadSourceZip({
+        api,
+        revisionNo: choice.revisionNo,
+        // 출처 표시는 **받아 온 그 사이트**로 찍는다 — 이 zip 이 어디서 왔는지가 곧 이 파일의 정체다.
+        provenanceTenant: String(tenant),
+        onProgress: log,
+      }),
+  );
+  await writeOwnFile(saveAt.fsPath, result.buffer);
+
+  log(
+    `버전 ${count(result.revisionNo)} · 파일 ${count(result.fileCount)}개 · ` +
+      `${Math.round(result.buffer.length / 1024)}KB`,
+  );
+  log(`정본 tar.gz sha256(서버 대조값): ${result.sourceSha256}`);
+  log(`받으신 zip sha256(여기서 포장): ${result.zipSha256}`);
+  log(`받은 곳: ${saveAt.fsPath}`);
+  void vscode.window.showInformationMessage(
+    // ⚠ **「전부 뺐다」고 말하지 않는다** — 형제 「zip 으로 내보내기」와 같은 이유다(`isSecretFile` 이
+    //   스스로 보증을 좁혀 뒀다). 「전부 막는다」고 적으면 못 막은 하나가 배신이 된다.
+    ours(
+      `버전 ${count(result.revisionNo)} 소스를 zip 으로 받았습니다. 미리보기 열쇠와 널리 쓰이는 ` +
+        "자격증명 파일, 빌드 산출물은 뺐습니다 — 「zip 으로 시작」·「zip 으로 교체」에 바로 쓰실 수 있습니다.",
+    ),
+  );
+}
+
+/**
  * 「zip 으로 시작」 — **남이 준 소스 zip** 을 빈 폴더에 푼다.
  *
- * 「예제로 시작」과 같은 문이지만 출처가 다르다: 서버 팩은 원장이 sha256 을 주장하고 우리가
+ * 「예제 zip 다운로드」로 받은 팩도 이 문으로 들어온다. 다만 출처가 다르다: 서버 팩은 원장이 sha256 을 주장하고 우리가
  * 대조하는데, **로컬 파일에는 주장할 원장이 없다.** 그래서 무결성 검증을 흉내 내지 않는다 —
  * 대신 `decideImportPlan` 이 **쓰기 전에** 구조를 판정하고, 통과 못 하면 파일을 하나도 안 만든다.
  * 완료 문면도 「검증됐다」고 말하지 않는다.
@@ -1077,7 +1213,7 @@ async function importZipCommand(): Promise<void> {
   await refreshSidebar();
 
   const open = await vscode.window.showInformationMessage(
-    ours("사이트 소스를 풀었습니다. 폴더를 열고 「폴더 연결」로 사이트에 붙이면 미리보기·올리기가 됩니다."),
+    ours("사이트 소스를 풀었습니다. 폴더를 열고 「사이트에 연결」로 사이트에 붙이면 미리보기·올리기가 됩니다."),
     "폴더 열기",
   );
   if (open === "폴더 열기") {
@@ -1104,7 +1240,7 @@ async function importZipInto(
   targetDir: string,
 ): Promise<{fileCount: number; dropped: string[]}> {
   const {zip, plan} = await readZipWithPlan(zipPath);
-  // ⚠ **빈 폴더 강제는 해제기 밖이다**(형제 `startFromPreset` 과 같은 규율) — 있는 파일을
+  // ⚠ **빈 폴더 강제는 해제기 밖이다**(형제 `fetchSiteSource` 와 같은 규율) — 있는 파일을
   //    덮어쓰지 않는다. `meaningfulEntries` 가 편집기·OS 부스러기는 「비어 있음」으로 본다.
   await mkdir(targetDir, {recursive: true});
   if ((await meaningfulEntries(targetDir)).length > 0) {
@@ -1114,7 +1250,7 @@ async function importZipInto(
       "빈 폴더를 골라 주세요(있는 파일을 덮어쓰지 않습니다).",
     );
   }
-  // ⚠ **반쪽 해제를 남기지 않는다** — 형제 `startFromPreset`·`fetchSource` 와 같은 규율이다.
+  // ⚠ **반쪽 해제를 남기지 않는다** — 형제 `fetchSource` 와 같은 규율이다.
   //    `extractZip` 은 항목을 훑으며 그때그때 쓰므로, 도중에 던지면 앞서 쓴 파일이 남는다.
   //    그러면 ⑴ 배송 문서의 「아무것도 풀지 않고 멈춘 것이니 폴더는 그대로입니다」가 거짓이 되고
   //    ⑵ 재시도가 「비어 있지 않습니다」로 막혀 손으로 지우기 전에는 못 빠져나온다.
@@ -1258,80 +1394,13 @@ async function updateZipCommand(): Promise<void> {
   }
   if (result.preserved.length === 0) {
     // 표식이 없었다는 것은 이 폴더가 아직 사이트에 안 붙었다는 뜻이다 — 조용히 넘기지 않는다.
-    log("이 폴더에는 사이트 소속 표식이 없었습니다 — 「폴더 연결」로 붙이면 미리보기·올리기가 됩니다.");
+    log("이 폴더에는 사이트 소속 표식이 없었습니다 — 「사이트에 연결」로 붙이면 미리보기·올리기가 됩니다.");
   }
   await refreshSidebar();
 
   await vscode.window.showInformationMessage(
-    ours("소스를 갈아 끼웠습니다. 「미리보기 시작」으로 확인한 뒤 「새 버전 올리기」로 올리세요."),
+    ours("소스를 갈아 끼웠습니다. 「미리보기 시작」으로 확인한 뒤 「새 버전 배포」로 올리세요."),
   );
-}
-
-async function startFromExample(): Promise<void> {
-  const api = await ensureApi();
-  const presets = await api.listPresets();
-  if (presets.length === 0) {
-    throw new DevtoolsError(
-      "NOT_A_SITE",
-      "지금 고를 수 있는 시작 소스가 없습니다.",
-      "잘커라 콘솔에서 시작 소스를 확인해 주세요.",
-    );
-  }
-
-  const choice = await vscode.window.showQuickPick(
-    presets.map((p) => ({
-      label: p.name,
-      description: `${p.code} · ${p.version}`,
-      detail: p.description,
-    })),
-    { title: "어떤 시작 소스로 시작할까요?" },
-  );
-  const preset = presets.find(
-    (p) => `${p.code} · ${p.version}` === choice?.description,
-  );
-  if (!preset) return;
-
-  const picked = await vscode.window.showOpenDialog({
-    canSelectFolders: true,
-    canSelectFiles: false,
-    openLabel: "여기에 받기",
-    title: "시작 소스를 풀 빈 폴더를 고르세요",
-  });
-  const target = picked?.[0]?.fsPath;
-  if (!target) return;
-
-  const result = await vscode.window.withProgress<StartFromPresetResult>(
-    {
-      location: vscode.ProgressLocation.Notification,
-      title: `${plainNotice(preset.name, 64)} 를 받는 중`,
-    },
-    () =>
-      startFromPreset({
-        api,
-        presetCode: preset.code,
-        targetDir: target,
-        onProgress: log,
-      }),
-  );
-  log(
-    `시작 소스 ${result.presetCode}@${result.version} · 파일 ${count(result.fileCount)}개.`,
-  );
-
-  // 받은 폴더가 지금 열린 폴더일 수 있다 — `openSite` 와 같은 이유로 갱신한다.
-  await refreshSidebar();
-  const open = await vscode.window.showInformationMessage(
-    // ⚠ `preset.name` 은 서버 응답(`/api/partner/site-preset/presets`)이다. 소독 없이 넣으면
-    // 비-모달 알림이 `[글](command:…)` 를 클릭 링크로 렌더한다(심의 실증).
-    `${plainNotice(preset.name, 64)} 를 받았습니다(${count(result.fileCount)}개 파일).`,
-    "이 폴더 열기",
-  );
-  if (open === "이 폴더 열기") {
-    await vscode.commands.executeCommand(
-      "vscode.openFolder",
-      vscode.Uri.file(target),
-      { forceNewWindow: false },
-    );
-  }
 }
 
 /**
@@ -1346,7 +1415,7 @@ async function startFromExample(): Promise<void> {
  *
  * ■ 확인을 modal 로 받는다
  *   전환은 **방문자가 보는 화면이 즉시 바뀌는** 동작이다. 잘못 누르면 손님이 다른 화면을 본다.
- *   「새 버전 올리기」가 조용한 대신 여기가 시끄러워야 한다 — 두 단계로 나눈 이유가 그것이다.
+ *   「새 버전 배포」가 조용한 대신 여기가 시끄러워야 한다 — 두 단계로 나눈 이유가 그것이다.
  */
 async function switchVersion(
   preselected?: number,
@@ -1479,7 +1548,7 @@ async function precheckCommand(): Promise<void> {
 /**
  * 「이 폴더의 사이트로 돌아가기」 — 어긋난 상태의 **탈출구**.
  *
- * 「폴더 연결」과 다르다: **소속을 바꾸지 않고 링크만 소속에 맞춘다.** 그래서 동의 모달이 없다 —
+ * 「사이트에 연결」과 다르다: **소속을 바꾸지 않고 링크만 소속에 맞춘다.** 그래서 동의 모달이 없다 —
  * 이 폴더가 원래부터 속해 있던 사이트로 창을 되돌릴 뿐이다.
  *
  * ⚠ 표식이 그 사이 사라졌으면 **아무것도 쓰지 않는다.** 링크만 남은 폴더에서 이 명령이 그 링크를
@@ -1490,7 +1559,7 @@ async function useFolderSite(): Promise<void> {
   const mark = readSourceMarkAt(dir);
   if (mark === null) {
     void vscode.window.showInformationMessage(
-      ours("이 폴더에는 사이트 표식이 없습니다 — 「폴더 연결」로 사이트를 정해 주세요."),
+      ours("이 폴더에는 사이트 표식이 없습니다 — 「사이트에 연결」로 사이트를 정해 주세요."),
     );
     return;
   }
@@ -1851,7 +1920,7 @@ async function stopPreview(): Promise<void> {
   log("미리보기를 멈췄습니다.");
 }
 
-// ── 새 버전 올리기 ────────────────────────────────────────────────────────
+// ── 새 버전 배포 ────────────────────────────────────────────────────────
 
 /**
  * **「발행」이라 부르지 않는다**(오너 지적 2026-08-10). 이 명령이 하는 일은 `confirmArchive` 까지,
@@ -2422,7 +2491,7 @@ async function offerFolderElsewhere(
   offer: "open" | "fetch",
 ): Promise<void> {
   log(`이 폴더는 ${binding ?? "다른"} 사이트의 소스라 ${picked} 작업은 다른 폴더에서 합니다.`);
-  const label = offer === "open" ? "그 사이트 폴더 열기" : "그 사이트 소스 받기";
+  const label = offer === "open" ? "그 사이트 폴더 열기" : "그 사이트 소스 다운로드";
   const answer = await vscode.window.showInformationMessage(
     say.pickedElsewhere(picked, binding ?? ""),
     label,
@@ -2434,7 +2503,7 @@ async function offerFolderElsewhere(
     // 다른 사이트를 담게 됐을 수 있고, 그때 여는 것이 이 설계가 막으려는 사고다.
     if (dir === null) {
       void vscode.window.showInformationMessage(
-        ours("그 사이트의 로컬본을 찾지 못했습니다 — 「불러오기」로 소스를 받아 주세요."),
+        ours("그 사이트의 로컬본을 찾지 못했습니다 — 「내려받기」로 소스를 받아 주세요."),
       );
       return;
     }

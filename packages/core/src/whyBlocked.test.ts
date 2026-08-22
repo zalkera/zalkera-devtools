@@ -1,7 +1,7 @@
 /**
  * **못 하는 이유를 말하는가.**
  *
- * 사이드바가 여섯 묶음을 항상 보여 주는 대신, 요건이 안 맞으면 **누를 때** 말한다.
+ * 사이드바가 일곱 묶음을 항상 보여 주는 대신, 요건이 안 맞으면 **누를 때** 말한다.
  * 그 말이 틀리거나 다음에 할 일을 안 주면, 사람은 「눌러도 아무 일이 없다」에 갇힌다.
  *
  * 재현: `npm test -w @zalkera/devtools-core`
@@ -36,7 +36,7 @@ test("로그인했으면 다음 요건을 말한다", () => {
 test("소스가 없으면 어디서 받는지 가리킨다 — 「없습니다」로 끝내지 않는다", () => {
   const blocked = decideBlocked("zalkera.preview.start", PICKED);
   assert.ok(blocked);
-  assert.match(blocked.message, /불러오기/);
+  assert.match(blocked.message, /내려받기/);
   assert.equal(blocked.action?.command, "zalkera.site.open");
 });
 

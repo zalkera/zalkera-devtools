@@ -144,7 +144,7 @@ export type MergeResult = {ok: true; text: string} | {ok: false; reason: string}
  *
  * ■ 못 읽으면 **안 쓴다**
  *   주석이 섞인 JSONC 나 손상된 파일을 우리가 다시 쓰면 그 사람의 설정이 날아간다. 그럴 때는
- *   쓰지 않고 사유를 돌려준다 — 부르는 쪽이 「폴더 연결을 한 번 눌러 주세요」로 옮긴다.
+ *   쓰지 않고 사유를 돌려준다 — 부르는 쪽이 「사이트에 연결을 한 번 눌러 주세요」로 옮긴다.
  */
 export function mergeTenantSetting(existing: string | null, tenant: string): MergeResult {
     if (tenant.length === 0) return {ok: false, reason: "사이트 코드가 비어 있습니다"};
@@ -196,7 +196,7 @@ async function writeMarkText(root: string, text: string): Promise<MergeResult> {
 }
 
 /**
- * 새 폴더가 그 사이트를 바라보게 한다 — 「폴더 연결」이 하는 쓰기의 선행 수행.
+ * 새 폴더가 그 사이트를 바라보게 한다 — 「사이트에 연결」이 하는 쓰기의 선행 수행.
  *
  * ■ 세 가지를 지킨다
  *   ⑴ **남의 키를 안 지운다**(병합) ⑵ **못 읽으면 안 쓴다**(「없다」와 구분한다)

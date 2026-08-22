@@ -392,8 +392,7 @@ test("무결성 — 받은 소스가 원장과 다르면 풀지 않는다(B2)", 
 });
 
 test("무결성 — 서버가 해시를 안 주면 시작 소스는 진행하지 않는다(fail-open 제거)", async () => {
-  const { startFromPreset } = await import("./presets.ts");
-  const dir = await tempDir("zalkera-preset-open-");
+  const { fetchPresetZip } = await import("./presets.ts");
   const api = {
     presetSourceUrl: async () => ({
       url: "https://s3/p",
@@ -406,10 +405,9 @@ test("무결성 — 서버가 해시를 안 주면 시작 소스는 진행하지
 
   await rejects(
     () =>
-      startFromPreset({
+      fetchPresetZip({
         api,
         presetCode: "skeleton",
-        targetDir: dir,
         fetchImpl: (async () =>
           new Response(Buffer.from("x"))) as unknown as typeof fetch,
       }),

@@ -31,28 +31,26 @@ test("사이트가 붙어도 받기 진입점이 보인다", () => {
   assert.ok(commands().includes("zalkera.site.open"), "처음 쓰는 사람에게도 보여야 한다");
 });
 
-test("순서는 사이트 · 미리보기 · 내보내기 · 불러오기 · 갈아끼우기 · 버전 · 도움", () => {
-  assert.deepEqual(ids({ site: "/tmp/x" }), ["site", "preview", "export", "source", "replace", "version", "help"]);
+test("순서는 사이트 · 미리보기 · 배포 · 내려받기 · 작업 폴더 · 버전 · 도움", () => {
+  assert.deepEqual(ids({ site: "/tmp/x" }), ["site", "preview", "export", "download", "workdir", "version", "help"]);
 });
 
-test("소스가 없어도 여섯 묶음이 다 보인다 — 없으면 「갱신이 안 됐다」로 읽힌다", () => {
+test("소스가 없어도 묶음이 다 보인다 — 없으면 「갱신이 안 됐다」로 읽힌다", () => {
   // 오너 확정. 종전에는 못 하는 것을 숨겼는데, 실사용에서 그 대가가 더 컸다 — 확장을 새로
   // 깔았는데 메뉴가 셋뿐이니 갱신 실패로 읽혔다. 사람은 없는 것을 「조건이 안 됐다」로 읽지 않는다.
   // 못 하는 이유는 **누를 때** 말한다(`whyBlocked`).
-  assert.deepEqual(ids(), ["site", "preview", "export", "source", "replace", "version", "help"]);
+  assert.deepEqual(ids(), ["site", "preview", "export", "download", "workdir", "version", "help"]);
 });
 
 test("소스가 있으나 없으나 묶음과 순서가 같다 — 화면이 흔들리지 않는다", () => {
   assert.deepEqual(ids(), ids({ site: "/tmp/x" }));
 });
 
-test("소스가 있으면 「예제로 시작」·「폴더 연결」은 사이드바에서 뺀다", () => {
-  // 셋이 다 보이면 「누르면 내 것이 날아가나」를 매번 다시 계산하게 된다. 팔레트에는 남는다.
-  const withSite = commands({ site: "/tmp/x" });
-  assert.ok(!withSite.includes("zalkera.site.create"), "예제로 시작이 남았다");
-  assert.ok(!withSite.includes("zalkera.site.link"), "폴더 연결이 남았다");
-  const fresh = commands();
-  assert.ok(fresh.includes("zalkera.site.create") && fresh.includes("zalkera.site.link"));
+test("소스가 있으나 없으나 **항목까지** 같다 — 화면이 흔들리지 않는다", () => {
+  // 종전에는 사이트가 붙으면 받기 자리가 넷에서 둘로 줄었다. 사람은 줄어든 것을 「조건이 안 됐다」로
+  // 읽지 않고 「고장」으로 읽는다. 「예제 zip 다운로드」가 **파일로 받는 것**이 되면서 어느 상태에서나
+  // 안전해졌으므로 이제 숨길 이유가 없다 — 못 하는 이유는 누를 때 말한다(`whyBlocked`).
+  assert.deepEqual(commands(), commands({ site: "/tmp/x" }));
 });
 
 test("묶음 id 는 라벨과 무관하다 — 문면을 다듬어도 접힘이 안 풀린다", () => {
@@ -104,7 +102,7 @@ test("모든 실행 항목은 실제로 누를 수 있어야 한다", () => {
 });
 
 test("누를 수 있어야 하는 항목이 info 로 바뀌면 잡는다", () => {
-  // 이 단언이 없으면 「사이트 소스 받기」를 info 로 바꿔도 전건 초록이다.
+  // 이 단언이 없으면 「소스 다운로드」를 info 로 바꿔도 전건 초록이다.
   const actions = plan({ site: "/tmp/x" })
     .flatMap((g) => g.items)
     .flatMap((i) => (i.kind === "action" ? [i.command] : []));
@@ -119,26 +117,32 @@ test("누를 수 있어야 하는 항목이 info 로 바뀌면 잡는다", () =>
   }
 });
 
-test("사이트가 붙으면 「불러오기」에는 새 폴더로 가는 둘만 남는다 — 매뉴얼이 그렇게 적혀 있다", () => {
-  // help.md 가 「…「사이트 소스 받기」와 「zip 으로 시작」이 보입니다. 둘 다 **새 빈 폴더**로만
-  // 가므로 지금 폴더는 바뀌지 않습니다」라고 단정한다. 그 문장을 지키는 것이 여기밖에 없다.
+test("「내려받기」의 어느 항목도 지금 폴더를 안 건드린다 — 툴팁이 그렇게 단정한다", () => {
+  // 툴팁이 「셋 다 지금 폴더를 안 건드립니다」라고 **약속**한다. 그 약속을 지키는 것이 여기밖에 없다.
   //
-  // ⚠ **여기에 항목을 더할 때는 그것도 「새 빈 폴더로만 간다」가 참이어야 한다.** 지금 폴더를
-  //   건드리는 항목이 이 묶음에 들어오면 문서가 거짓이 되고, 사람은 누르기 전에 그걸 알 방법이 없다.
-  const attached = plan({ site: "/tmp/x" }).find((g) => g.id === "source");
-  assert.ok(attached, "「불러오기」 묶음이 사라졌다");
-  assert.deepEqual(
-    attached.items.map((i) => (i.kind === "action" ? i.command : `info:${i.label}`)),
-    ["zalkera.site.open", "zalkera.site.importZip"],
-  );
+  // ⚠ **여기에 항목을 더할 때는 그것도 참이어야 한다.** 지금 폴더를 건드리는 항목이 이 묶음에
+  //   들어오면 툴팁이 거짓이 되고, 사람은 누르기 전에 그걸 알 방법이 없다. 폴더를 건드리는
+  //   것들의 자리는 「작업 폴더」다.
+  const HARMLESS = ["zalkera.site.open", "zalkera.site.downloadZip", "zalkera.preset.download"];
+  for (const state of [{}, { site: "/tmp/x" }]) {
+    const group = plan(state).find((g) => g.id === "download");
+    assert.ok(group, "「내려받기」 묶음이 사라졌다");
+    assert.deepEqual(
+      group.items.map((i) => (i.kind === "action" ? i.command : `info:${i.label}`)),
+      HARMLESS,
+    );
+  }
+});
 
-  // 붙기 **전**도 함께 못 박는다 — 한쪽만 재면 다른 갈래에 항목이 늘어도 아무도 안 본다.
-  const fresh = plan().find((g) => g.id === "source");
-  assert.ok(fresh, "처음 쓰는 사람에게 「불러오기」가 없다");
-  assert.deepEqual(
-    fresh.items.map((i) => (i.kind === "action" ? i.command : `info:${i.label}`)),
-    ["zalkera.site.create", "zalkera.site.open", "zalkera.site.importZip", "zalkera.site.link"],
-  );
+test("지금 폴더를 지우는 명령은 「작업 폴더」 안에만 있다", () => {
+  // 「zip 으로 교체」는 되돌릴 수 없다. 그것이 「내려받기」 옆에 서면 「zip 으로 시작」과 두 글자
+  // 차이로 나란히 놓여, 안전한 것과 안 안전한 것이 같은 무게로 보인다.
+  for (const state of [{}, { site: "/tmp/x" }]) {
+    for (const g of plan(state)) {
+      const has = g.items.some((i) => i.kind === "action" && i.command === "zalkera.site.updateZip");
+      assert.equal(has, g.id === "workdir", `${g.id} 에 「zip 으로 교체」가 ${has ? "있다" : "없다"}`);
+    }
+  }
 });
 
 test("툴팁이 세는 수와 실제 항목 수가 같다", () => {
@@ -148,17 +152,17 @@ test("툴팁이 세는 수와 실제 항목 수가 같다", () => {
   let checked = 0;
   for (const state of [{}, { tenant: "" }, { site: "/tmp/x" }, { site: "/tmp/x", previewUrl: "http://x" }]) {
     for (const g of plan(state)) {
-      const said = g.tooltip?.match(/([둘셋넷다섯])\s*중/);
+      const said = g.tooltip?.match(/([둘셋넷다섯])\s*(?:중|다)/);
       if (!said) continue;
       checked += 1;
-      assert.equal(g.items.length, WORDS[said[1]!], `${g.id} 툴팁은 「${said[1]} 중」인데 항목은 ${g.items.length}개다`);
+      assert.equal(g.items.length, WORDS[said[1]!], `${g.id} 툴팁은 「${said[0]}」인데 항목은 ${g.items.length}개다`);
     }
   }
   assert.ok(checked > 0, "세는 툴팁을 하나도 못 찾았다 — 이 시험이 아무것도 안 재고 있다");
 });
 
 test("사이드바가 보여 주는 명령은 요건 판정이 **알고 있다**", () => {
-  // 여섯 묶음이 항상 보이므로, 요건 목록에 없는 명령은 조건이 안 맞아도 **그냥 돈다.**
+  // 일곱 묶음이 항상 보이므로, 요건 목록에 없는 명령은 조건이 안 맞아도 **그냥 돈다.**
   // 그것이 의도인지 빠뜨린 것인지 목록만 보면 모른다 — 여기서 그 차이를 못 박는다.
   //
   // 요건이 **없어야 하는** 것: 막힌 사람의 탈출구(로그인·사이트 선택·도움말·진단·초기화·로그아웃)
@@ -197,16 +201,12 @@ test("요건 목록에 사이드바 밖 명령이 섞이지 않았다", () => {
       .flatMap((g) => g.items)
       .flatMap((i) => (i.kind === "action" ? [i.command] : [])),
   );
-  // 팔레트에만 있는 것도 정당하다(예제로 시작·폴더 연결은 소스가 있으면 사이드바에서 빠진다).
-  // ⚠ **갱신은 사이드바에 두지 않는다.** 「불러오기」는 «새 빈 폴더로만» 이라는 약속이고
-  //    (아래 시험이 그것을 문다), 지금 폴더를 갈아 끼우는 명령을 그 옆에 두면 그 약속이 거짓이
-  //    된다. 형제 `site.link`·`site.create` 를 팔레트에 둔 이유와 같다 — 있는 소스를 위험하게
-  //    하는 명령이 사이드바에 있으면 「누르면 내 것이 날아가나」를 매번 계산하게 된다.
-  const PALETTE_ONLY = new Set([
-    "zalkera.site.create",
-    "zalkera.site.link",
-    "zalkera.preview.restart",
-  ]);
+  // 팔레트에만 있는 것도 정당하다. 다만 **예외는 좁게 든다** — 넓게 들면 이름이 바뀌어 사이드바에서
+  // 사라진 진짜 흔적까지 같이 덮인다.
+  //
+  // ⚠ 「다시 시작」은 사이드바에 안 둔다: 「미리보기 시작」이 이미 도는 것을 다시 쓰므로 두 줄이
+  //   같은 일을 하는 것으로 보인다. 팔레트에서 이름으로 찾는 사람에게만 필요하다.
+  const PALETTE_ONLY = new Set(["zalkera.preview.restart"]);
   // 차단 알림의 버튼으로만 닿는 명령도 정당하다 — 그 자리가 곧 탈출구다.
   //
   // ⚠ **손으로 열거하지 않는다.** 예외를 손에 들면 이름이 바뀐 진짜 흔적도 같이 덮인다.

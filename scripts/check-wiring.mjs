@@ -149,8 +149,8 @@ const WIRES = [
     ],
     [
         "packages/vscode/src/extension.ts",
-        'register("zalkera.site.create", () => withReceiveGuard(startFromExample))',
-        "위와 같다 — 예제로 시작도 같은 폴더에 푼다",
+        'register("zalkera.preset.download", downloadPresetZipCommand)',
+        "위와 같다 — 예제 zip 다운로드도 같은 폴더에 푼다",
     ],
     [
         "packages/vscode/src/extension.ts",
@@ -168,6 +168,9 @@ const WIRES = [
         "packages/vscode/src/extension.ts",
         "if (!choice) throw noRevisionError(revisions);",
         "한 번도 안 올린 사람에게 「빌드 중이거나 실패했습니다」라고 말하고 빈 「버전 이력」으로 보낸다",
+        // 「소스 다운로드」와 「소스 zip 다운로드」 둘 다 판을 **먼저 정한다** — 코어 폴백에 맡기면
+        // 화면에 말한 판과 받는 판이 갈린다. 둘 다 이 줄을 지녀야 하므로 둘이다.
+        2,
     ],
     [
         "packages/vscode/src/extension.ts",
@@ -234,7 +237,7 @@ const WIRES = [
     [
         "packages/vscode/src/extension.ts",
         "onConsent: (serverMessage) => askDiscardConsent(tenant, serverMessage),",
-        "새 버전 올리기가 zip 을 다 올린 뒤 409 를 받고 「계속하려면 확인해 주세요」만 반복한다 — 확인할 자리가 없는 막다른 길이 된다",
+        "새 버전 배포가 zip 을 다 올린 뒤 409 를 받고 「계속하려면 확인해 주세요」만 반복한다 — 확인할 자리가 없는 막다른 길이 된다",
     ],
     [
         "packages/core/src/publish.ts",
@@ -265,7 +268,7 @@ const WIRES = [
     [
         "packages/vscode/src/extension.ts",
         "if (await announceIfBlocked(command)) return;",
-        "사이드바가 여섯 묶음을 항상 보여 주는데 요건이 안 맞는 것을 눌러도 아무 말이 없다 — 「눌러도 아무 일이 없다」에 갇힌다",
+        "사이드바가 일곱 묶음을 항상 보여 주는데 요건이 안 맞는 것을 눌러도 아무 말이 없다 — 「눌러도 아무 일이 없다」에 갇힌다",
     ],
     [
         "packages/vscode/src/extension.ts",
@@ -287,6 +290,9 @@ const WIRES = [
         "packages/core/src/fetchSource.ts",
         "rejectVendored: true",
         "받은 소스가 `node_modules` 를 담고 있어도 그대로 풀린다",
+        // 폴더로 푸는 쪽과 zip 으로 다시 싸는 쪽 — 해제가 두 자리라 가드도 두 자리다.
+        // 한쪽만 걸면 그쪽으로 받은 소스만 안전해지고, 그 차이는 아무 데도 안 보인다.
+        2,
     ],
 ];
 

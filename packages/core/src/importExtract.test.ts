@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tempDir } from "./testing/tempDir.ts";
 import { createZip, type ZipEntry } from "./zip.ts";
@@ -58,7 +59,7 @@ test("중첩·제외가 실제 해제에도 그대로 적용된다", async () =>
   }
 });
 
-test("계획을 안 주면 옛 동작 그대로다 — 받기·예제로 시작이 이 경로다", async () => {
+test("계획을 안 주면 옛 동작 그대로다 — 받기·들여오기가 이 경로다", async () => {
   const dir = await tempDir("zalkera-import-");
   {
     const { fileCount } = await extractZip(await zipOf({ "a.txt": "hi", "b/c.txt": "there" }), dir);
@@ -140,6 +141,37 @@ test("해제가 도중에 멈추면 **아무것도 남기지 않는다** — 문
       }
     });
     assert.deepEqual(readdirSync(dir), [], `반쪽 해제가 남았다: ${readdirSync(dir).join(",")}`);
+  }
+});
+
+test("롤백이 **고객이 손으로 만든 것**은 안 지운다 — 「빈 폴더」가 일부러 초대한 것이다", async () => {
+  // ⚠ 「빈 폴더」 판정(`meaningfulEntries`)은 `.vscode`·`.DS_Store` 를 「비어 있음」으로 본다 —
+  //   배송 문서가 "편집기가 만든 `.vscode` 폴더는 있어도 괜찮습니다"라고 **초대**하기 때문이다.
+  //   그래서 롤백이 폴더를 통째로 지우면, 초대해 놓고 지우는 셈이 된다.
+  //
+  //   팩이든 남이 준 zip 이든 폴더로 들어오는 문은 이제 여기 하나다 — 그래서 이 보증도 여기서 잰다.
+  const dir = await tempDir("zalkera-import-");
+  {
+    await mkdir(join(dir, ".vscode"), {recursive: true});
+    await writeFile(join(dir, ".vscode", "launch.json"), '{"customer":true}', "utf8");
+    await writeFile(join(dir, ".DS_Store"), "mac", "utf8");
+
+    const zip = await zipOf({
+      "site/package.json": "{}",
+      "site/../../escaped.txt": "nope",
+    });
+    const plan = decideImportPlan(listZipEntries(zip));
+    const before = await snapshotEntries(dir);
+    await assert.rejects(async () => {
+      try {
+        await extractZip(zip, dir, plan);
+      } catch (cause) {
+        await removeAdded(dir, before);
+        throw cause;
+      }
+    });
+    assert.deepEqual(readdirSync(dir).sort(), [".DS_Store", ".vscode"], "고객 파일이 함께 지워졌다");
+    assert.equal(readFileSync(join(dir, ".vscode", "launch.json"), "utf8"), '{"customer":true}');
   }
 });
 

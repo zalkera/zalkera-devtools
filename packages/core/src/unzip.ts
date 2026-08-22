@@ -204,7 +204,7 @@ export async function extractZip(zip: Buffer, targetDir: string, plan?: ImportPl
         const commentLength = zip.readUInt16LE(offset + 32);
         const localOffset = zip.readUInt32LE(offset + 42);
         const flags = zip.readUInt16LE(offset + 8);
-        // 받기·예제로 시작도 이 문을 지난다 — 서버가 준 zip 이라도 상한은 같다.
+        // 받기·예제 zip 다운로드도 이 문을 지난다 — 서버가 준 zip 이라도 상한은 같다.
         totalNameBytes += nameLength;
         if (totalNameBytes > MAX_NAME_BYTES) throw tooManyNameBytes();
         const entryName = decodeEntryName(zip.subarray(offset + 46, offset + 46 + nameLength), flags);

@@ -84,7 +84,7 @@ export function noRevisionError(revisions: readonly RevisionLike[]): DevtoolsErr
         return new DevtoolsError(
             "NOT_A_SITE",
             "아직 올린 사이트 소스가 없습니다.",
-            "예제로 시작하거나, 잘커라 콘솔에서 소스를 먼저 올려 주세요.",
+            "「예제 zip 다운로드」로 예제를 받아 「zip 으로 시작」으로 푸시거나, 잘커라 콘솔에서 소스를 먼저 올려 주세요.",
         );
     }
     return new DevtoolsError(

@@ -244,7 +244,48 @@ function isAllowed(e) {
     if (!ts.isIdentifier(e.expression)) return false;
     const callee = e.expression.getText();
     if (!SANITIZERS.has(callee) && callee !== MARKER) return false;
-    return currentIsHome || currentImports.has(callee);
+    if (!(currentIsHome || currentImports.has(callee))) return false;
+    // ⚠ **표기는 «이 문장은 우리 것»이라는 말이지 «안을 안 봐도 된다»는 말이 아니다.**
+    //    `ours(\`… ${서버값} …\`)` 이 통째로 통과하던 자리다(변이로 실증). 그러면 요약이
+    //    「보간 N개를 전부 봤다」고 말하는데 실제로는 표기 안쪽을 하나도 안 본 것이 된다.
+    //    소독기(`count`·`plainNotice`·`shown`)는 값을 **바꿔서** 돌려주므로 안을 다시 볼 필요가
+    //    없지만, 표기는 값을 그대로 흘린다 — 그래서 표기만 안을 들여다본다.
+    if (callee === MARKER) return e.arguments.every((arg) => isAllowedDeep(arg));
+    return true;
+}
+
+/**
+ * 표기 안쪽을 본다. 템플릿이면 `${…}` 마다, 아니면 그 표현식 자체를.
+ *
+ * ■ 무엇을 잡나
+ *   `ours(\`… ${result.revisionNo} …\`)` — **서버 응답의 속성이 문장 안에 그대로 박힌 형상**이다.
+ *   실측으로 이것이 통째로 통과했다: 비-모달 알림은 마크다운을 렌더하므로 서버가
+ *   `1 [열기](command:…)` 를 주면 그것이 클릭 링크가 된다(`notice.ts` 가 이름까지 대며 경고하는 그것).
+ *
+ * ■ 무엇을 안 잡나 — **여기가 이 검사의 경계선이다**
+ *   맨 식별자(`ours(message)`)는 통과시킨다. 그것이 표기의 본래 용도다 — 지역에서 조립한 문장에
+ *   "이건 우리 것"이라고 사람이 서명하는 자리. 그 지역 변수가 서버값을 품고 있으면 이 검사는
+ *   못 잡는다(데이터흐름 추적이 필요하다). 그래서 **표기는 여전히 사람의 판단**이고, 이 검사는
+ *   그 판단을 대신하지 않고 **가장 흔한 새는 형상 하나**를 막는다.
+ *
+ * `inspect` 와 갈래 처리가 같아야 한다 — 삼항·`??`·괄호를 못 알아보면 고치는 사람이 코드를
+ * 검사기에 맞추게 되고, 그것이 곧 다음 판의 면제다.
+ */
+function isAllowedDeep(e) {
+    // 맨 식별자 — 표기가 서명하는 대상. 위 경계선 참조.
+    if (ts.isIdentifier(e)) return true;
+    if (ts.isParenthesizedExpression(e)) return isAllowedDeep(e.expression);
+    if (ts.isConditionalExpression(e)) return isAllowedDeep(e.whenTrue) && isAllowedDeep(e.whenFalse);
+    if (
+        ts.isBinaryExpression(e) &&
+        [ts.SyntaxKind.QuestionQuestionToken, ts.SyntaxKind.BarBarToken, ts.SyntaxKind.PlusToken].includes(
+            e.operatorToken.kind,
+        )
+    ) {
+        return isAllowedDeep(e.left) && isAllowedDeep(e.right);
+    }
+    if (ts.isTemplateExpression(e)) return e.templateSpans.every((span) => isAllowedDeep(span.expression));
+    return isAllowed(e);
 }
 
 function describe(e) {

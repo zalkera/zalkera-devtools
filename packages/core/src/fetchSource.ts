@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
 import { createWriteStream } from "node:fs";
-import { mkdir, readdir, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rm } from "node:fs/promises";
 import { meaningfulEntries, removeAdded, snapshotEntries } from "./emptyDir.ts";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createGunzip } from "node:zlib";
 import { pipeline } from "node:stream/promises";
@@ -11,6 +12,7 @@ import { DevtoolsError } from "./errors.ts";
 import { noRevisionError, pickRevision } from "./fetchTarget.ts";
 import { downloadBounded } from "./download.ts";
 import { extractTarGz } from "./untar.ts";
+import { packProject } from "./zip.ts";
 
 // 해제기 본체는 `untar.ts` 로 옮겼다(페이로드 스트리밍 경로와 **같은 파서**를 쓰기 위해 · §13.10.6).
 // 여기서 재수출한다 — 이 이름을 쓰던 호출부·테스트의 계약을 그대로 둔다.
@@ -50,7 +52,28 @@ const MAX_SOURCE_EXTRACT_BYTES = MAX_EXTRACT_BYTES;
 /** 대용량 전송 상한(15분) — publish 와 같은 근거. 짧으면 느린 회선의 정상 수신을 끊는다. */
 const TRANSFER_TIMEOUT_MS = 15 * 60 * 1000;
 
-export async function fetchSiteSource(options: FetchSourceOptions): Promise<FetchSourceResult> {
+/** 받아서 **대조까지 마친** 정본 tar.gz. 푸는 쪽과 다시 포장하는 쪽이 이것을 나눠 쓴다. */
+export interface VerifiedSourceTar {
+    revisionNo: number;
+    /** 서버가 준 tar.gz 바이트 그대로. */
+    buffer: Buffer;
+    /** 대조에 쓴 값 — **이 tar.gz 의** 것이다. 다시 포장한 zip 의 해시가 아니다. */
+    sha256: string;
+}
+
+/**
+ * 정본 tar.gz 를 받아 **원장의 그 바이트인지 대조한다.** 푸는 것은 하지 않는다.
+ *
+ * ⚠ **두 입구가 이 하나를 지난다** — 폴더에 푸는 쪽(`fetchSiteSource`)과 zip 으로 다시 포장하는
+ *   쪽(`downloadSourceZip`). 검증을 각자 두면 한쪽만 고쳐져 갈린다. 이 레포는 실제로 형제
+ *   `presets.ts` 만 대조하고 **이 경로가 비어 있던** 적이 있다(심의 지적).
+ */
+export async function fetchVerifiedSourceTar(options: {
+    api: ZalkeraApi;
+    revisionNo?: number;
+    onProgress?: (message: string) => void;
+    fetchImpl?: typeof fetch;
+}): Promise<VerifiedSourceTar> {
     const report = options.onProgress ?? (() => {});
     const fetchImpl = options.fetchImpl ?? fetch;
 
@@ -68,18 +91,6 @@ export async function fetchSiteSource(options: FetchSourceOptions): Promise<Fetc
 
     report(`버전 ${revisionNo} 소스를 받는 중…`);
     const source = await options.api.sourceUrl(revisionNo);
-    await mkdir(options.targetDir, { recursive: true });
-    // **편집기가 만든 것 때문에 막히지 않는다**(emptyDir.ts) — `.vscode` 는 우리가 만드는 쪽이다.
-    const existing = await meaningfulEntries(options.targetDir);
-    if (existing.length > 0) {
-        // **덮어쓰지 않는다.** 고객이 고치던 소스를 서버 버전으로 조용히 밀어 버리는 것이 이 도구가 낼 수 있는
-        // 가장 큰 손해다. 빈 폴더를 요구하는 편이 불편하지만 되돌릴 수 없는 손실보다 낫다.
-        throw new DevtoolsError(
-            "NOT_A_SITE",
-            "받을 폴더가 비어 있지 않습니다.",
-            "빈 폴더를 고르거나, 기존 폴더는 「잘커라: 폴더 연결」로 이어 주세요.",
-        );
-    }
 
     // 주소 검사·크기 상한은 형제 셋이 공유한다(`download.ts`) — 자리마다 다르게 두던 것이 결함이었다.
     const buffer = await downloadBounded(source.url, {
@@ -88,10 +99,9 @@ export async function fetchSiteSource(options: FetchSourceOptions): Promise<Fetc
         what: "소스",
     });
 
-    // ⚠ **받은 바이트가 원장의 그 바이트인지 대조한다**(심의 반영 · 2026-08-03).
-    // 시작 소스(B1)는 진작 대조하는데 **이 경로만 비어 있었다** — 그런데 이쪽이 MVP 절단선의 본체다.
-    // 불일치면 **풀지 않는다**: 풀고 나면 무엇이 깨졌는지 모른 채 소스가 남고, 그 소스로 만든 사이트의
-    // 원인 추적이 불가능해진다.
+    // ⚠ **받은 바이트가 원장의 그 바이트인지 대조한다.**
+    // 불일치면 **아무것도 남기지 않는다**: 남기고 나면 무엇이 깨졌는지 모른 채 소스가 돌아다니고,
+    // 그 소스로 만든 사이트의 원인 추적이 불가능해진다.
     //
     // ⚠ 종전에는 서버가 sha 를 안 주면 **경고하고 진행**했다. 그 경고는 출력 채널로만 가서 패널을
     //   안 여는 사용자에게는 아무것도 안 보였고, 그러면 "검사가 있는 척"이 된다 — 형제 `presets.ts`
@@ -111,6 +121,29 @@ export async function fetchSiteSource(options: FetchSourceOptions): Promise<Fetc
             "네트워크 문제일 수 있습니다. 다시 시도해 주세요.",
         );
     }
+    return { revisionNo, buffer, sha256: source.sha256 };
+}
+
+export async function fetchSiteSource(options: FetchSourceOptions): Promise<FetchSourceResult> {
+    const report = options.onProgress ?? (() => {});
+
+    await mkdir(options.targetDir, { recursive: true });
+    // **편집기가 만든 것 때문에 막히지 않는다**(emptyDir.ts) — `.vscode` 는 우리가 만드는 쪽이다.
+    //
+    // ⚠ **받기 전에 본다.** 폴더가 못 쓸 상태인 것은 네트워크를 태우기 전에 알 수 있는 사실이다.
+    const existing = await meaningfulEntries(options.targetDir);
+    if (existing.length > 0) {
+        // **덮어쓰지 않는다.** 고객이 고치던 소스를 서버 버전으로 조용히 밀어 버리는 것이 이 도구가 낼 수
+        // 있는 가장 큰 손해다. 빈 폴더를 요구하는 편이 불편하지만 되돌릴 수 없는 손실보다 낫다.
+        throw new DevtoolsError(
+            "NOT_A_SITE",
+            "받을 폴더가 비어 있지 않습니다.",
+            "빈 폴더를 고르거나, 기존 폴더는 「잘커라: 사이트에 연결」로 이어 주세요.",
+        );
+    }
+
+    const got = await fetchVerifiedSourceTar(options);
+    const { revisionNo, buffer, sha256 } = got;
 
     // ⚠ **반쪽 해제를 남기지 않는다.** `extractTarGz` 는 항목을 훑으며 **그때그때 쓴다** — 경로 이탈·
     //    항목 상한 같은 검사가 중간 항목에서 걸리면 앞서 쓴 파일들이 그대로 남는다. 배송 문서
@@ -139,7 +172,74 @@ export async function fetchSiteSource(options: FetchSourceOptions): Promise<Fetc
         throw cause;
     }
     report(`${fileCount}개 파일을 받았습니다.`);
-    return { revisionNo, fileCount, sha256: source.sha256 };
+    return { revisionNo, fileCount, sha256 };
+}
+
+/** 「소스 zip 다운로드」의 결과. 두 해시가 **다른 물건의 것**이라 이름으로 갈라 둔다. */
+export interface SourceZipResult {
+    revisionNo: number;
+    /** 포장한 zip 에 담긴 파일 수. */
+    fileCount: number;
+    /** 서버에서 받아 대조한 **정본 tar.gz** 의 해시. */
+    sourceSha256: string;
+    /** **우리가 방금 만든 zip** 의 해시. 서버는 이 값을 모른다. */
+    zipSha256: string;
+    buffer: Buffer;
+}
+
+/**
+ * 배포 중인 판을 **zip 파일 하나로** 받는다 — 폴더에 풀지 않는다.
+ *
+ * ■ 왜 다시 포장하나
+ *   서버 정본은 **tar.gz** 인데 이 도구가 소스를 들여오는 문(`importZip.ts` — 「zip 으로 시작」·
+ *   「zip 으로 교체」)은 **zip 만** 받는다. tar.gz 를 그대로 내주면 받은 사람이 우리 도구로
+ *   되돌릴 수 없다 — 「받았는데 못 넣는 파일」이 된다.
+ *
+ * ■ 포장 규칙을 새로 만들지 않는다
+ *   「zip 으로 내보내기」와 **같은 `packProject`** 를 쓴다. 규칙이 둘이 되면 한쪽만 고쳐져
+ *   갈리고, 갈린 날 「내보내기에서는 빠지는데 여기서는 들어오는」 파일이 생긴다.
+ *
+ * ■ 임시 폴더는 반드시 지운다
+ *   푼 소스가 남으면 그것이 곧 유출면이다. `finally` 로 지운다 — 포장이 던져도 지운다.
+ */
+export async function downloadSourceZip(options: {
+    api: ZalkeraApi;
+    revisionNo?: number;
+    /** 출처 표시에 찍을 사이트. 없으면 **안 찍는다** — 없는 정체성을 지어내지 않는다. */
+    provenanceTenant?: string;
+    onProgress?: (message: string) => void;
+    fetchImpl?: typeof fetch;
+}): Promise<SourceZipResult> {
+    const report = options.onProgress ?? (() => {});
+    const got = await fetchVerifiedSourceTar(options);
+
+    // ⚠ **작업 폴더는 임시 자리에 만든다.** 고객 폴더 안에 만들면 실패했을 때 부스러기가 남고,
+    //    「빈 폴더」 판정에 걸려 다음 시도가 막힌다.
+    const work = await mkdtemp(join(tmpdir(), "zalkera-source-"));
+    try {
+        const fileCount = await extractTarGz(got.buffer, work, {
+            rejectVendored: true,
+            maxBytes: MAX_SOURCE_EXTRACT_BYTES,
+        });
+        report(`${fileCount}개 파일을 확인했습니다 — zip 으로 포장하는 중…`);
+        // 아카이브가 한 겹 감싸고 있을 수 있다 — 포장 뿌리를 잘못 잡으면 `package.json` 이
+        // 한 단계 안쪽에 들어가 `importZip` 이 「소스 zip 이 아니다」로 거절한다.
+        const root = await findProjectRoot(work);
+        const packed = await packProject({
+            projectDir: root,
+            provenanceTenant: options.provenanceTenant,
+            onProgress: options.onProgress,
+        });
+        return {
+            revisionNo: got.revisionNo,
+            fileCount: packed.fileCount,
+            sourceSha256: got.sha256,
+            zipSha256: packed.sha256,
+            buffer: packed.buffer,
+        };
+    } finally {
+        await rm(work, { recursive: true, force: true });
+    }
 }
 
 /** 큰 아카이브를 메모리에 다 올리지 않고 파일로 흘리고 싶을 때(현재 미사용 · CLI 대용량 경로 대비). */

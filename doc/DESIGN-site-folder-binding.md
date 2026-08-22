@@ -10,7 +10,7 @@
 
 **정책 한 줄**: 폴더는 한 사이트에 속하고 그 소속의 정본은 폴더 안 표식(`.zalkera/source.json`)이다.
 창의 작업 사이트는 열린 폴더의 소속을 따르고, 다른 사이트를 고르는 것은 **폴더(창)를 옮기는 제안**으로
-이어진다. 소속 변경은 명시적 「폴더 연결」(동의 모달)로만 한다.
+이어진다. 소속 변경은 명시적 「사이트에 연결」(동의 모달)로만 한다.
 
 | 초안 항목 | 판정 | 형상 |
 |---|---|---|
@@ -33,7 +33,7 @@
 | 자리 | 쓰는 코드 | 성격 |
 |---|---|---|
 | `.zalkera/source.json` | `core/src/localMark.ts` `writeSourceMarkTo` — 받기(`openSite`)가 쓴다 | 출처 사실(tenant·revisionNo·sha256·fetchedAt) |
-| `.vscode/settings.json` 의 `zalkera.tenant` | `linkFolderToTenant`(받기 직후) 와 `saveTenant`(사이트 선택·폴더 연결) | 소속 의도 — 그런데 사이트 선택이 이 자리를 덮는다 |
+| `.vscode/settings.json` 의 `zalkera.tenant` | `linkFolderToTenant`(받기 직후) 와 `saveTenant`(사이트 선택·사이트에 연결) | 소속 의도 — 그런데 사이트 선택이 이 자리를 덮는다 |
 | `.env.local` 의 `ZALKERA_TENANT`·`ZALKERA_STOREFRONT_KEY` | `core/src/env.ts` `writePreviewEnv` — 미리보기 시작이 쓴다 | 발급 자격증명(서버 TTL 최대 12시간 — `accountState.ts`) |
 | `.mcp.json` 의 서버 URL(`{tenantCode}` 치환) | `connectAgent` → `core/src/mcp.ts` | 에이전트가 붙을 사이트 |
 
@@ -90,7 +90,7 @@
 1. 표식은 받기·발행이라는 **실제 사건의 기록**이고 도구만 쓰는 것이 원칙이다. 링크는 오늘까지
    사이트 선택이 곁다리로 덮던 자리다 — 어긋남의 사고 모드가 「링크가 덮였다」이므로, 어긋났을 때
    진실은 표식 쪽이다.
-2. 이 설계에서 **동의 경로(「폴더 연결」)는 표식과 링크를 같이 갱신한다**(§4.5). 그래서 남는
+2. 이 설계에서 **동의 경로(「사이트에 연결」)는 표식과 링크를 같이 갱신한다**(§4.5). 그래서 남는
    어긋남은 사고(구판 결함의 잔재·손 편집 실수)로 간주해도 된다 — 의도된 어긋남을 만들 정규
    경로가 없다.
 3. 표식을 손으로 고친 경우: 폴더는 고객 소유물이므로 그 값을 따른다. 이 서열은 자기 실수 방지
@@ -155,10 +155,10 @@ type SourceMark =
     해 주세요.` 행동 버튼 둘(라벨은 리터럴 — 서버 값 소독 문제를 버튼에서 만들지 않는다):
     - `{label: "이 폴더의 사이트로 돌아가기", command: "zalkera.site.useFolder"}` — 이 상태에
       빠진 사람이 대개 원하는 것(이 폴더에서 그대로 계속하기)을 한 번에 준다. 표식의 tenant 를
-      읽어 워크스페이스 범위 링크를 그 값으로 되돌린다. §4.5 의 「폴더 연결」과 달리 **소속을
+      읽어 워크스페이스 범위 링크를 그 값으로 되돌린다. §4.5 의 「사이트에 연결」과 달리 **소속을
       바꾸지 않고 링크만 소속에 맞추므로** 동의 모달이 없다. 표식이 그 사이 사라졌으면 알림만
       하고 아무것도 쓰지 않는다.
-    - `{label: "그 사이트 소스 받기", command: "zalkera.site.open"}` — site.open 의 요건은
+    - `{label: "그 사이트 소스 다운로드", command: "zalkera.site.open"}` — site.open 의 요건은
       `signedIn`·`tenant` 라 이 상태에서 막히지 않는다.
   - `zalkera.site.useFolder` 의 고정: `NEEDS` 에 빈 요건으로 등재한다(`preview.stop` 과 같은
     형상 — 탈출구라 어떤 요건도 어긋난 폴더에서 이 명령을 막게 하면 안 된다). whyBlocked.test 의
@@ -204,7 +204,7 @@ function decideTenantScope(input: {
 
 확장의 `saveTenant` 는 이 판정을 지나 `configTarget()` 직접 호출을 대체한다 — `none` 이면 어떤
 범위에도 쓰지 않는다. `linkFolderToTenant`
-(받기 직후)와 「폴더 연결」의 동의 경로(§4.5)는 이 판정을 지나지 않는다 — 그 둘은 소속을 **정하는**
+(받기 직후)와 「사이트에 연결」의 동의 경로(§4.5)는 이 판정을 지나지 않는다 — 그 둘은 소속을 **정하는**
 쓰기라 워크스페이스 범위가 본령이다. 워크스페이스 링크 읽기는
 `getConfiguration("zalkera").inspect("tenant")?.workspaceValue` 로 한다 — 병합 조회로는 전역 값과
 구분할 수 없다.
@@ -246,7 +246,7 @@ function decideSiteChoice(input: {
   버튼은 리터럴로 둔다(서버 값 소독 문제를 버튼에서 만들지 않는다):
   - 레지스트리가 y 의 폴더를 알고 확증되면 「그 사이트 폴더 열기」 → `vscode.openFolder`(같은 창).
     열린 폴더의 워크스페이스 링크가 창을 y 로 만든다.
-  - 모르면 「그 사이트 소스 받기」 → `withReceiveGuard(() => openSite(pinned))`. 받기는 새 빈
+  - 모르면 「그 사이트 소스 다운로드」 → `withReceiveGuard(() => openSite(pinned))`. 받기는 새 빈
     폴더로만 가므로(`fetchSiteSource`) 지금 폴더는 손대지 않는다.
 - **`openSite(pinned?: CapturedTenant)`**: 이 흐름에서는 창의 유효 사이트가 여전히 x 라
   `ensureApiFor()` 의 기본 경로가 x 를 잡는다. 고른 y 를 `captureTenant(picked.code)` 로 잡아
@@ -254,7 +254,7 @@ function decideSiteChoice(input: {
   (고르는 그 순간이 이 값이 API 에 묶일 값으로 고정되는 순간이다). 등록부의
   `register("zalkera.site.open", () => withReceiveGuard(openSite))` 줄은 그대로다(배선 검사 유지).
 - **레지스트리**: `globalState` 키 `zalkera.folderRegistry` — `사이트 코드 → 마지막 로컬본 절대경로`.
-  - 쓰는 곳: 받기 성공(`openSite` 의 root)·발행 성공·「폴더 연결」 성공.
+  - 쓰는 곳: 받기 성공(`openSite` 의 root)·발행 성공·「사이트에 연결」 성공.
   - **정본이 아니다.** 제안 전에 반드시 확증한다: 폴더가 실재하고, 그 폴더의
     `folderBinding`(표식 우선)이 고른 사이트와 같을 때만 「열기」를 제안한다. 어긋나면 항목을
     버리고 「받기」로 간다 — 경로가 재활용돼 다른 사이트를 담게 된 폴더를 열어 주는 것이
@@ -264,7 +264,7 @@ function decideSiteChoice(input: {
     — `check-wiring.mjs` 의 자동 유도가 `signOut` 의 그 호출을 강제한다. 지우는 순서는
     `clearTenantSetting()` 다음(실패해도 다음이 도는 순서 규율 그대로).
 
-### 4.5 명시 재연결 — 「폴더 연결」(B3, `linkFolder`)만이 소속을 바꾼다
+### 4.5 명시 재연결 — 「사이트에 연결」(B3, `linkFolder`)만이 소속을 바꾼다
 
 - 폴더에 소속이 있고 고른 사이트와 다르면 **모달 동의**를 받는다(문구는 `say`):
   `이 폴더는 「x」 의 소스입니다. 「y」 로 다시 연결하면, 이 폴더의 소스가 「y」 사이트로 올라가게 됩니다.`
@@ -283,7 +283,7 @@ function decideSiteChoice(input: {
   폴더(프리셋 시작·구판 받기·타 입구)의 발행은 사이트 이름을 박은 확인 모달을 지난 사람의 결정이고,
   그 순간이 이 폴더의 소속이 처음으로 사실이 되는 순간이다 — 여기서 결정화하는 것이 이행(§5)의
   기둥이다.
-- 예제로 시작(`startFromExample`)은 표식을 쓰지 않는다 — 그 시점의 폴더는 어느 사이트의 소스도
+- 예제 zip 다운로드(`downloadPresetZipCommand`)는 표식을 쓰지 않는다 — 그 시점의 폴더는 어느 사이트의 소스도
   아니다.
 - **받기와 발행은 동의의 성격이 다르다**: 받기의 표식은 사용자가 대상으로 고른 폴더에 생기지만,
   발행의 표식은 사용자가 파일 생성을 고른 적 없는 폴더에 부수효과로 생긴다 — BYO git 레포라면
@@ -347,7 +347,7 @@ function decideSiteChoice(input: {
   위협(zip 은 언제나 적대적일 수 있다 — `npmBlindSpots` 의 근거)이고, 이 변경과 무관하게 남는다.
   git 레인으로 유통된 레포가 **다른** 사이트의 표식을 담고 있으면 게이트는 막는 쪽으로 동작한다.
   다만 표식이 **수신자 자신의 사이트 코드**를 담고 있으면 막지 않는다 — 그때의 방어선은 발행
-  확인 모달과 서버 권한이다(심의 정정) — 제 사이트로 쓰려면 「폴더 연결」 재연결을 지난다.
+  확인 모달과 서버 권한이다(심의 정정) — 제 사이트로 쓰려면 「사이트에 연결」 재연결을 지난다.
 - **표식·settings 의 손 편집** — 폴더는 고객 소유라 막지 않는다. 서버 권한 판정과 발행 모달이
   최종 경계다.
 - **`.zalkera/source.json` 의 git 커밋(BYO 레포)** — 확장이 고객 `.gitignore` 에 줄을 추가하지
@@ -385,7 +385,7 @@ function decideSiteChoice(input: {
   「이 폴더의 사이트로 돌아가기」 포함.
 - 사이트 선택의 흐름이 달라진다(소속 다른 폴더에서 폴더 전환 제안).
 - 사이드바에 새 항목이 생긴다(소속 경고).
-- 「폴더 연결」에 동의 모달이 생긴다.
+- 「사이트에 연결」에 동의 모달이 생긴다.
 
 따라서 **minor**. `packages/vscode/CHANGELOG.md` 에는 결과만 적는다(§5 규율): 무엇이 새로 막히고,
 사이트를 바꾸면 무엇이 제안되는지.
@@ -439,7 +439,7 @@ function decideSiteChoice(input: {
   `none` 을 전역으로 흘려보내는 한 줄 변이가 전건 초록으로 살아남았다. 전수 `switch` +
   `never` + 배선 두 줄로 닫았다.
 - **기능**: 로그아웃이 링크를 지우고 표식만 남긴 폴더에서 다른 계정이 사이트를 고르면 무기록이라
-  `tenant` 가 영원히 비고, 탈출구인 「폴더 연결」이 그 `tenant` 요건에 막혀 고리가 됐다.
+  `tenant` 가 영원히 비고, 탈출구인 「사이트에 연결」이 그 `tenant` 요건에 막혀 고리가 됐다.
   `site.link` 의 요건에서 `tenant`·`site` 를 뺐다 — 이 명령은 목록을 스스로 받아 오고,
   폴더 유무는 자신이 판정한다.
 

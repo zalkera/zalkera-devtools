@@ -147,7 +147,7 @@ test("받을 판이 하나도 없으면 「없다」의 이유를 가른다", as
     () => null,
     (e: unknown) => e as DevtoolsError,
   );
-  match(none?.hint ?? "", /예제로 시작/);
+  match(none?.hint ?? "", /예제 zip 다운로드/);
 
   const building = {
     listRevisions: async () => [{ revisionNo: 3, status: "BUILDING", isActive: false }],

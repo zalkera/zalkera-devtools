@@ -82,7 +82,7 @@ export function decideSiteChoice(input: ChoiceInput): SiteChoice {
 }
 
 /**
- * 「폴더 연결」이 동의를 받아야 하는가.
+ * 「사이트에 연결」이 동의를 받아야 하는가.
  *
  * 소속이 있고 그것이 고른 사이트와 다르면 받는다 — 그 폴더의 소스가 다른 사이트로 올라가게
  * 되는 변경이라, 조용히 하면 안 된다.

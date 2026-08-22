@@ -2,7 +2,7 @@
  * **왜 지금 이걸 못 하는가 — 사람에게 할 말.**
  *
  * ■ 왜 생겼나
- *   사이드바는 여섯 묶음을 **항상** 보여 준다(오너 확정). 종전에는 못 하는 것을 숨겼는데,
+ *   사이드바는 일곱 묶음을 **항상** 보여 준다(오너 확정). 종전에는 못 하는 것을 숨겼는데,
  *   실사용에서 그 대가가 더 컸다 — 확장을 새로 깔았는데 메뉴가 셋뿐이니 **「갱신이 안 됐다」로
  *   읽혔다.** 사람은 없는 것을 「아직 조건이 안 됐다」로 읽지 않는다.
  *
@@ -81,7 +81,10 @@ const NEEDS: Readonly<Record<string, ReadonlyArray<Need>>> = {
     "zalkera.history": ["signedIn", "tenant"],
     "zalkera.version.switch": ["signedIn", "tenant"],
     "zalkera.site.open": ["signedIn", "tenant"],
-    "zalkera.site.create": ["signedIn", "tenant"],
+    // ⚠ 파일로 받는 둘에는 `site` 를 달지 않는다. 이 둘은 **열린 폴더를 안 건드리고** 고르신
+    //    자리에 파일 하나를 놓는다 — `site` 를 달면 「소스가 없어서 소스를 못 받는」 고리가 된다.
+    "zalkera.site.downloadZip": ["signedIn", "tenant"],
+    "zalkera.preset.download": ["signedIn", "tenant"],
     // ⚠ `tenant`·`siteMatches` 를 달지 않는다. 이 명령은 **새 빈 폴더로 가는 길**이고, 소속이
     //    어긋난 창에서 다음 거래처 zip 을 여는 것이 정상 사용이다. 달면 그 창이 갇힌다.
     "zalkera.site.importZip": ["signedIn"],
@@ -93,7 +96,7 @@ const NEEDS: Readonly<Record<string, ReadonlyArray<Need>>> = {
     // ⚠ **`site` 를 달면 고리가 생긴다.** 그 요건의 버튼은 `site.open` 인데, 사이트 미선택
     //    상태에서는 그것도 막힌다. `site` 를 다는 명령은 반드시 `tenant` 가 앞에 있어야 한다.
     "zalkera.export": [],
-    // ⚠ 「폴더 연결」과 「이 폴더의 사이트로 돌아가기」에는 `siteMatches` 를 달지 않는다 —
+    // ⚠ 「사이트에 연결」과 「이 폴더의 사이트로 돌아가기」에는 `siteMatches` 를 달지 않는다 —
     //    둘이 곧 어긋난 상태의 정규 탈출구다. 달면 빠져나갈 수 없는 고리가 된다.
     // ⚠ **`tenant` 요건을 달지 마라.** 이 명령은 사이트를 **정하는** 자리이고, 목록을 스스로
     //    받아 온다(`listMyTenants`) — 고른 사이트를 쓰지 않는다. 달면 고리가 생긴다:
@@ -131,15 +134,15 @@ export function decideBlocked(command: string, ready: Readiness): Blocked | null
                     `이 폴더는 「${plainNotice(ready.folderTenant ?? "", 64)}」 사이트의 소스입니다 — ` +
                     `「${plainNotice(ready.tenant, 64)}」 작업은 그 사이트의 폴더에서 해 주세요.`,
                 action: {label: "이 폴더의 사이트로 돌아가기", command: "zalkera.site.useFolder"},
-                alternative: {label: "그 사이트 소스 받기", command: "zalkera.site.open"},
+                alternative: {label: "그 사이트 소스 다운로드", command: "zalkera.site.open"},
             };
         }
         if (need === "site" && ready.site === null) {
             return {
                 message:
-                    "이 창에 사이트 소스가 없습니다. 「불러오기」에서 소스를 먼저 받아 주세요 — " +
+                    "이 창에 사이트 소스가 없습니다. 「내려받기」에서 소스를 먼저 받아 주세요 — " +
                     "받은 폴더를 열면 여기 있는 것들이 전부 됩니다.",
-                action: {label: "사이트 소스 받기", command: "zalkera.site.open"},
+                action: {label: "소스 다운로드", command: "zalkera.site.open"},
             };
         }
     }

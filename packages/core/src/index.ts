@@ -86,10 +86,14 @@ export {
 } from "./preview.ts";
 export { runDoctor, type DoctorCheck, type DoctorOptions } from "./doctor.ts";
 export {
+  downloadSourceZip,
   fetchSiteSource,
+  fetchVerifiedSourceTar,
   findProjectRoot,
   type FetchSourceOptions,
   type FetchSourceResult,
+  type SourceZipResult,
+  type VerifiedSourceTar,
 } from "./fetchSource.ts";
 export { extractZip, listZipEntries, type UnzipResult } from "./unzip.ts";
 export { decideImportPlan, readZipFile, type ImportPlan } from "./importZip.ts";
@@ -119,7 +123,7 @@ export {
   mcpServerName,
   type McpServerName,
 } from "./serverUrl.ts";
-export { writeOwnFile } from "./safeWrite.ts";
+export { safeFileName, writeOwnFile } from "./safeWrite.ts";
 export {
   chooseNpm,
   describeNpm,
@@ -147,11 +151,7 @@ export {
   type ReadyPrompt,
   type SwitchDecision,
 } from "./tenantScope.ts";
-export {
-  startFromPreset,
-  type StartFromPresetOptions,
-  type StartFromPresetResult,
-} from "./presets.ts";
+export { fetchPresetZip, type PresetZip } from "./presets.ts";
 export {
   precheck,
   type PrecheckFinding,
