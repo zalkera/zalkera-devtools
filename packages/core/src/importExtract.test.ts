@@ -196,3 +196,103 @@ for (const wrap of WRAPS) {
     }
   }
 }
+
+/**
+ * **이름을 바이트 그대로 넣고 EFS 플래그를 세우지 않는 zip.** 알집·구형 윈도 탐색기 형상이다.
+ * `createZip` 은 늘 UTF-8 플래그를 세우므로 이 형상을 못 만든다 — 그래서 손으로 조립한다.
+ */
+function storedZipRaw(entries: [Buffer, Buffer][]): Buffer {
+  const locals: Buffer[] = [];
+  const centrals: Buffer[] = [];
+  let offset = 0;
+  for (const [name, data] of entries) {
+    const crc = crc32(data);
+    const lh = Buffer.alloc(30);
+    lh.writeUInt32LE(0x04034b50, 0);
+    lh.writeUInt16LE(20, 4);
+    lh.writeUInt32LE(crc, 14);
+    lh.writeUInt32LE(data.length, 18);
+    lh.writeUInt32LE(data.length, 22);
+    lh.writeUInt16LE(name.length, 26);
+    locals.push(lh, name, data);
+    const ch = Buffer.alloc(46);
+    ch.writeUInt32LE(0x02014b50, 0);
+    ch.writeUInt16LE(20, 4);
+    ch.writeUInt16LE(20, 6);
+    ch.writeUInt32LE(crc, 16);
+    ch.writeUInt32LE(data.length, 20);
+    ch.writeUInt32LE(data.length, 24);
+    ch.writeUInt16LE(name.length, 28);
+    ch.writeUInt32LE(offset, 42);
+    centrals.push(ch, name);
+    offset += 30 + name.length + data.length;
+  }
+  const local = Buffer.concat(locals);
+  const central = Buffer.concat(centrals);
+  const eocd = Buffer.alloc(22);
+  eocd.writeUInt32LE(0x06054b50, 0);
+  eocd.writeUInt16LE(entries.length, 8);
+  eocd.writeUInt16LE(entries.length, 10);
+  eocd.writeUInt32LE(central.length, 12);
+  eocd.writeUInt32LE(local.length, 16);
+  return Buffer.concat([local, central, eocd]);
+}
+
+function crc32(buf: Buffer): number {
+  let c = ~0;
+  for (const byte of buf) {
+    c ^= byte;
+    for (let k = 0; k < 8; k += 1) c = (c >>> 1) ^ (0xedb88320 & -(c & 1));
+  }
+  return ~c >>> 0;
+}
+
+test("CP949 파일명 zip 이 이름 그대로 들어온다 — 국내 도구가 만드는 형상", async () => {
+  // ⚠ 무조건 UTF-8 로 읽으면 이름이 전부 U+FFFD 로 접힌다. 한글 파일이 둘 이상이면 같은
+  //   이름이 되어 「같은 파일을 두 번 담고 있습니다」로 **정상 zip 이 통째로 거절**되고,
+  //   하나면 깨진 이름으로 조용히 풀린다(이미지 404 인데 원인이 화면에 없다).
+  //   국내 개발사가 소스를 넘기는 것이 이 제품의 정본 시나리오다.
+  const cp949 = (text: string): Buffer =>
+    Buffer.from(new TextEncoder().encode(text)) as Buffer; // ASCII 부분용
+  const ko = (bytes: number[]): Buffer => Buffer.from(bytes);
+  const zip = storedZipRaw([
+    [cp949("site/package.json"), Buffer.from('{"name":"x"}')],
+    // `site/public/가.jpg` — 「가」 = CP949 B0A1
+    [Buffer.concat([cp949("site/public/"), ko([0xb0, 0xa1]), cp949(".jpg")]), Buffer.from("A")],
+    // `site/public/나.jpg` — 「나」 = CP949 B3AA
+    [Buffer.concat([cp949("site/public/"), ko([0xb3, 0xaa]), cp949(".jpg")]), Buffer.from("B")],
+  ]);
+  const names = listZipEntries(zip);
+  assert.ok(names.includes("site/public/가.jpg"), `이름이 안 읽혔다: ${names.join(",")}`);
+  assert.ok(names.includes("site/public/나.jpg"), `둘째 이름이 안 읽혔다: ${names.join(",")}`);
+
+  const dir = await tempDir("zalkera-cp949-");
+  const plan = decideImportPlan(names);
+  const { fileCount } = await extractZip(zip, dir, plan);
+  assert.equal(fileCount, 3);
+  assert.ok(existsSync(join(dir, "public/가.jpg")), "한글 이름이 깨진 채 풀렸다");
+});
+
+test("겹 자리의 부스러기가 접두 계산을 끊지 않는다", async () => {
+  // ⚠ 맥에서 폴더를 한 번 열면 `.DS_Store` 가 생긴다. 받은 zip 을 풀고 상위 폴더를 다시
+  //   압축하는 것이 두 겹 zip 의 전형적 생성 경로라, 이 형상이 흔하다.
+  for (const junk of [".DS_Store", ".env.local"]) {
+    const plan = decideImportPlan([
+      "outer/",
+      `outer/${junk}`,
+      "outer/site/",
+      "outer/site/package.json",
+      "outer/site/src/a.ts",
+    ]);
+    assert.equal(plan.strip, "outer/site/", `${junk} 가 접두를 끊었다`);
+    assert.ok(plan.keep.includes("package.json"), `${junk}: 표식이 뿌리에 안 올라왔다`);
+  }
+});
+
+test("표식은 파일이어야 한다 — 같은 이름의 디렉터리 항목에 속지 않는다", async () => {
+  // 디렉터리 항목 `package.json/` 하나로 「사이트」가 되면, 아무 폴더나 소스로 둔갑한다.
+  assert.throws(
+    () => decideImportPlan(["package.json/", "src/", "src/a.ts"]),
+    /사이트 소스가 아닙니다/,
+  );
+});

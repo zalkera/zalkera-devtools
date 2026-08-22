@@ -77,7 +77,9 @@ export function decideImportPlan(names: readonly string[]): ImportPlan {
         const judged = name.endsWith("/") ? name.slice(0, -1) : name;
         (isExcludedEntry(judged) ? dropped : keep).push(name);
     }
-    // 표식은 **파일**이어야 한다 — 디렉터리 항목이 이름만 같아도 사이트가 되지 않는다.
+    // 표식은 **파일**이어야 한다. 디렉터리 항목은 늘 `/` 로 끝나 표식 이름과 일치할 수 없으므로
+    // 이 조건은 **중복 방어**다 — 변이로 깨지지 않는다. 뒤에 누가 `keep` 에서 끝 슬래시를 떼면
+    // 그때 유일한 방어가 되므로 남긴다.
     if (!keep.some((name) => !name.endsWith("/") && STOREFRONT_MARKERS.includes(name))) {
         throw new DevtoolsError(
             "NOT_A_SITE",
@@ -100,7 +102,14 @@ function commonRoot(names: readonly string[]): string {
     //    접두를 재는 데 끼우면 **거기서 끊긴다** — 두 겹으로 감싼 실물 zip 이 한 겹만 벗겨지고
     //    표식(`package.json`)이 뿌리에 안 올라와 「사이트가 아니다」로 통째 거절된다(심의 실증).
     //    빈 디렉터리는 뿌리를 정하는 근거가 될 수도 없다.
-    const rest = names.filter((n) => !n.endsWith("/") && !n.toLowerCase().startsWith("__macosx/"));
+    // ⚠ **제외 대상은 접두를 정하는 데 끼지 않는다.** 겹 자리의 `.DS_Store`(맥에서 폴더를 한 번
+    //    열면 생긴다)나 `.env.local` 하나가 최장공통접두를 거기서 끊어, 두 겹이 한 겹만 벗겨지고
+    //    표식이 뿌리에 안 올라와 「사이트가 아니다」가 된다(심의 실증). 받은 zip 을 풀고 상위
+    //    폴더를 다시 압축하는 것이 두 겹 zip 의 전형적 생성 경로라, 이 형상이 흔하다.
+    //    디렉터리 항목·`__MACOSX` 와 **같은 잣대**다 — 어차피 안 들여올 것은 뿌리도 못 정한다.
+    const rest = names.filter(
+        (n) => !n.endsWith("/") && !n.toLowerCase().startsWith("__macosx/") && !isExcludedEntry(n),
+    );
     const first = rest[0];
     if (first === undefined) return "";
 

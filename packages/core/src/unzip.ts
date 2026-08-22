@@ -42,6 +42,43 @@ export interface UnzipResult {
  *
  * 들여오기가 쓴다 — 무엇을 풀지(`decideImportPlan`)는 **쓰기 전에** 정해져야 한다.
  */
+/**
+ * zip 항목의 **파일 이름을 읽는다.**
+ *
+ * ⚠ **무조건 UTF-8 로 읽으면 국내 도구가 만든 zip 이 깨진다.** 범용 플래그 11번(EFS)을 세운
+ *   zip 만 UTF-8 을 보장한다. 알집·구형 윈도 탐색기는 그 플래그 없이 **CP949** 로 적는데,
+ *   그것을 UTF-8 로 읽으면 이름이 전부 `U+FFFD` 로 접힌다. 그러면 ⑴ 한글 파일이 둘 이상일 때
+ *   같은 이름이 되어 「같은 파일을 두 번 담고 있습니다」로 **정상 zip 이 통째로 거절**되고
+ *   ⑵ 하나면 이름이 깨진 채 조용히 풀린다(이미지 404 인데 원인이 화면에 없다).
+ *   국내 개발사가 오너에게 소스를 넘기는 것이 이 제품의 정본 시나리오다.
+ */
+function decodeEntryName(raw: Buffer): string {
+    // ASCII 뿐이면 어느 인코딩이든 같다 — 가장 흔한 경우를 먼저 끝낸다.
+    let ascii = true;
+    for (const byte of raw) {
+        if (byte >= 0x80) {
+            ascii = false;
+            break;
+        }
+    }
+    if (ascii) return raw.toString("latin1");
+
+    // 플래그를 안 세우고 UTF-8 로 적는 도구가 많다 — 유효하면 그것이다.
+    const utf8 = new TextDecoder("utf-8").decode(raw);
+    if (!utf8.includes("\uFFFD")) return utf8;
+
+    // 남은 현실적 후보는 CP949 다.
+    const euckr = new TextDecoder("euc-kr").decode(raw);
+    if (!euckr.includes("\uFFFD")) return euckr;
+
+    // 어느 쪽으로도 안 읽힌다. **깨진 이름으로 풀지 않는다** — 조용한 훼손보다 멈추는 편이 낫다.
+    throw new DevtoolsError(
+        "SERVER_REJECTED",
+        "압축 파일 안의 이름을 읽지 못했습니다.",
+        "옛 방식으로 압축된 파일로 보입니다 — 최신 압축 도구로 다시 압축해 주세요.",
+    );
+}
+
 export function listZipEntries(zip: Buffer): string[] {
     const eocd = findEocd(zip);
     const entryCount = zip.readUInt16LE(eocd + 10);
@@ -61,7 +98,7 @@ export function listZipEntries(zip: Buffer): string[] {
         const nameLength = zip.readUInt16LE(offset + 28);
         const extraLength = zip.readUInt16LE(offset + 30);
         const commentLength = zip.readUInt16LE(offset + 32);
-        const name = zip.subarray(offset + 46, offset + 46 + nameLength).toString("utf8");
+        const name = decodeEntryName(zip.subarray(offset + 46, offset + 46 + nameLength));
         offset += 46 + nameLength + extraLength + commentLength;
         // ⚠ **디렉터리 항목도 돌려준다.** 실물 zip(탐색기·Finder·`zip -r`)은 디렉터리 항목을
         //    담는데, 계획이 파일만 판정하면 `node_modules/` 같은 항목이 걸러지지 않고 해제기
@@ -118,7 +155,7 @@ export async function extractZip(zip: Buffer, targetDir: string, plan?: ImportPl
         const extraLength = zip.readUInt16LE(offset + 30);
         const commentLength = zip.readUInt16LE(offset + 32);
         const localOffset = zip.readUInt32LE(offset + 42);
-        const entryName = zip.subarray(offset + 46, offset + 46 + nameLength).toString("utf8");
+        const entryName = decodeEntryName(zip.subarray(offset + 46, offset + 46 + nameLength));
         offset += 46 + nameLength + extraLength + commentLength;
 
         // ⚠ **여기서 벗긴다 — 안전 검사보다 앞이다.** 아래 `safeSegments`·`descend` 는 실제로 쓸
