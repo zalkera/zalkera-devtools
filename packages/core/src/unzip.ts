@@ -87,7 +87,13 @@ function decodeEntryName(raw: Buffer, flags: number): string {
         );
     }
     try {
-        return new TextDecoder("utf-8", {fatal: true}).decode(raw);
+        // ⚠ **NFC 로 모은다.** 맥은 파일명을 NFD(분해형)로 적는다 — 「가.jpg」가 `ᄀ`+`ᅡ` 두
+        //    글자로 저장된다. 그 이름은 표시도 있고 유효 UTF-8 이라 여기까지 통과하는데,
+        //    소스가 NFC(조합형)로 그 파일을 가리키면 **다른 문자열**이라 안 맞는다 —
+        //    「이미지가 404 인데 원인이 화면에 없는」 바로 그 증상이다.
+        //    두 형태가 한 zip 에 같이 있으면 이름이 겹치는데, 그것은 `writeExclusive` 가
+        //    「같은 파일을 두 번 담고 있습니다」로 **보이게** 끊는다.
+        return new TextDecoder("utf-8", {fatal: true}).decode(raw).normalize("NFC");
     } catch {
         throw new DevtoolsError(
             "SERVER_REJECTED",

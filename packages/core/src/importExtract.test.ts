@@ -332,3 +332,31 @@ test("표식은 파일이어야 한다 — 같은 이름의 디렉터리 항목�
     /사이트 소스가 아닙니다/,
   );
 });
+
+test("맥이 만든 NFD 한글 이름은 NFC 로 모아 푼다", async () => {
+  // ⚠ 맥은 파일명을 분해형(NFD)으로 적는다 — 「가」가 `ᄀ`+`ᅡ` 두 글자다. 그 이름은 표시도
+  //   있고 유효 UTF-8 이라 그냥 통과하는데, 소스가 조합형(NFC)으로 그 파일을 가리키면
+  //   **다른 문자열**이라 안 맞는다. 「이미지가 404 인데 원인이 화면에 없는」 그 증상이다.
+  const ascii = (text: string): Buffer => Buffer.from(text, "latin1");
+  const nfd = "여름사진.jpg".normalize("NFD");
+  assert.notEqual(nfd, "여름사진.jpg", "시험 입력이 NFD 가 아니다 — 아무것도 안 재고 있다");
+
+  const zip = storedZipRaw(
+    [
+      [ascii("site/package.json"), Buffer.from('{"name":"x"}')],
+      [Buffer.from(`site/public/${nfd}`, "utf8"), Buffer.from("A")],
+    ],
+    0x800,
+  );
+  const names = listZipEntries(zip);
+  assert.ok(
+    names.includes("site/public/여름사진.jpg"),
+    `NFC 로 안 모였다: ${names.map((n) => JSON.stringify(n)).join(",")}`,
+  );
+
+  const dir = await tempDir("zalkera-nfd-");
+  const plan = decideImportPlan(names);
+  await extractZip(zip, dir, plan);
+  // 소스가 조합형으로 가리키는 그 이름으로 실제 파일이 있어야 한다.
+  assert.ok(existsSync(join(dir, "public/여름사진.jpg")), "조합형 이름으로 안 풀렸다");
+});

@@ -11,7 +11,7 @@
  */
 import {readFile, stat} from "node:fs/promises";
 import {DevtoolsError} from "./errors.ts";
-import {MAX_DOWNLOAD_BYTES} from "./limits.ts";
+import {MAX_DOWNLOAD_BYTES, MAX_NAME_BYTES} from "./limits.ts";
 import {isExcludedEntry} from "./zip.ts";
 
 export interface ImportPlan {
@@ -50,6 +50,20 @@ export function decideImportPlan(names: readonly string[]): ImportPlan {
     if (names.length === 0) {
         throw new DevtoolsError("NOT_A_SITE", "압축 파일이 비어 있습니다.", "받으신 파일을 다시 확인해 주세요.");
     }
+    // ⚠ **총 바이트를 가장 먼저 본다.** 아래 훑기가 전부 이름 바이트에 비례하므로, 재기 전에
+    //    끊어야 한다. 항목 수·깊이 상한을 다 지키면서 긴 이름으로만 137MB 를 만들 수 있다.
+    let nameBytes = 0;
+    for (const name of names) {
+        nameBytes += name.length;
+        if (nameBytes > MAX_NAME_BYTES) {
+            throw new DevtoolsError(
+                "NOT_A_SITE",
+                "압축 파일의 파일 목록이 지나치게 큽니다.",
+                "사이트 소스 zip 이 맞는지 확인해 주세요 — 정상 소스에는 이런 목록이 없습니다.",
+            );
+        }
+    }
+
     // ⚠ **깊이를 먼저 본다.** 아래 훑기가 항목 × 세그먼트라, 재기 전에 끊어야 한다.
     const tooDeep = names.find((n) => segmentCount(n) > MAX_PATH_SEGMENTS);
     if (tooDeep !== undefined) {

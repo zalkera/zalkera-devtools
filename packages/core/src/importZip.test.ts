@@ -113,3 +113,23 @@ test("경로가 지나치게 깊으면 **재기 전에** 거절한다", () => {
   const normal = "src/app/api/orders/[orderNo]/cancel/route.ts";
   assert.doesNotThrow(() => decideImportPlan(["package.json", normal]));
 });
+
+test("이름 목록이 지나치게 크면 **재기 전에** 거절한다", () => {
+  // ⚠ 항목 수 상한도 깊이 상한도 이 축을 못 막는다 — 65,535개를 긴 이름으로 채우면 두 상한을
+  //   다 지키면서 137MB 가 되고, 그 훑기는 **양보점 없는 동기 구간**이라 확장 호스트가 언다
+  //   (실측: 137MB → 2,517ms, 취소 불가). 이 경로의 입력은 남이 준 zip 이다.
+  const seg = `${"d".repeat(60)}/`;
+  const names: string[] = ["package.json"];
+  // 8MB 를 넘기되 항목 수·깊이 상한에는 안 걸리는 목록을 만든다.
+  for (let i = 0; i < 20_000; i += 1) names.push(`${seg}f${String(i).padStart(400, "0")}`);
+  assert.ok(
+    names.reduce((sum, n) => sum + n.length, 0) > 8 * 1024 * 1024,
+    "시험 입력이 상한을 안 넘는다 — 이 시험은 아무것도 안 재고 있다",
+  );
+  assert.throws(() => decideImportPlan(names), /목록이 지나치게 큽니다/);
+
+  // 정상 소스는 막지 않는다 — 실물 팩의 이름 총량은 5KB 다(팩 4벌 실측).
+  assert.doesNotThrow(() =>
+    decideImportPlan(["package.json", "src/app/page.tsx", "content/pages/home.json"]),
+  );
+});
