@@ -74,6 +74,31 @@ const WIRES = [
     ],
     [
         "packages/vscode/src/extension.ts",
+        'if (ok !== "갈아 끼우기") return;',
+        "되돌릴 수 없는 조작의 **유일한 동의 관문**이다. 지우면 zip 을 고르는 순간 폴더가 사라진다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "await stopPreview();\n\n  // ⚠ **읽기·판정을 먼저 끝낸다.**",
+        "미리보기가 파일을 물고 있으면 지우기가 갈아 끼우기 한복판에서 실패한다 — 되돌리기에 기대게 된다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "const {zip, plan} = await readZipWithPlan(zipPath);\n\n  const result",
+        "읽기·판정이 교체 뒤로 가면 폴더를 비운 다음에 zip 이 상했음을 알게 된다 — 순서가 곧 안전이다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "const keep = await keepNames(dir);",
+        "손 목록으로 열거하면 포장기가 빼는 것과 갈린다 — 갈린 쪽이 영구 삭제된다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "replaceContents(dir, [SOURCE_MARK_PATH], keep,",
+        "보존·보류 목록이 빠지면 고객의 .git·시크릿·에디터 설정이 영구히 사라진다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
         "return {zip, plan: decideImportPlan(listZipEntries(zip))};",
         "들여오기가 판정을 안 지나 아무 zip 이나 풀리고, 보낸 쪽 .vscode 가 들어와 그 폴더가 남의 사이트라고 주장한다",
     ],

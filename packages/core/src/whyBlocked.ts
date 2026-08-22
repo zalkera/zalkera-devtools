@@ -85,8 +85,8 @@ const NEEDS: Readonly<Record<string, ReadonlyArray<Need>>> = {
     // ⚠ `tenant`·`siteMatches` 를 달지 않는다. 이 명령은 **새 빈 폴더로 가는 길**이고, 소속이
     //    어긋난 창에서 다음 거래처 zip 을 여는 것이 정상 사용이다. 달면 그 창이 갇힌다.
     "zalkera.site.importZip": ["signedIn"],
-  // 갱신은 **있는 소스를 갈아 끼운다** — 어느 폴더인지, 어느 사이트 것인지가 정해져 있어야 한다.
-  "zalkera.site.updateZip": ["signedIn", "tenant", "site", "siteMatches"],
+    // 갱신은 **있는 소스를 갈아 끼운다** — 어느 폴더인지, 어느 사이트 것인지가 정해져 있어야 한다.
+    "zalkera.site.updateZip": ["signedIn", "tenant", "site", "siteMatches"],
     // 포장은 **이 폴더를 파일로 만드는 일**이다 — 로그인도 사이트도 필요 없고, 소속과도 무관하다.
     // 필요한 것은 「열린 폴더」뿐이고 그 판정은 `exportZipCommand` 자신이 한다.
     //

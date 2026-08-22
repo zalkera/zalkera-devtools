@@ -98,13 +98,15 @@ test("도는 것을 멈추는 명령에는 요건이 없다 — 폴더가 닫혀
 });
 
 test("어긋난 폴더 — 폴더를 만지는 명령은 막고, 탈출구는 안 막는다", () => {
-  // 게이트가 서는 다섯. 이 목록을 지우면 교차 오염이 그대로 돌아온다.
+  // 게이트가 서는 여섯. 이 목록을 지우면 교차 오염이 그대로 돌아온다.
+  // 갱신은 **남의 사이트 폴더를 지우는** 형태라 여기 빠지면 그 사고가 무경고로 난다.
   for (const command of [
     "zalkera.preview.start",
     "zalkera.preview.restart",
     "zalkera.agent.connect",
     "zalkera.precheck",
     "zalkera.publish",
+    "zalkera.site.updateZip",
   ]) {
     const blocked = decideBlocked(command, MISMATCH);
     assert.ok(blocked, `${command} 가 어긋난 폴더에서 안 막혔다`);

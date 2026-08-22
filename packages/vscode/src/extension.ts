@@ -54,6 +54,7 @@ import {
   extractZip,
   listZipEntries,
   meaningfulEntries,
+  keepNames,
   replaceContents,
   removeAdded,
   snapshotEntries,
@@ -1121,6 +1122,7 @@ async function importZipInto(
   return {fileCount, dropped: plan.dropped};
 }
 
+
 /**
  * **받은 zip 으로 지금 폴더를 갈아 끼운다.**
  *
@@ -1130,7 +1132,7 @@ async function importZipInto(
  * 「비어 있지 않습니다」로 막히고, 중간에 실패하면 되돌릴 길이 없다.
  *
  * 그래서 옆에 치워 두고 채운 뒤 성공했을 때만 버린다(`replaceContents`). 그리고 **소속 표식은
- * 보존한다** — zip 에는 그 파일이 없으므로(정본 도구가 `.zalkera` 를 빼고 압축한다) 그냥 풀면
+ * 보존한다** — 포장기가 `.zalkera/source.json` 을 빼고 압축하므로 zip 에 그 파일이 없다. 그냥 풀면
  * 이 폴더가 어느 사이트 것인지 잃는다.
  */
 async function updateZipCommand(): Promise<void> {
@@ -1155,9 +1157,15 @@ async function updateZipCommand(): Promise<void> {
   if (!zipPath) return;
 
   // ⚠ **되돌릴 수 없는 조작이라 한 번 묻는다.** 실패하면 되돌리지만, 성공하면 옛 소스는 없다.
+  // ⚠ **무엇을 남기는지 계산해서 보여 준다.** 목록은 포장기가 zip 에서 빼는 것과 같은 술어로
+  //    고른다(`keepNames`) — 손으로 열거하면 두 목록이 갈리고, 갈린 쪽이 영구 삭제된다.
+  const keep = await keepNames(dir);
   const ok = await vscode.window.showWarningMessage(
-    ours(`이 폴더의 소스를 고르신 zip 으로 갈아 끼웁니다. 지금 내용은 사라집니다.\n${dir}`),
-    {modal: true},
+    ours("이 폴더의 소스를 고르신 zip 으로 갈아 끼웁니다. 지금 내용은 사라집니다."),
+    {
+      modal: true,
+      detail: `${dir}\n\n그대로 두는 것: ${keep.length > 0 ? keep.join(" · ") : "없습니다"}`,
+    },
     "갈아 끼우기",
   );
   if (ok !== "갈아 끼우기") return;
@@ -1174,16 +1182,19 @@ async function updateZipCommand(): Promise<void> {
     {location: vscode.ProgressLocation.Notification, title: "사이트 소스를 갈아 끼우는 중"},
     async () => {
       let fileCount = 0;
-      const {preserved} = await replaceContents(dir, [SOURCE_MARK_PATH], async () => {
+      const {preserved, kept} = await replaceContents(dir, [SOURCE_MARK_PATH], keep, async () => {
         ({fileCount} = await extractZip(zip, dir, plan));
       });
-      return {fileCount, preserved};
+      return {fileCount, preserved, kept};
     },
   );
 
   log(`파일 ${count(result.fileCount)}개로 갈아 끼웠습니다: ${dir}`);
   if (plan.dropped.length > 0) {
     log(`정본에 싣지 않는 ${count(plan.dropped.length)}개는 빼고 풀었습니다: ${plan.dropped.join(", ")}`);
+  }
+  if (result.kept.length > 0) {
+    log(`그대로 둔 ${count(result.kept.length)}개: ${result.kept.join(", ")}`);
   }
   if (result.preserved.length === 0) {
     // 표식이 없었다는 것은 이 폴더가 아직 사이트에 안 붙었다는 뜻이다 — 조용히 넘기지 않는다.
