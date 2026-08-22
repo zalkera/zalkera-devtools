@@ -53,6 +53,8 @@ import {
   extractZip,
   listZipEntries,
   meaningfulEntries,
+  removeAdded,
+  snapshotEntries,
   readZipFile,
   folderBinding,
   decideTenantScope,
@@ -1011,7 +1013,13 @@ async function exportZipCommand(): Promise<void> {
   log(`파일 ${count(result.fileCount)}개 · ${Math.round(result.buffer.length / 1024)}KB 로 포장했습니다.`);
   log(`sha256: ${result.sha256}`);
   void vscode.window.showInformationMessage(
-    ours("사이트 소스를 zip 으로 내보냈습니다. 자격증명·빌드 산출물은 빠졌습니다."),
+    // ⚠ **「전부 뺐다」고 말하지 않는다.** `isSecretFile` 이 스스로 보증을 좁혀 뒀다 — 우리가
+    //    발급한 `.env*` 는 반드시, 널리 쓰이는 표준 자격증명 이름은 최선, 그 밖은 보증하지
+    //    않는다. 「전부 막는다」고 적으면 못 막은 하나가 배신이 된다.
+    ours(
+      "사이트 소스를 zip 으로 내보냈습니다. 미리보기 열쇠와 널리 쓰이는 자격증명 파일, " +
+        "빌드 산출물은 뺐습니다 — 넘기시기 전에 출력 패널에서 무엇이 빠졌는지 확인해 주세요.",
+    ),
   );
 }
 
@@ -1057,11 +1065,13 @@ async function importZipCommand(): Promise<void> {
   await refreshSidebar();
 
   const open = await vscode.window.showInformationMessage(
-    ours("사이트 소스를 풀었습니다. 폴더를 열면 사이트에 연결할 수 있습니다."),
+    ours("사이트 소스를 풀었습니다. 폴더를 열고 「폴더 연결」로 사이트에 붙이면 미리보기·올리기가 됩니다."),
     "폴더 열기",
   );
   if (open === "폴더 열기") {
-    await vscode.commands.executeCommand("vscode.openFolder", vscode.Uri.file(target));
+    // ⚠ **여기도 `openSiteFolder` 를 지난다.** 직접 열면 미리보기가 돌고 있어도 무경고로
+    //    지금 창을 뺏는다 — 받기·전환 흐름이 이미 고친 그 비대칭이 여기서 되살아난다.
+    await openSiteFolder(target);
   }
 }
 
@@ -1082,7 +1092,19 @@ async function importZipInto(
       "빈 폴더를 골라 주세요(있는 파일을 덮어쓰지 않습니다).",
     );
   }
-  const {fileCount} = await extractZip(zip, targetDir, plan);
+  // ⚠ **반쪽 해제를 남기지 않는다** — 형제 `startFromPreset`·`fetchSource` 와 같은 규율이다.
+  //    `extractZip` 은 항목을 훑으며 그때그때 쓰므로, 도중에 던지면 앞서 쓴 파일이 남는다.
+  //    그러면 ⑴ 배송 문서의 「아무것도 풀지 않고 멈춘 것이니 폴더는 그대로입니다」가 거짓이 되고
+  //    ⑵ 재시도가 「비어 있지 않습니다」로 막혀 손으로 지우기 전에는 못 빠져나온다.
+  //    적대적 zip 이 보안 정지를 유발하고도 디스크에 흔적을 남기는 것도 이 자리다.
+  const before = await snapshotEntries(targetDir);
+  let fileCount: number;
+  try {
+    ({fileCount} = await extractZip(zip, targetDir, plan));
+  } catch (cause) {
+    await removeAdded(targetDir, before);
+    throw cause;
+  }
   return {fileCount, dropped: plan.dropped};
 }
 
@@ -1505,7 +1527,6 @@ async function startPreviewInner(pinned?: CapturedTenant): Promise<void> {
     showIdleStatus();
     // **상태바를 되돌린다.** 종전에는 텍스트만 바꾸고 command 를 stop 에 둬서, 크래시 뒤 상태바를
     // 누르면 session 이 없어 아무 일도 안 하는 죽은 버튼이 됐다(심의 경고).
-    status.command = "zalkera.preview.start";
     if (code !== 0 && code !== null)
       log(`미리보기가 종료되었습니다(코드 ${code}).`);
   });
@@ -1668,7 +1689,6 @@ async function stopPreview(): Promise<void> {
   session = null;
   sidebar.update({ previewUrl: null, keyExpiresAt: null });
   showIdleStatus();
-  status.command = "zalkera.preview.start";
   log("미리보기를 멈췄습니다.");
 }
 
@@ -2443,6 +2463,10 @@ function requireWorkspace(): string {
 /** 사이드바가 보여 줄 사실만 다시 읽는다 — 판정이 아니라 표시다. */
 async function refreshSidebar(): Promise<void> {
   const dir = workspaceDir();
+  // ⚠ **상태바도 같이 갱신한다.** 종전에는 사이드바만 새로 그려, 사이트를 바꾸거나 폴더로
+  //    돌아온 뒤에도 상태바가 낡은 사이트를 말했다 — 경고를 눌러 되돌려도 경고가 그대로였다.
+  //    화면 둘이 같은 사건을 보게 하는 것이 이 한 줄이다(미리보기 중에는 그쪽이 자리를 쓴다).
+  if (session === null) showIdleStatus();
   sidebar.update({
     signedIn: (await store.read()) !== null,
     tenant: tenantCode(),

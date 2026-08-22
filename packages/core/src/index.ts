@@ -93,7 +93,7 @@ export {
 } from "./fetchSource.ts";
 export { extractZip, listZipEntries, type UnzipResult } from "./unzip.ts";
 export { decideImportPlan, readZipFile, type ImportPlan } from "./importZip.ts";
-export { isReceivable, meaningfulEntries } from "./emptyDir.ts";
+export { isReceivable, meaningfulEntries, removeAdded, snapshotEntries } from "./emptyDir.ts";
 
 export { waitForBuild, type BuildOutcome, type WaitOptions } from "./build.ts";
 

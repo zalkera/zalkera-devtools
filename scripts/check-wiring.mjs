@@ -69,6 +69,11 @@ const WIRES = [
     ],
     [
         "packages/vscode/src/extension.ts",
+        "await removeAdded(targetDir, before);",
+        "들여오기가 도중에 멈추면 반쪽 해제가 남는다 — 배송 문서의 「폴더는 그대로입니다」가 거짓이 되고, 재시도가 「비어 있지 않습니다」로 막혀 손으로 지우기 전에는 못 빠져나온다. 이 레포가 같은 회귀를 세 번째 겪은 자리다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
         "const plan = decideImportPlan(listZipEntries(zip));",
         "들여오기가 판정을 안 지나 아무 zip 이나 풀리고, 보낸 쪽 .vscode 가 들어와 그 폴더가 남의 사이트라고 주장한다",
     ],

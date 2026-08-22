@@ -1,11 +1,26 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { tempDir } from "./testing/tempDir.ts";
 import { createZip, type ZipEntry } from "./zip.ts";
 import { extractZip, listZipEntries } from "./unzip.ts";
+import { removeAdded, snapshotEntries } from "./emptyDir.ts";
 import { decideImportPlan } from "./importZip.ts";
+
+/**
+ * **디렉터리 항목까지 담은 zip.** 실물(탐색기·Finder·`zip -r`)이 이 모양이다.
+ *
+ * ⚠ 이 헬퍼가 없으면 시험이 실물과 갈린다 — `createZip` 은 디렉터리 항목을 안 내므로,
+ *   파일만 담은 zip 으로는 「정상 zip 이 통째로 거절되는」 사고를 못 잡는다(심의 실증).
+ */
+function zipWithDirs(entries: Record<string, string>, dirs: string[]): Promise<Buffer> {
+  const list: ZipEntry[] = [
+    ...dirs.map((path) => ({path, data: Buffer.alloc(0)})),
+    ...Object.entries(entries).map(([path, text]) => ({path, data: Buffer.from(text, "utf8")})),
+  ];
+  return createZip(list);
+}
 
 function zipOf(entries: Record<string, string>): Promise<Buffer> {
   const list: ZipEntry[] = Object.entries(entries).map(([path, text]) => ({
@@ -63,5 +78,67 @@ test("접두를 벗긴 뒤에도 뿌리 밖으로 못 나간다", async () => {
     // `resolve` 상 뿌리 안이라 통과했을 것이다.
     await assert.rejects(() => importInto(zip, dir), /폴더 밖을 가리킵니다: \.\.\/\.\.\/escaped\.txt/);
     assert.ok(!existsSync(join(dir, "..", "..", "escaped.txt")), "뿌리 밖에 파일이 생겼다");
+  }
+});
+
+test("디렉터리 항목이 든 실물 zip 이 통째로 거절되지 않는다", async () => {
+  // ⚠ 이것이 이 기능의 **1순위 입력**이다 — 고객·개발사가 폴더를 통째로 압축해 보낸다.
+  //   계획이 파일만 판정하면 `node_modules/` 디렉터리 항목이 해제기 안쪽 가드까지 가서
+  //   「받은 파일에 node_modules 가 들어 있습니다」로 폭사한다.
+  const dir = await tempDir("zalkera-import-");
+  {
+    const zip = await zipWithDirs(
+      {
+        "site/package.json": '{"name":"x"}',
+        "site/src/page.tsx": "export default null;",
+        "site/node_modules/pkg/index.js": "module.exports={}",
+      },
+      ["site/", "site/src/", "site/node_modules/", "site/node_modules/pkg/"],
+    );
+    const plan = decideImportPlan(listZipEntries(zip));
+    const { fileCount } = await extractZip(zip, dir, plan);
+    assert.equal(fileCount, 2, "정상 zip 이 온전히 풀리지 않았다");
+    assert.ok(existsSync(join(dir, "package.json")));
+    assert.ok(existsSync(join(dir, "src/page.tsx")));
+    // 제외 대상은 **빈 껍데기조차** 남기지 않는다 — 「들여오지도 않는다」가 참이어야 한다.
+    assert.ok(!existsSync(join(dir, "node_modules")), "제외 폴더가 빈 껍데기로 생겼다");
+  }
+});
+
+test("제외 디렉터리 항목은 빈 폴더로도 안 생긴다", async () => {
+  const dir = await tempDir("zalkera-import-");
+  {
+    const zip = await zipWithDirs({ "package.json": "{}" }, [".git/", ".vscode/", "dist/", ".ssh/"]);
+    const plan = decideImportPlan(listZipEntries(zip));
+    await extractZip(zip, dir, plan);
+    for (const junk of [".git", ".vscode", "dist", ".ssh"]) {
+      assert.ok(!existsSync(join(dir, junk)), `${junk} 가 빈 껍데기로 생겼다`);
+    }
+  }
+});
+
+test("해제가 도중에 멈추면 **아무것도 남기지 않는다** — 문서가 그렇게 약속한다", async () => {
+  // ⚠ help.md 가 「…아무것도 풀지 않고 멈춘 것이니 폴더는 그대로입니다」라고 단정한다.
+  //   `extractZip` 은 항목을 훑으며 그때그때 쓰므로, 롤백이 없으면 그 문장이 거짓이 된다.
+  //   재시도도 「비어 있지 않습니다」로 막혀 손으로 지우기 전에는 못 빠져나온다.
+  //   적대적 zip 이 보안 정지를 유발하고도 디스크에 흔적을 남기는 자리이기도 하다.
+  const dir = await tempDir("zalkera-import-");
+  {
+    const zip = await zipOf({
+      "site/package.json": "{}",
+      "site/src/a.ts": "export default 1;",
+      "site/../../escaped.txt": "nope",
+    });
+    const plan = decideImportPlan(listZipEntries(zip));
+    const before = await snapshotEntries(dir);
+    await assert.rejects(async () => {
+      try {
+        await extractZip(zip, dir, plan);
+      } catch (cause) {
+        await removeAdded(dir, before);
+        throw cause;
+      }
+    });
+    assert.deepEqual(readdirSync(dir), [], `반쪽 해제가 남았다: ${readdirSync(dir).join(",")}`);
   }
 });

@@ -164,7 +164,7 @@ export function sidebarPlan(state: SidebarState): PlanGroup[] {
                     // 이름이 하는 일과 같아야 한다 — 이 명령은 **올리기까지**다(전환은 따로).
                     act("새 버전 올리기", "zalkera.publish", "cloud-upload", "올리기만 합니다 — 사이트는 아직 안 바뀝니다"),
                     // 넘기는 길. 손으로 압축하면 자격증명이 딸려 가므로 이 자리가 필요하다.
-                    act("zip 으로 내보내기", "zalkera.export", "package", "자격증명·빌드 산출물을 뺀 zip 을 만듭니다"),
+                    act("zip 으로 내보내기", "zalkera.export", "package", "열쇠·자격증명·빌드 산출물을 빼고 담습니다"),
                 ],
             },
         );

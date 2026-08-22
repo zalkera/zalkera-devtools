@@ -23,6 +23,16 @@ export interface ImportPlan {
     dropped: string[];
 }
 
+/**
+ * 경로 깊이 상한. 정상 소스 트리에 이만큼 깊은 자리는 없다
+ * (`src/app/api/orders/[orderNo]/cancel/route.ts` 가 7단).
+ *
+ * ⚠ **자원 상한이지 취향이 아니다.** 항목마다 세그먼트를 훑어 제외를 판정하므로, 깊이가 곧
+ *   항목당 비용이다. 형식이 허용하는 최악(이름 65,534B = 32,767단)을 그대로 받으면 그 곱이
+ *   확장 호스트를 멈춘다.
+ */
+const MAX_PATH_SEGMENTS = 64;
+
 /** 이 zip 이 잘커라 스토어프론트인가를 판정하는 표. 하나라도 있으면 참으로 본다. */
 const STOREFRONT_MARKERS = ["package.json", "llms.txt", ".zalkera/pack.json"];
 
@@ -40,6 +50,15 @@ export function decideImportPlan(names: readonly string[]): ImportPlan {
     if (names.length === 0) {
         throw new DevtoolsError("NOT_A_SITE", "압축 파일이 비어 있습니다.", "받으신 파일을 다시 확인해 주세요.");
     }
+    // ⚠ **깊이를 먼저 본다.** 아래 훑기가 항목 × 세그먼트라, 재기 전에 끊어야 한다.
+    const tooDeep = names.find((n) => segmentCount(n) > MAX_PATH_SEGMENTS);
+    if (tooDeep !== undefined) {
+        throw new DevtoolsError(
+            "NOT_A_SITE",
+            "압축 파일에 경로가 지나치게 깊은 항목이 있습니다.",
+            "사이트 소스 zip 이 맞는지 확인해 주세요 — 정상 소스에는 이런 자리가 없습니다.",
+        );
+    }
     const strip = commonRoot(names);
     const keep: string[] = [];
     const dropped: string[] = [];
@@ -54,9 +73,12 @@ export function decideImportPlan(names: readonly string[]): ImportPlan {
         const name = raw.slice(strip.length);
         // 접두를 벗기고 남은 것이 없는 항목(= 그 접두 디렉터리 자신)은 셀 것이 아니다.
         if (name === "") continue;
-        (isExcludedEntry(name) ? dropped : keep).push(name);
+        // 디렉터리 항목(`node_modules/`)도 **같은 잣대**로 본다 — 끝 슬래시만 떼고 잰다.
+        const judged = name.endsWith("/") ? name.slice(0, -1) : name;
+        (isExcludedEntry(judged) ? dropped : keep).push(name);
     }
-    if (!keep.some((name) => STOREFRONT_MARKERS.includes(name))) {
+    // 표식은 **파일**이어야 한다 — 디렉터리 항목이 이름만 같아도 사이트가 되지 않는다.
+    if (!keep.some((name) => !name.endsWith("/") && STOREFRONT_MARKERS.includes(name))) {
         throw new DevtoolsError(
             "NOT_A_SITE",
             "잘커라 사이트 소스가 아닙니다.",
@@ -74,21 +96,34 @@ export function decideImportPlan(names: readonly string[]): ImportPlan {
  *   중첩이 안 벗겨진다 — macOS 에서 압축한 zip 이 정확히 그 모양이다.
  */
 function commonRoot(names: readonly string[]): string {
-    let prefix = "";
-    let rest = names.filter((n) => !n.toLowerCase().startsWith("__macosx/"));
-    for (;;) {
-        const heads = new Set(rest.map((n) => n.slice(0, n.indexOf("/") + 1)));
-        // 뿌리에 파일이 있으면(`indexOf("/") === -1` → 빈 문자열) 벗길 것이 없다.
-        if (heads.size !== 1 || heads.has("")) return prefix;
-        const head = [...heads][0];
-        if (head === undefined) return prefix;
-        // ⚠ **제외 대상은 벗기지 않는다.** `node_modules/pkg/` 도 단일 루트라, 그냥 벗기면
-        //    남의 의존 트리가 `package.json` 을 뿌리에 둔 「사이트」로 둔갑한다(시험이 잡은 자리).
-        if (isExcludedEntry(head.slice(0, -1))) return prefix;
-        prefix += head;
-        rest = rest.map((n) => n.slice(head.length)).filter((n) => n !== "");
-        if (rest.length === 0) return prefix;
+    const rest = names.filter((n) => !n.toLowerCase().startsWith("__macosx/"));
+    const first = rest[0];
+    if (first === undefined) return "";
+
+    // ⚠ **이름 전체를 한 번만 훑는다.** 깊이마다 남은 이름을 다시 잘라 담으면 비용이
+    //    O(이름바이트 × 깊이)가 되고, 깊게 감싼 zip 하나가 확장 호스트를 **십수 초 얼린다**
+    //    (실측: 깊이 1,120 · 항목 65,535 에서 14.6초, 취소도 안 되는 동기 구간).
+    //    이 경로의 입력은 **남이 준 zip** 이라 악의·손상 입력이 곧 위협모형이다.
+    let end = first.length;
+    for (const name of rest) {
+        const max = Math.min(end, name.length);
+        let i = 0;
+        while (i < max && first.charCodeAt(i) === name.charCodeAt(i)) i += 1;
+        end = i;
+        if (end === 0) return "";
     }
+    const cut = first.slice(0, end).lastIndexOf("/");
+    if (cut < 0) return "";
+
+    // ⚠ **제외 대상은 벗기지 않는다.** `node_modules/pkg/` 도 단일 루트라, 그냥 벗기면
+    //    남의 의존 트리가 `package.json` 을 뿌리에 둔 「사이트」로 둔갑한다(시험이 잡은 자리).
+    let kept = "";
+    for (const segment of first.slice(0, cut + 1).split("/")) {
+        if (segment === "") continue;
+        if (isExcludedEntry(segment)) break;
+        kept += `${segment}/`;
+    }
+    return kept;
 }
 
 /**
@@ -110,4 +145,14 @@ export async function readZipFile(path: string): Promise<Buffer> {
         );
     }
     return readFile(path);
+}
+
+/** `/` 개수 + 1. `split` 으로 배열을 만들지 않는다 — 그 자체가 이 자리의 비용이다. */
+function segmentCount(name: string): number {
+    let n = 1;
+    for (let i = 0; i < name.length; i += 1) {
+        if (name.charCodeAt(i) === 47) n += 1;
+        if (n > MAX_PATH_SEGMENTS) return n;
+    }
+    return n;
 }

@@ -5,7 +5,7 @@ import { inflateRaw } from "node:zlib";
 import { promisify } from "node:util";
 import { DevtoolsError } from "./errors.ts";
 import { assertNotSymlink, assertNotVendored, descend, safeSegments } from "./safeWrite.ts";
-import { MAX_ENTRIES, MAX_ENTRY_BYTES, MAX_EXTRACT_BYTES } from "./limits.ts";
+import { MAX_ZIP_ENTRIES, MAX_ENTRY_BYTES, MAX_EXTRACT_BYTES } from "./limits.ts";
 
 const inflate = promisify(inflateRaw);
 
@@ -46,10 +46,10 @@ export function listZipEntries(zip: Buffer): string[] {
     const eocd = findEocd(zip);
     const entryCount = zip.readUInt16LE(eocd + 10);
     let offset = zip.readUInt32LE(eocd + 16);
-    if (entryCount > MAX_ENTRIES) {
+    if (entryCount > MAX_ZIP_ENTRIES) {
         throw new DevtoolsError(
             "SERVER_REJECTED",
-            `받은 파일에 항목이 너무 많습니다(${entryCount.toLocaleString()}개 · 상한 ${MAX_ENTRIES.toLocaleString()}개).`,
+            `받은 파일에 항목이 너무 많습니다(${entryCount.toLocaleString()}개 · 상한 ${MAX_ZIP_ENTRIES.toLocaleString()}개).`,
             "받은 꾸러미가 정상이 아닙니다.",
         );
     }
@@ -63,7 +63,10 @@ export function listZipEntries(zip: Buffer): string[] {
         const commentLength = zip.readUInt16LE(offset + 32);
         const name = zip.subarray(offset + 46, offset + 46 + nameLength).toString("utf8");
         offset += 46 + nameLength + extraLength + commentLength;
-        if (!name.endsWith("/")) names.push(name);
+        // ⚠ **디렉터리 항목도 돌려준다.** 실물 zip(탐색기·Finder·`zip -r`)은 디렉터리 항목을
+        //    담는데, 계획이 파일만 판정하면 `node_modules/` 같은 항목이 걸러지지 않고 해제기
+        //    안쪽 가드까지 가서 **정상 zip 이 통째로 거절된다**(심의 실증).
+        names.push(name);
     }
     return names;
 }
@@ -89,10 +92,10 @@ export async function extractZip(zip: Buffer, targetDir: string, plan?: ImportPl
     /** 계획이 허락한 이름만 쓴다. 배열 조회를 반복하지 않으려고 한 번만 만든다. */
     const allowed = plan ? new Set(plan.keep) : null;
 
-    if (entryCount > MAX_ENTRIES) {
+    if (entryCount > MAX_ZIP_ENTRIES) {
         throw new DevtoolsError(
             "SERVER_REJECTED",
-            `받은 파일에 항목이 너무 많습니다(${entryCount.toLocaleString()}개 · 상한 ${MAX_ENTRIES.toLocaleString()}개).`,
+            `받은 파일에 항목이 너무 많습니다(${entryCount.toLocaleString()}개 · 상한 ${MAX_ZIP_ENTRIES.toLocaleString()}개).`,
             "받은 꾸러미가 정상이 아닙니다. 잘커라에 문의해 주세요.",
         );
     }
@@ -122,7 +125,7 @@ export async function extractZip(zip: Buffer, targetDir: string, plan?: ImportPl
         //    경로를 봐야 한다. 벗기기 전 이름으로 검사하면 검사한 것과 쓰는 것이 달라진다.
         if (plan && !entryName.startsWith(plan.strip)) continue;
         const name = plan ? entryName.slice(plan.strip.length) : entryName;
-        if (plan && (name === "" || (!name.endsWith("/") && !allowed?.has(name)))) continue;
+        if (plan && (name === "" || !allowed?.has(name))) continue;
 
         if (name.endsWith("/")) {
             const dirSegments = safeSegments(root, name);

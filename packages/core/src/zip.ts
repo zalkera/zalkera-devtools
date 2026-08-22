@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import {MAX_ZIP_ENTRIES} from "./limits.ts";
 import { readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join, relative, sep } from "node:path";
 import { DevtoolsError } from "./errors.ts";
@@ -25,10 +26,10 @@ export interface ZipEntry {
 export async function createZip(entries: ZipEntry[]): Promise<Buffer> {
     // ZIP64 를 안 다루므로 항목 수 상한이 실재한다. 초판 주석은 "100MB 상한이라 닿을 수 없다"고 적었지만
     // **거짓이었다** — 작은 파일 65,536개는 수 MB 다(심의 실측: raw RangeError). 사람 말로 끊는다.
-    if (entries.length > MAX_ENTRIES) {
+    if (entries.length > MAX_ZIP_ENTRIES) {
         throw new DevtoolsError(
             "PACK_FAILED",
-            `파일이 너무 많습니다(${entries.length.toLocaleString()}개 · 상한 ${MAX_ENTRIES.toLocaleString()}개).`,
+            `파일이 너무 많습니다(${entries.length.toLocaleString()}개 · 상한 ${MAX_ZIP_ENTRIES.toLocaleString()}개).`,
             "빌드 산출물·캐시 폴더가 섞여 있지 않은지 확인해 주세요.",
         );
     }
@@ -356,7 +357,6 @@ const MAX_FILE_BYTES = 100 * 1024 * 1024;
  * (150MB → VmHWM 445MB), 확장 호스트를 1GB 아래로 두려면 원본 300MB 언저리가 선이다.
  */
 const MAX_RAW_BYTES = 300 * 1024 * 1024;
-const MAX_ENTRIES = 65_535;
 
 let crcTable: Uint32Array | null = null;
 
