@@ -142,3 +142,12 @@ test("해제가 도중에 멈추면 **아무것도 남기지 않는다** — 문
     assert.deepEqual(readdirSync(dir), [], `반쪽 해제가 남았다: ${readdirSync(dir).join(",")}`);
   }
 });
+
+test("목록이 디렉터리 항목도 돌려준다 — 계획이 그것까지 판정해야 규칙이 한 곳에 있다", async () => {
+  // ⚠ 목록이 파일만 주면 계획은 디렉터리를 못 보고, `node_modules/` 항목이 해제기 안쪽
+  //   가드까지 가서 **정상 zip 이 통째로 거절된다.** 그 사고를 이 한 줄이 막는다.
+  const zip = await zipWithDirs({ "package.json": "{}" }, ["src/", "node_modules/"]);
+  const names = listZipEntries(zip);
+  assert.ok(names.includes("src/"), `디렉터리 항목이 목록에 없다: ${names.join(",")}`);
+  assert.ok(names.includes("node_modules/"), `제외 대상 디렉터리가 목록에 없다: ${names.join(",")}`);
+});

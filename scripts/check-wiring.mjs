@@ -84,6 +84,11 @@ const WIRES = [
     ],
     [
         "packages/vscode/src/extension.ts",
+        "if (session === null) showIdleStatus();",
+        "사이드바만 새로 그려 상태바가 낡은 사이트를 말한다 — 어긋남 경고를 눌러 되돌려도 경고가 그대로 남는다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
         "const plan = idleStatusPlan({",
         "상태바가 core 판정을 안 지나 어긋남 술어가 세 벌이 된다",
     ],

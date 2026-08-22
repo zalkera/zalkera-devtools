@@ -88,3 +88,28 @@ test("접두 밖 항목은 계획에서 버린다 — 잘라서 쓰레기 이름
     `접두 밖 항목이 버려졌다고 보고되지 않는다: ${plan.dropped.join(",")}`,
   );
 });
+
+test("두 겹으로 감싼 **실물** zip 도 벗긴다 — 디렉터리 항목이 접두를 끊지 않는다", () => {
+  // ⚠ 이 시험이 없으면 「파일만 담은 zip」으로만 확인하게 되고, 실물(탐색기·Finder·`zip -r`)은
+  //   전부 디렉터리 항목을 담으므로 **시험은 초록인데 실물이 통째로 거절된다.**
+  //   디렉터리 항목 `wrapper/` 는 자기 자신이 접두라, 최장공통접두를 재는 데 끼우면 거기서 끊긴다.
+  const plan = decideImportPlan([
+    "wrapper/",
+    "wrapper/site/",
+    "wrapper/site/package.json",
+    "wrapper/site/src/",
+    "wrapper/site/src/a.ts",
+  ]);
+  assert.equal(plan.strip, "wrapper/site/");
+  assert.ok(plan.keep.includes("package.json"), `표식이 뿌리에 안 올라왔다: ${plan.keep.join(",")}`);
+});
+
+test("경로가 지나치게 깊으면 **재기 전에** 거절한다", () => {
+  // ⚠ 항목마다 세그먼트를 훑어 제외를 판정하므로 깊이가 곧 항목당 비용이다. 형식이 허용하는
+  //   최악(이름 65,534B = 32,767단)을 그대로 받으면 그 곱이 확장 호스트를 멈춘다.
+  const deep = `${"a/".repeat(200)}package.json`;
+  assert.throws(() => decideImportPlan([deep]), /깊은/);
+  // 정상 소스는 막지 않는다 — 실제 트리는 10단 안쪽이다.
+  const normal = "src/app/api/orders/[orderNo]/cancel/route.ts";
+  assert.doesNotThrow(() => decideImportPlan(["package.json", normal]));
+});

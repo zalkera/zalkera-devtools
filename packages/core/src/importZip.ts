@@ -96,7 +96,11 @@ export function decideImportPlan(names: readonly string[]): ImportPlan {
  *   중첩이 안 벗겨진다 — macOS 에서 압축한 zip 이 정확히 그 모양이다.
  */
 function commonRoot(names: readonly string[]): string {
-    const rest = names.filter((n) => !n.toLowerCase().startsWith("__macosx/"));
+    // ⚠ **접두는 파일로만 정한다.** 디렉터리 항목(`wrapper/`)은 자기 자신이 접두라, 최장공통
+    //    접두를 재는 데 끼우면 **거기서 끊긴다** — 두 겹으로 감싼 실물 zip 이 한 겹만 벗겨지고
+    //    표식(`package.json`)이 뿌리에 안 올라와 「사이트가 아니다」로 통째 거절된다(심의 실증).
+    //    빈 디렉터리는 뿌리를 정하는 근거가 될 수도 없다.
+    const rest = names.filter((n) => !n.endsWith("/") && !n.toLowerCase().startsWith("__macosx/"));
     const first = rest[0];
     if (first === undefined) return "";
 
