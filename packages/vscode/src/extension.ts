@@ -54,8 +54,12 @@ import {
   extractZip,
   listZipEntries,
   meaningfulEntries,
+  PROVENANCE_PATH,
+  judgeUpdate,
   keepNames,
+  parseProvenance,
   replaceContents,
+  type UpdateVerdict,
   removeAdded,
   snapshotEntries,
   readZipFile,
@@ -84,7 +88,8 @@ import {
   type SourceMark,
 } from "@zalkera/devtools-core";
 import { lstatSync, readFileSync } from "node:fs";
-import { mkdir, readFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { existsSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { SecretTokenStore } from "./secretStore.ts";
@@ -1008,9 +1013,12 @@ async function exportZipCommand(): Promise<void> {
   });
   if (!saveAt) return;
 
+  // ⚠ **출처 표시는 «지금 소속»으로 찍는다.** 연결 안 된 폴더면 안 찍는다 — 없는 정체성을
+  //   지어내면 받는 쪽이 틀린 확신을 얻는다.
+  const provenanceTenant = currentFolderBinding() ?? undefined;
   const result = await vscode.window.withProgress(
     {location: vscode.ProgressLocation.Notification, title: "사이트 소스를 포장하는 중"},
-    () => packProject({projectDir: dir, onProgress: log}),
+    () => packProject({projectDir: dir, provenanceTenant, onProgress: log}),
   );
   await writeOwnFile(saveAt.fsPath, result.buffer);
 
@@ -1135,6 +1143,51 @@ async function importZipInto(
  * 보존한다** — 포장기가 `.zalkera/source.json` 을 빼고 압축하므로 zip 에 그 파일이 없다. 그냥 풀면
  * 이 폴더가 어느 사이트 것인지 잃는다.
  */
+/**
+ * zip 안의 **출처 표시**를 읽는다. 없거나 못 읽으면 `null`(= 모른다).
+ *
+ * ⚠ **저수준 판독기를 새로 쓰지 않는다.** `extractZip` 은 읽기 «전에» 범위·이름 바이트·항목 수
+ *   상한을 건다. 같은 일을 하는 문이 둘이 되면 한쪽만 고쳐진다 — 이 레포가 반복해 밟은 형태다.
+ *   그래서 **이미 만든 계획을 그대로 태우고** 허락 목록만 그 한 항목으로 좁혀 임시 자리에 푼다.
+ */
+async function readProvenance(zip: Buffer, plan: ImportPlan): Promise<ReturnType<typeof parseProvenance>> {
+  const box = await mkdtemp(join(tmpdir(), "zalkera-prov-"));
+  try {
+    await extractZip(zip, box, {...plan, keep: [PROVENANCE_PATH], dropped: []});
+    return parseProvenance(readSmallOwnFile(join(box, PROVENANCE_PATH)));
+  } catch {
+    // 못 읽은 것은 «모른다»다 — 여기서 갱신을 막지 않는다(경고만 하는 게이트다).
+    return null;
+  } finally {
+    await rm(box, {recursive: true, force: true});
+  }
+}
+
+/** 판정별로 사람이 읽는 줄과 버튼 문구. **match 와 unknown 이 서로 부분문자열이면 안 된다.** */
+function provenanceNotice(verdict: UpdateVerdict, zipTenant: string | null, binding: string | null) {
+  switch (verdict) {
+    case "match":
+      // ⚠ 「검증됨」이라 쓰지 않는다 — 표시는 서명 없는 **선언**이지 증명이 아니다.
+      return {line: `출처 표시: 이 사이트(${plainNotice(binding ?? "", 64)})에서 내보낸 소스로 표시되어 있습니다.`, action: "갈아 끼우기"};
+    case "mismatch":
+      // 버튼 문구를 바꿔 **클릭 자체가 고지된 진술**이 되게 한다. 막지는 않는다.
+      return {
+        line: `⚠ 이 zip 은 다른 사이트(${plainNotice(zipTenant ?? "", 64)})에서 내보낸 것으로 표시되어 있습니다. 이 폴더의 사이트: ${plainNotice(binding ?? "", 64)}.`,
+        action: "다른 사이트 표시를 알고 갈아 끼우기",
+      };
+    case "unbound":
+      return {
+        line: zipTenant === null ? "이 폴더는 아직 사이트에 연결되어 있지 않습니다." : `이 zip 은 ${plainNotice(zipTenant, 64)} 사이트에서 내보낸 것으로 표시되어 있습니다. 이 폴더는 아직 어느 사이트에도 연결되어 있지 않습니다.`,
+        action: "갈아 끼우기",
+      };
+    default:
+      return {
+        line: `출처 표시 없거나 읽을 수 없음 — 이 zip 이 어느 사이트의 것인지 도구는 알 수 없습니다. 이 폴더의 사이트: ${plainNotice(binding ?? "", 64)}. 파일 이름과 보낸 곳으로 확인해 주세요.`,
+        action: "갈아 끼우기",
+      };
+  }
+}
+
 async function updateZipCommand(): Promise<void> {
   const dir = siteDir();
   if (dir === null) {
@@ -1157,6 +1210,17 @@ async function updateZipCommand(): Promise<void> {
   if (!zipPath) return;
 
   // ⚠ **되돌릴 수 없는 조작이라 한 번 묻는다.** 실패하면 되돌리지만, 성공하면 옛 소스는 없다.
+  // ⚠ **읽기·판정을 확인 «앞»에 둔다.** 사람이 동의할 때 이미 「이 zip 이 어느 사이트 것으로
+  //    표시돼 있는가」를 알고 있어야 한다 — 되돌릴 수 없는 조작의 동의는 그 재료 위에서 받는다.
+  const {zip, plan} = await readZipWithPlan(zipPath);
+  const prov = await readProvenance(zip, plan);
+  // ⚠ **소속이 없으면 «고른 사이트»와 견준다.** 소속 없는 폴더에서 올리면 그 사이트가 소속이
+  //    되므로(발행이 표식을 만든다), 비교를 건너뛰면 「D 를 골라 두고 C 의 zip 을 넣는」 경로가
+  //    무경고로 통과한다 — 이 게이트가 막으려는 그 사고다(심의 실측).
+  const binding = currentFolderBinding() ?? tenantCode() ?? null;
+  const verdict = judgeUpdate(prov, binding);
+  const provNotice = provenanceNotice(verdict, prov?.tenant ?? null, binding);
+
   // ⚠ **무엇을 남기는지 계산해서 보여 준다.** 목록은 포장기가 zip 에서 빼는 것과 같은 술어로
   //    고른다(`keepNames`) — 손으로 열거하면 두 목록이 갈리고, 갈린 쪽이 영구 삭제된다.
   const keep = await keepNames(dir);
@@ -1164,19 +1228,15 @@ async function updateZipCommand(): Promise<void> {
     ours("이 폴더의 소스를 고르신 zip 으로 갈아 끼웁니다. 지금 내용은 사라집니다."),
     {
       modal: true,
-      detail: `${dir}\n\n그대로 두는 것: ${keep.length > 0 ? keep.join(" · ") : "없습니다"}`,
+      detail: `${provNotice.line}\n\n${dir}\n\n그대로 두는 것: ${keep.length > 0 ? keep.join(" · ") : "없습니다"}`,
     },
-    "갈아 끼우기",
+    provNotice.action,
   );
-  if (ok !== "갈아 끼우기") return;
+  if (ok !== provNotice.action) return;
 
   // ⚠ **먼저 멈춘다.** 미리보기가 파일을 물고 있으면 지우기가 실패하고, 그 실패는 갈아 끼우기
   //    한복판에서 난다 — 되돌리기가 도는 자리지만 애초에 거기까지 안 가는 편이 낫다.
   await stopPreview();
-
-  // ⚠ **읽기·판정을 먼저 끝낸다.** 폴더를 비운 뒤에 zip 이 상했다는 걸 알면 되돌리기에 기대게
-  //    된다 — 기댈 필요가 없게 순서를 잡는다.
-  const {zip, plan} = await readZipWithPlan(zipPath);
 
   const result = await vscode.window.withProgress(
     {location: vscode.ProgressLocation.Notification, title: "사이트 소스를 갈아 끼우는 중"},
@@ -1840,6 +1900,7 @@ async function publishCommand(): Promise<void> {
       publish({
         projectDir: dir,
         api,
+        tenant,
         onProgress: log,
         // 서버가 「계속하려면 확인해 주세요」라고 말한 자리 — 확인할 곳을 준다. 전환 쪽과
         // **같은 문면**을 쓴다: 두 문이 같은 가드를 지나므로 사람이 보는 말도 같아야 한다.

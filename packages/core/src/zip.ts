@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { PROVENANCE_PATH, buildProvenance } from "./provenance.ts";
 import {MAX_ZIP_ENTRIES} from "./limits.ts";
 import { readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join, relative, sep } from "node:path";
@@ -199,6 +200,13 @@ const SECRET_SUFFIXES = [".pem", ".key", ".p12", ".pfx", ".p8"];
 
 export interface PackOptions {
     projectDir: string;
+    /**
+     * 출처 표시를 찍을 사이트. 없으면 **안 찍는다**(연결 안 된 폴더).
+     *
+     * ⚠ **디스크의 표시를 그대로 싣지 않는다** — 위 [EXCLUDED_PATHS] 가 걷기에서 빼고, 여기서
+     *   **지금 소속으로 새로** 만들어 넣는다. 그래서 낡은 표시가 따라다닐 몸통이 없다.
+     */
+    provenanceTenant?: string;
     /** 추가 제외(프로젝트 사정). 이름 단위 비교라 경로가 아니라 파일·폴더 이름을 넣는다. */
     exclude?: string[];
     onProgress?: (message: string) => void;
@@ -221,7 +229,7 @@ export interface PackResult {
  *   남기고(고객 소스와 동행), 같은 폴더의 `ASSETS-LICENSE.md`(라이선스 대장)·`pack.json`(판 출처)이
  *   배송 문서가 가리키는 실물이다 — 폴더째 빼면 그 참조가 매달린다.
  */
-const EXCLUDED_PATHS = new Set([".zalkera/source.json"]);
+const EXCLUDED_PATHS = new Set([".zalkera/source.json", PROVENANCE_PATH]);
 
 /**
  * zip 항목 하나(`a/b/c.ts` 꼴 상대 경로)가 **정본에 실리지 않는 것**인가.
@@ -327,6 +335,10 @@ export async function packProject(options: PackOptions): Promise<PackResult> {
             `비밀로 판단해 뺀 파일 ${dropped.length}개: ${shown.join(", ")}` +
                 (dropped.length > shown.length ? ` 외 ${dropped.length - shown.length}개` : ""),
         );
+    }
+
+    if (options.provenanceTenant !== undefined) {
+        entries.push({ path: PROVENANCE_PATH, data: Buffer.from(buildProvenance(options.provenanceTenant), "utf8") });
     }
 
     entries.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0)); // 재현 가능한 순서
