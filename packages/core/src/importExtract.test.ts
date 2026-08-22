@@ -163,11 +163,19 @@ test("목록이 디렉터리 항목도 돌려준다 — 계획이 그것까지 �
 const WRAPS = [[], ["site"], ["outer", "site"]];
 const WITH_DIRS = [false, true];
 const WITH_MACOSX = [false, true];
+/**
+ * 겹 자리의 부스러기. **독립 축이라 표에 있어야 한다** — 이 축이 표 밖에 있을 때 겹의
+ * `.DS_Store` 하나가 접두를 끊는 결함이 났고, 표는 초록이었다.
+ */
+const WITH_JUNK = [false, true];
 
 for (const wrap of WRAPS) {
   for (const dirs of WITH_DIRS) {
     for (const macosx of WITH_MACOSX) {
-      const label = `감싸기 ${wrap.length}겹 · 디렉터리항목 ${dirs ? "있음" : "없음"} · __MACOSX ${macosx ? "있음" : "없음"}`;
+     for (const junk of WITH_JUNK) {
+      const label =
+        `감싸기 ${wrap.length}겹 · 디렉터리항목 ${dirs ? "있음" : "없음"} · ` +
+        `__MACOSX ${macosx ? "있음" : "없음"} · 겹 부스러기 ${junk ? "있음" : "없음"}`;
       test(`실물 형상 — ${label}`, async () => {
         const under = wrap.length === 0 ? "" : `${wrap.join("/")}/`;
         const files: Record<string, string> = {
@@ -177,6 +185,9 @@ for (const wrap of WRAPS) {
           [`${under}.env.local`]: "ZALKERA_STOREFRONT_KEY=oqsk_live_LEAK",
         };
         if (macosx) files["__MACOSX/._x"] = "junk";
+        // 겹 **바깥** 자리의 부스러기 — 맥에서 폴더를 한 번 열면 생기고, 받은 zip 을 풀어
+        // 상위 폴더를 다시 압축하는 두 겹 생성 경로에서 정확히 이 자리에 놓인다.
+        if (junk && wrap.length > 0) files[`${wrap[0]}/.DS_Store`] = "junk";
         const dirEntries: string[] = [];
         if (dirs) {
           for (let i = 1; i <= wrap.length; i += 1) dirEntries.push(`${wrap.slice(0, i).join("/")}/`);
@@ -192,7 +203,9 @@ for (const wrap of WRAPS) {
         assert.ok(!existsSync(join(dir, "node_modules")), `제외 폴더가 생겼다 — ${label}`);
         assert.ok(!existsSync(join(dir, ".env.local")), `자격증명이 들어왔다 — ${label}`);
         assert.ok(!existsSync(join(dir, "__MACOSX")), `OS 부스러기가 들어왔다 — ${label}`);
+        assert.ok(!existsSync(join(dir, ".DS_Store")), `겹 부스러기가 들어왔다 — ${label}`);
       });
+     }
     }
   }
 }
@@ -201,7 +214,7 @@ for (const wrap of WRAPS) {
  * **이름을 바이트 그대로 넣고 EFS 플래그를 세우지 않는 zip.** 알집·구형 윈도 탐색기 형상이다.
  * `createZip` 은 늘 UTF-8 플래그를 세우므로 이 형상을 못 만든다 — 그래서 손으로 조립한다.
  */
-function storedZipRaw(entries: [Buffer, Buffer][]): Buffer {
+function storedZipRaw(entries: [Buffer, Buffer][], flags = 0): Buffer {
   const locals: Buffer[] = [];
   const centrals: Buffer[] = [];
   let offset = 0;
@@ -210,6 +223,7 @@ function storedZipRaw(entries: [Buffer, Buffer][]): Buffer {
     const lh = Buffer.alloc(30);
     lh.writeUInt32LE(0x04034b50, 0);
     lh.writeUInt16LE(20, 4);
+    lh.writeUInt16LE(flags, 6);
     lh.writeUInt32LE(crc, 14);
     lh.writeUInt32LE(data.length, 18);
     lh.writeUInt32LE(data.length, 22);
@@ -219,6 +233,7 @@ function storedZipRaw(entries: [Buffer, Buffer][]): Buffer {
     ch.writeUInt32LE(0x02014b50, 0);
     ch.writeUInt16LE(20, 4);
     ch.writeUInt16LE(20, 6);
+    ch.writeUInt16LE(flags, 8);
     ch.writeUInt32LE(crc, 16);
     ch.writeUInt32LE(data.length, 20);
     ch.writeUInt32LE(data.length, 24);
@@ -267,11 +282,23 @@ test("UTF-8 이 아닌 파일 이름은 **읽지 않고 멈춘다** — 조용�
     assert.throws(() => listZipEntries(zip), /이름을 읽지 못했습니다/, `${label}: 조용히 통과했다`);
   }
 
-  // UTF-8 한글은 플래그가 없어도 그대로 읽힌다 — 유효한 UTF-8 이면 받는다.
-  const utf8Zip = storedZipRaw([
+  // ⚠ **플래그 없는 비-ASCII 이름은 유효한 UTF-8 이어도 거절한다.** 유효성만 보면 창이 남는다 —
+  //   CP949 두 바이트열 중 상당수가 UTF-8 로도 유효하고 실제 한글 음절이 되는 것이 많다
+  //   (심의 실측: 「체크.png」→ `üũ.png`). 형식이 정한 표시(EFS)를 요구해야 그 창이 닫힌다.
+  const flagless = storedZipRaw([
     [ascii("site/package.json"), Buffer.from('{"name":"x"}')],
     [Buffer.from("site/public/가.jpg", "utf8"), Buffer.from("A")],
   ]);
+  assert.throws(() => listZipEntries(flagless), /이름을 읽지 못했습니다/, "플래그 없는 이름이 통과했다");
+
+  // 표시를 세운 UTF-8 한글은 그대로 읽힌다 — 우리가 만드는 zip 이 이 형상이다.
+  const utf8Zip = storedZipRaw(
+    [
+      [ascii("site/package.json"), Buffer.from('{"name":"x"}')],
+      [Buffer.from("site/public/가.jpg", "utf8"), Buffer.from("A")],
+    ],
+    0x800,
+  );
   const names = listZipEntries(utf8Zip);
   assert.ok(names.includes("site/public/가.jpg"), `UTF-8 한글이 막혔다: ${names.join(",")}`);
 

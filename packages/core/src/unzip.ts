@@ -56,15 +56,39 @@ export interface UnzipResult {
  *   남는다. 그래서 못 읽으면 멈추고, **다음에 할 일을 이름 대고 말한다** — 「최신 도구로」라고만
  *   하면 같은 도구로 다시 해서 또 막힌다.
  */
-function decodeEntryName(raw: Buffer): string {
+function decodeEntryName(raw: Buffer, flags: number): string {
+    // ASCII 뿐이면 어느 인코딩이든 같다 — 가장 흔한 경우를 먼저 끝낸다.
+    let ascii = true;
+    for (const byte of raw) {
+        if (byte >= 0x80) {
+            ascii = false;
+            break;
+        }
+    }
+    if (ascii) return raw.toString("latin1");
+
+    // ⚠ **비-ASCII 이름은 「UTF-8 이라고 표시된 것」만 받는다**(범용 플래그 11번 = EFS).
+    //    형식이 정한 것이 그것이다 — 플래그가 없으면 이름은 UTF-8 이 **아니라고** 봐야 한다.
+    //
+    //    유효한 UTF-8 로 읽히는지만 보면 창이 남는다: CP949 두 바이트열 중 상당수가 UTF-8 로도
+    //    유효하고, 그중에는 실제 한글 음절이 되는 것이 많다 — 「체크.png」가 `üũ.png` 로 조용히
+    //    풀린다(심의 실측). 플래그를 요구하면 그 창이 닫힌다.
+    if ((flags & 0x800) === 0) {
+        throw new DevtoolsError(
+            "SERVER_REJECTED",
+            "압축 파일 안의 파일 이름을 읽지 못했습니다.",
+            "이름이 UTF-8 로 저장돼 있지 않습니다. 파일 이름을 영문으로 바꾸시거나, " +
+                "이름을 UTF-8 로 저장하는 압축 도구로 다시 압축해 주세요.",
+        );
+    }
     try {
         return new TextDecoder("utf-8", {fatal: true}).decode(raw);
     } catch {
         throw new DevtoolsError(
             "SERVER_REJECTED",
             "압축 파일 안의 파일 이름을 읽지 못했습니다.",
-            "7-Zip 이나 반디집으로 다시 압축하시거나, 파일 이름을 영문으로 바꿔 주세요 — " +
-                "윈도 기본 「압축」은 한글 이름을 옛 방식으로 저장합니다.",
+            "이름이 UTF-8 로 저장돼 있지 않습니다. 파일 이름을 영문으로 바꾸시거나, " +
+                "이름을 UTF-8 로 저장하는 압축 도구로 다시 압축해 주세요.",
         );
     }
 }
@@ -88,7 +112,8 @@ export function listZipEntries(zip: Buffer): string[] {
         const nameLength = zip.readUInt16LE(offset + 28);
         const extraLength = zip.readUInt16LE(offset + 30);
         const commentLength = zip.readUInt16LE(offset + 32);
-        const name = decodeEntryName(zip.subarray(offset + 46, offset + 46 + nameLength));
+        const flags = zip.readUInt16LE(offset + 8);
+        const name = decodeEntryName(zip.subarray(offset + 46, offset + 46 + nameLength), flags);
         offset += 46 + nameLength + extraLength + commentLength;
         // ⚠ **디렉터리 항목도 돌려준다.** 실물 zip(탐색기·Finder·`zip -r`)은 디렉터리 항목을
         //    담는데, 계획이 파일만 판정하면 `node_modules/` 같은 항목이 걸러지지 않고 해제기
@@ -145,7 +170,8 @@ export async function extractZip(zip: Buffer, targetDir: string, plan?: ImportPl
         const extraLength = zip.readUInt16LE(offset + 30);
         const commentLength = zip.readUInt16LE(offset + 32);
         const localOffset = zip.readUInt32LE(offset + 42);
-        const entryName = decodeEntryName(zip.subarray(offset + 46, offset + 46 + nameLength));
+        const flags = zip.readUInt16LE(offset + 8);
+        const entryName = decodeEntryName(zip.subarray(offset + 46, offset + 46 + nameLength), flags);
         offset += 46 + nameLength + extraLength + commentLength;
 
         // ⚠ **여기서 벗긴다 — 안전 검사보다 앞이다.** 아래 `safeSegments`·`descend` 는 실제로 쓸
