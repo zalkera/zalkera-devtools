@@ -198,7 +198,16 @@ test("요건 목록에 사이드바 밖 명령이 섞이지 않았다", () => {
       .flatMap((i) => (i.kind === "action" ? [i.command] : [])),
   );
   // 팔레트에만 있는 것도 정당하다(예제로 시작·폴더 연결은 소스가 있으면 사이드바에서 빠진다).
-  const PALETTE_ONLY = new Set(["zalkera.site.create", "zalkera.site.link", "zalkera.preview.restart"]);
+  // ⚠ **갱신은 사이드바에 두지 않는다.** 「불러오기」는 «새 빈 폴더로만» 이라는 약속이고
+  //    (아래 시험이 그것을 문다), 지금 폴더를 갈아 끼우는 명령을 그 옆에 두면 그 약속이 거짓이
+  //    된다. 형제 `site.link`·`site.create` 를 팔레트에 둔 이유와 같다 — 있는 소스를 위험하게
+  //    하는 명령이 사이드바에 있으면 「누르면 내 것이 날아가나」를 매번 계산하게 된다.
+  const PALETTE_ONLY = new Set([
+    "zalkera.site.create",
+    "zalkera.site.link",
+    "zalkera.site.updateZip",
+    "zalkera.preview.restart",
+  ]);
   // 차단 알림의 버튼으로만 닿는 명령도 정당하다 — 그 자리가 곧 탈출구다.
   //
   // ⚠ **손으로 열거하지 않는다.** 예외를 손에 들면 이름이 바뀐 진짜 흔적도 같이 덮인다.

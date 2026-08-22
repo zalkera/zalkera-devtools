@@ -94,12 +94,7 @@ export {
 export { extractZip, listZipEntries, type UnzipResult } from "./unzip.ts";
 export { decideImportPlan, readZipFile, type ImportPlan } from "./importZip.ts";
 export { replaceContents, type ReplaceResult } from "./replaceDir.ts";
-export {
-  isReceivable,
-  meaningfulEntries,
-  removeAdded,
-  snapshotEntries,
-} from "./emptyDir.ts";
+export { isReceivable, meaningfulEntries, removeAdded, snapshotEntries } from "./emptyDir.ts";
 
 export { waitForBuild, type BuildOutcome, type WaitOptions } from "./build.ts";
 
@@ -167,23 +162,9 @@ export {
   type Diagnostic,
 } from "./diagnostics.ts";
 export { BUSY, createReentrancyGuard } from "./reentrancy.ts";
-export {
-  pickRevision,
-  noRevisionError,
-  suggestFolderName,
-  nextAvailableName,
-} from "./fetchTarget.ts";
-export {
-  decideErrorNotice,
-  isCancelled,
-  type ErrorNotice,
-} from "./errorNotice.ts";
-export {
-  decideBlocked,
-  commandsWithNeeds,
-  type Blocked,
-  type Readiness,
-} from "./whyBlocked.ts";
+export { pickRevision, noRevisionError, suggestFolderName, nextAvailableName } from "./fetchTarget.ts";
+export { decideErrorNotice, isCancelled, type ErrorNotice } from "./errorNotice.ts";
+export { decideBlocked, commandsWithNeeds, type Blocked, type Readiness } from "./whyBlocked.ts";
 export { ACCOUNT_SCOPED, type AccountScoped } from "./accountState.ts";
 export {
   MAX_ISSUED_KEYS,
@@ -196,23 +177,23 @@ export {
 } from "./issuedKeys.ts";
 export type { RevisionChoice, RevisionLike } from "./fetchTarget.ts";
 export {
-  buildSourceMark,
-  parseSourceMark,
-  holdsSameRevision,
-  mergeTenantSetting,
-  SOURCE_MARK_PATH,
-  writeSourceMarkTo,
-  writeBindingMarkTo,
-  linkFolderToTenant,
+    buildSourceMark,
+    parseSourceMark,
+    holdsSameRevision,
+    mergeTenantSetting,
+    SOURCE_MARK_PATH,
+    writeSourceMarkTo,
+    writeBindingMarkTo,
+    linkFolderToTenant,
 } from "./localMark.ts";
 export type { SourceMark } from "./localMark.ts";
 export {
-  folderBinding,
-  decideTenantScope,
-  decideSiteChoice,
-  needsRelinkConsent,
-  type TenantScope,
-  type SiteChoice,
+    folderBinding,
+    decideTenantScope,
+    decideSiteChoice,
+    needsRelinkConsent,
+    type TenantScope,
+    type SiteChoice,
 } from "./siteBinding.ts";
 export { sidebarPlan } from "./sidebarPlan.ts";
 export { idleStatusPlan, type StatusPlan } from "./statusPlan.ts";

@@ -74,7 +74,7 @@ const WIRES = [
     ],
     [
         "packages/vscode/src/extension.ts",
-        "const plan = decideImportPlan(listZipEntries(zip));",
+        "return {zip, plan: decideImportPlan(listZipEntries(zip))};",
         "들여오기가 판정을 안 지나 아무 zip 이나 풀리고, 보낸 쪽 .vscode 가 들어와 그 폴더가 남의 사이트라고 주장한다",
     ],
     [
