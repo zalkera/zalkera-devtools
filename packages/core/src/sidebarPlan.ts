@@ -163,6 +163,8 @@ export function sidebarPlan(state: SidebarState): PlanGroup[] {
                     act("배포 전 검사", "zalkera.precheck", "checklist", "조언입니다 — 발행을 막지 않습니다"),
                     // 이름이 하는 일과 같아야 한다 — 이 명령은 **올리기까지**다(전환은 따로).
                     act("새 버전 올리기", "zalkera.publish", "cloud-upload", "올리기만 합니다 — 사이트는 아직 안 바뀝니다"),
+                    // 넘기는 길. 손으로 압축하면 자격증명이 딸려 가므로 이 자리가 필요하다.
+                    act("zip 으로 내보내기", "zalkera.export", "package", "미리보기 열쇠와 널리 쓰이는 자격증명 파일, 빌드 산출물을 빼고 담습니다"),
                 ],
             },
         );
@@ -179,9 +181,10 @@ export function sidebarPlan(state: SidebarState): PlanGroup[] {
                   id: "source",
                   label: "불러오기",
                   icon: "cloud-download",
-                  tooltip: "받기는 새 빈 폴더로만 갑니다 — 지금 폴더는 바뀌지 않습니다",
+                  tooltip: "둘 다 새 빈 폴더로만 갑니다 — 지금 폴더는 바뀌지 않습니다",
                   items: [
                       act("사이트 소스 받기", "zalkera.site.open", "cloud-download", "지금 방문자가 보는 판을 새 빈 폴더로 받습니다"),
+                        act("zip 으로 시작", "zalkera.site.importZip", "file-zip", "받으신 소스 zip 을 새 빈 폴더에 풉니다"),
                   ],
               }
             : {
@@ -190,10 +193,11 @@ export function sidebarPlan(state: SidebarState): PlanGroup[] {
                   icon: "cloud-download",
                   // 셋은 **택일**이다. 번호(①②③)를 붙이지 않는 이유가 그것이다 — 번호는 "1번 하고
                   // 2번 하라"로 읽혀 정반대 뜻이 된다.
-                  tooltip: "셋 중 하나로 시작합니다",
+                  tooltip: "넷 중 하나로 시작합니다",
                   items: [
                       act("예제로 시작", "zalkera.site.create", "add", "시작 소스를 받아 새로 시작합니다"),
                       act("사이트 소스 받기", "zalkera.site.open", "cloud-download", "지금 배포 중인 소스를 로컬로"),
+                        act("zip 으로 시작", "zalkera.site.importZip", "file-zip", "받으신 소스 zip 을 새 빈 폴더에 풉니다"),
                       act("폴더 연결", "zalkera.site.link", "link", "이미 가진 소스를 이 사이트에 붙입니다"),
                   ],
               },

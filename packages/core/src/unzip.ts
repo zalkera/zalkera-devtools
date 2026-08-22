@@ -1,10 +1,11 @@
 import { writeExclusive } from "./safeWrite.ts";
+import type { ImportPlan } from "./importZip.ts";
 import { join, resolve } from "node:path";
 import { inflateRaw } from "node:zlib";
 import { promisify } from "node:util";
 import { DevtoolsError } from "./errors.ts";
 import { assertNotSymlink, assertNotVendored, descend, safeSegments } from "./safeWrite.ts";
-import { MAX_ENTRIES, MAX_ENTRY_BYTES, MAX_EXTRACT_BYTES } from "./limits.ts";
+import { MAX_ZIP_ENTRIES, MAX_ENTRY_BYTES, MAX_EXTRACT_BYTES } from "./limits.ts";
 
 const inflate = promisify(inflateRaw);
 
@@ -36,7 +37,47 @@ export interface UnzipResult {
     fileCount: number;
 }
 
-export async function extractZip(zip: Buffer, targetDir: string): Promise<UnzipResult> {
+/**
+ * 아카이브의 **항목 이름만** 읽는다. 파일을 하나도 만들지 않는다.
+ *
+ * 들여오기가 쓴다 — 무엇을 풀지(`decideImportPlan`)는 **쓰기 전에** 정해져야 한다.
+ */
+export function listZipEntries(zip: Buffer): string[] {
+    const eocd = findEocd(zip);
+    const entryCount = zip.readUInt16LE(eocd + 10);
+    let offset = zip.readUInt32LE(eocd + 16);
+    if (entryCount > MAX_ZIP_ENTRIES) {
+        throw new DevtoolsError(
+            "SERVER_REJECTED",
+            `받은 파일에 항목이 너무 많습니다(${entryCount.toLocaleString()}개 · 상한 ${MAX_ZIP_ENTRIES.toLocaleString()}개).`,
+            "받은 꾸러미가 정상이 아닙니다.",
+        );
+    }
+    const names: string[] = [];
+    for (let i = 0; i < entryCount; i += 1) {
+        if (offset < 0 || offset + 46 > zip.length || zip.readUInt32LE(offset) !== 0x02014b50) {
+            throw new DevtoolsError("SERVER_REJECTED", "받은 압축 파일이 손상되었습니다(목록 오류).");
+        }
+        const nameLength = zip.readUInt16LE(offset + 28);
+        const extraLength = zip.readUInt16LE(offset + 30);
+        const commentLength = zip.readUInt16LE(offset + 32);
+        const name = zip.subarray(offset + 46, offset + 46 + nameLength).toString("utf8");
+        offset += 46 + nameLength + extraLength + commentLength;
+        // ⚠ **디렉터리 항목도 돌려준다.** 실물 zip(탐색기·Finder·`zip -r`)은 디렉터리 항목을
+        //    담는데, 계획이 파일만 판정하면 `node_modules/` 같은 항목이 걸러지지 않고 해제기
+        //    안쪽 가드까지 가서 **정상 zip 이 통째로 거절된다**(심의 실증).
+        names.push(name);
+    }
+    return names;
+}
+
+/**
+ * @param plan 들여오기 계획. 주면 **접두를 벗기고 계획에 없는 항목은 건너뛴다.**
+ *
+ * ⚠ **벗긴 뒤에 안전 검사가 돈다.** 순서가 뒤집히면 `site/../../etc/x` 같은 이름이 벗겨지기 전
+ *   모양으로 검사를 통과하고, 실제로 쓰는 경로는 다른 것이 된다.
+ */
+export async function extractZip(zip: Buffer, targetDir: string, plan?: ImportPlan): Promise<UnzipResult> {
     const eocd = findEocd(zip);
     const entryCount = zip.readUInt16LE(eocd + 10);
     let offset = zip.readUInt32LE(eocd + 16);
@@ -48,11 +89,13 @@ export async function extractZip(zip: Buffer, targetDir: string): Promise<UnzipR
      */
     const written = new Set<string>();
     let totalBytes = 0;
+    /** 계획이 허락한 이름만 쓴다. 배열 조회를 반복하지 않으려고 한 번만 만든다. */
+    const allowed = plan ? new Set(plan.keep) : null;
 
-    if (entryCount > MAX_ENTRIES) {
+    if (entryCount > MAX_ZIP_ENTRIES) {
         throw new DevtoolsError(
             "SERVER_REJECTED",
-            `받은 파일에 항목이 너무 많습니다(${entryCount.toLocaleString()}개 · 상한 ${MAX_ENTRIES.toLocaleString()}개).`,
+            `받은 파일에 항목이 너무 많습니다(${entryCount.toLocaleString()}개 · 상한 ${MAX_ZIP_ENTRIES.toLocaleString()}개).`,
             "받은 꾸러미가 정상이 아닙니다. 잘커라에 문의해 주세요.",
         );
     }
@@ -75,8 +118,14 @@ export async function extractZip(zip: Buffer, targetDir: string): Promise<UnzipR
         const extraLength = zip.readUInt16LE(offset + 30);
         const commentLength = zip.readUInt16LE(offset + 32);
         const localOffset = zip.readUInt32LE(offset + 42);
-        const name = zip.subarray(offset + 46, offset + 46 + nameLength).toString("utf8");
+        const entryName = zip.subarray(offset + 46, offset + 46 + nameLength).toString("utf8");
         offset += 46 + nameLength + extraLength + commentLength;
+
+        // ⚠ **여기서 벗긴다 — 안전 검사보다 앞이다.** 아래 `safeSegments`·`descend` 는 실제로 쓸
+        //    경로를 봐야 한다. 벗기기 전 이름으로 검사하면 검사한 것과 쓰는 것이 달라진다.
+        if (plan && !entryName.startsWith(plan.strip)) continue;
+        const name = plan ? entryName.slice(plan.strip.length) : entryName;
+        if (plan && (name === "" || !allowed?.has(name))) continue;
 
         if (name.endsWith("/")) {
             const dirSegments = safeSegments(root, name);

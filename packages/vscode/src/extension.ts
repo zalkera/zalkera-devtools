@@ -47,6 +47,15 @@ import {
   pickRevision,
   decideErrorNotice,
   decideBlocked,
+  idleStatusPlan,
+  packProject,
+  decideImportPlan,
+  extractZip,
+  listZipEntries,
+  meaningfulEntries,
+  removeAdded,
+  snapshotEntries,
+  readZipFile,
   folderBinding,
   decideTenantScope,
   type TenantScope,
@@ -279,7 +288,7 @@ export function activate(context: vscode.ExtensionContext): void {
     100,
   );
   status.command = "zalkera.preview.start";
-  setStatus("$(zap) 잘커라");
+  showIdleStatus();
   status.show();
   store = new SecretTokenStore(context);
   extensionPath = context.extensionPath;
@@ -318,6 +327,8 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     register("zalkera.site.create", () => withReceiveGuard(startFromExample)),
     register("zalkera.site.open", () => withReceiveGuard(openSite)),
+    register("zalkera.site.importZip", () => withReceiveGuard(importZipCommand)),
+    register("zalkera.export", exportZipCommand),
     register("zalkera.site.link", linkFolder),
     register("zalkera.site.useFolder", useFolderSite),
     register("zalkera.preview.start", startPreviewCommand),
@@ -944,6 +955,159 @@ async function linkFolderToSite(
  *
  * 목록에 **공개된 팩만** 온다(서버 판정). 고를 수 없는 것을 보여 주지 않는 편이 정직하다.
  */
+/**
+ * 그 사이트 폴더를 연다.
+ *
+ * ⚠ **지금 창을 함부로 뺏지 않는다.** 미리보기가 돌거나 저장 안 된 편집기가 있으면 **새 창**을
+ *   기본으로 준다 — 「잠깐 다른 사이트만 볼까」가 파괴적이면 안 된다. 그 둘이 없으면 이 창에서
+ *   열어 창이 늘어나지 않게 한다.
+ *
+ * 미리보기는 창마다 따로 서고 발급된 열쇠도 창 밖 목록에 함께 적히므로(`recordedKeys`),
+ * 새 창을 여는 것 자체는 지금 미리보기를 깨지 않는다.
+ */
+async function openSiteFolder(dir: string): Promise<void> {
+  const dirty = vscode.workspace.textDocuments.some((d) => d.isDirty);
+  if (session === null && !dirty) {
+    await vscode.commands.executeCommand("vscode.openFolder", vscode.Uri.file(dir));
+    return;
+  }
+  const reason = session !== null ? "미리보기가 돌고 있습니다" : "저장하지 않은 편집기가 있습니다";
+  const picked = await vscode.window.showWarningMessage(
+    ours(`${reason} — 새 창에서 열면 지금 창은 그대로 둡니다.`),
+    { modal: true },
+    "새 창에서 열기",
+    "이 창에서 열기",
+  );
+  if (picked === undefined) return;
+  await vscode.commands.executeCommand("vscode.openFolder", vscode.Uri.file(dir), {
+    forceNewWindow: picked === "새 창에서 열기",
+  });
+}
+
+/**
+ * 「zip 으로 내보내기」 — 이 폴더를 **넘길 수 있는 zip** 으로 만든다.
+ *
+ * ⚠ **손으로 압축하면 안 되는 이유가 이 명령의 존재 이유다.** 폴더를 그냥 압축하면 `.env.local`
+ *   (우리가 발급한 미리보기 키)·`.mcp.json`·`.ssh`·`.aws` 가 딸려 가고, 그러면 **고객 자격증명이
+ *   받는 사람 손에 들어간다.** 발행이 쓰는 포장기를 그대로 쓴다 — 규칙을 두 벌로 두면 갈린다.
+ *
+ * 검사(`precheck`)를 강제하지 않는다. 이 도구는 조언하지 막지 않는다 — 넘기는 사람이 무엇을
+ * 넘기는지 알면 된다.
+ */
+async function exportZipCommand(): Promise<void> {
+  const dir = requireWorkspace();
+  const suggested = `${basename(dir)}-source.zip`;
+  const saveAt = await vscode.window.showSaveDialog({
+    title: "넘기실 zip 을 저장할 곳",
+    defaultUri: vscode.Uri.file(join(dirname(dir), suggested)),
+    filters: {"사이트 소스": ["zip"]},
+  });
+  if (!saveAt) return;
+
+  const result = await vscode.window.withProgress(
+    {location: vscode.ProgressLocation.Notification, title: "사이트 소스를 포장하는 중"},
+    () => packProject({projectDir: dir, onProgress: log}),
+  );
+  await writeOwnFile(saveAt.fsPath, result.buffer);
+
+  log(`파일 ${count(result.fileCount)}개 · ${Math.round(result.buffer.length / 1024)}KB 로 포장했습니다.`);
+  log(`sha256: ${result.sha256}`);
+  void vscode.window.showInformationMessage(
+    // ⚠ **「전부 뺐다」고 말하지 않는다.** `isSecretFile` 이 스스로 보증을 좁혀 뒀다 — 우리가
+    //    발급한 `.env*` 는 반드시, 널리 쓰이는 표준 자격증명 이름은 최선, 그 밖은 보증하지
+    //    않는다. 「전부 막는다」고 적으면 못 막은 하나가 배신이 된다.
+    ours(
+      "사이트 소스를 zip 으로 내보냈습니다. 미리보기 열쇠와 널리 쓰이는 자격증명 파일, " +
+        "빌드 산출물은 뺐습니다 — 넘기시기 전에 출력 패널에서 무엇이 빠졌는지 확인해 주세요.",
+    ),
+  );
+}
+
+/**
+ * 「zip 으로 시작」 — **남이 준 소스 zip** 을 빈 폴더에 푼다.
+ *
+ * 「예제로 시작」과 같은 문이지만 출처가 다르다: 서버 팩은 원장이 sha256 을 주장하고 우리가
+ * 대조하는데, **로컬 파일에는 주장할 원장이 없다.** 그래서 무결성 검증을 흉내 내지 않는다 —
+ * 대신 `decideImportPlan` 이 **쓰기 전에** 구조를 판정하고, 통과 못 하면 파일을 하나도 안 만든다.
+ * 완료 문면도 「검증됐다」고 말하지 않는다.
+ */
+async function importZipCommand(): Promise<void> {
+  const chosen = await vscode.window.showOpenDialog({
+    canSelectFiles: true,
+    canSelectFolders: false,
+    canSelectMany: false,
+    filters: {"사이트 소스": ["zip"]},
+    openLabel: "이 zip 으로 시작",
+    title: "받으신 사이트 소스 zip 을 고르세요",
+  });
+  const zipPath = chosen?.[0]?.fsPath;
+  if (!zipPath) return;
+
+  const picked = await vscode.window.showOpenDialog({
+    canSelectFolders: true,
+    canSelectFiles: false,
+    openLabel: "여기에 풀기",
+    title: "소스를 풀 빈 폴더를 고르세요",
+  });
+  const target = picked?.[0]?.fsPath;
+  if (!target) return;
+
+  const result = await vscode.window.withProgress(
+    {location: vscode.ProgressLocation.Notification, title: "사이트 소스를 푸는 중"},
+    () => importZipInto(zipPath, target),
+  );
+
+  log(`파일 ${count(result.fileCount)}개를 풀었습니다: ${target}`);
+  if (result.dropped.length > 0) {
+    // **무엇이 빠졌는지 말한다.** 조용히 빼면 「보낸 파일이 없다」는 문의가 우리에게 온다.
+    log(`정본에 싣지 않는 ${count(result.dropped.length)}개는 빼고 풀었습니다: ${result.dropped.join(", ")}`);
+  }
+  await refreshSidebar();
+
+  const open = await vscode.window.showInformationMessage(
+    ours("사이트 소스를 풀었습니다. 폴더를 열고 「폴더 연결」로 사이트에 붙이면 미리보기·올리기가 됩니다."),
+    "폴더 열기",
+  );
+  if (open === "폴더 열기") {
+    // ⚠ **여기도 `openSiteFolder` 를 지난다.** 직접 열면 미리보기가 돌고 있어도 무경고로
+    //    지금 창을 뺏는다 — 받기·전환 흐름이 이미 고친 그 비대칭이 여기서 되살아난다.
+    await openSiteFolder(target);
+  }
+}
+
+/** 읽기·판정·해제. **판정은 core 가 한다** — 확장 안에 두면 시험도 검사기도 못 닿는다. */
+async function importZipInto(
+  zipPath: string,
+  targetDir: string,
+): Promise<{fileCount: number; dropped: string[]}> {
+  const zip = await readZipFile(zipPath);
+  const plan = decideImportPlan(listZipEntries(zip));
+  // ⚠ **빈 폴더 강제는 해제기 밖이다**(형제 `startFromPreset` 과 같은 규율) — 있는 파일을
+  //    덮어쓰지 않는다. `meaningfulEntries` 가 편집기·OS 부스러기는 「비어 있음」으로 본다.
+  await mkdir(targetDir, {recursive: true});
+  if ((await meaningfulEntries(targetDir)).length > 0) {
+    throw new DevtoolsError(
+      "NOT_A_SITE",
+      "고르신 폴더가 비어 있지 않습니다.",
+      "빈 폴더를 골라 주세요(있는 파일을 덮어쓰지 않습니다).",
+    );
+  }
+  // ⚠ **반쪽 해제를 남기지 않는다** — 형제 `startFromPreset`·`fetchSource` 와 같은 규율이다.
+  //    `extractZip` 은 항목을 훑으며 그때그때 쓰므로, 도중에 던지면 앞서 쓴 파일이 남는다.
+  //    그러면 ⑴ 배송 문서의 「아무것도 풀지 않고 멈춘 것이니 폴더는 그대로입니다」가 거짓이 되고
+  //    ⑵ 재시도가 「비어 있지 않습니다」로 막혀 손으로 지우기 전에는 못 빠져나온다.
+  //    적대적 zip 이 보안 정지를 유발하고도 디스크에 흔적을 남기는 것도 이 자리다.
+  const before = await snapshotEntries(targetDir);
+  let fileCount: number;
+  try {
+    ({fileCount} = await extractZip(zip, targetDir, plan));
+  } catch (cause) {
+    await removeAdded(targetDir, before);
+    throw cause;
+  }
+  return {fileCount, dropped: plan.dropped};
+}
+
 async function startFromExample(): Promise<void> {
   const api = await ensureApi();
   const presets = await api.listPresets();
@@ -1360,10 +1524,9 @@ async function startPreviewInner(pinned?: CapturedTenant): Promise<void> {
     clearRenewal();
     // 만료 표시도 함께 걷는다 — 미리보기가 없는데 "자격증명 만료: …"가 남으면 낡은 화면이다.
     sidebar.update({ previewUrl: null, keyExpiresAt: null });
-    setStatus("$(zap) 잘커라");
+    showIdleStatus();
     // **상태바를 되돌린다.** 종전에는 텍스트만 바꾸고 command 를 stop 에 둬서, 크래시 뒤 상태바를
     // 누르면 session 이 없어 아무 일도 안 하는 죽은 버튼이 됐다(심의 경고).
-    status.command = "zalkera.preview.start";
     if (code !== 0 && code !== null)
       log(`미리보기가 종료되었습니다(코드 ${code}).`);
   });
@@ -1507,7 +1670,7 @@ async function withStartGuard<T>(run: () => Thenable<T>): Promise<T> {
   try {
     return await run();
   } catch (error) {
-    setStatus("$(zap) 잘커라");
+    showIdleStatus();
     throw error;
   }
 }
@@ -1525,8 +1688,7 @@ async function stopPreview(): Promise<void> {
   await session.server.stop();
   session = null;
   sidebar.update({ previewUrl: null, keyExpiresAt: null });
-  setStatus("$(zap) 잘커라");
-  status.command = "zalkera.preview.start";
+  showIdleStatus();
   log("미리보기를 멈췄습니다.");
 }
 
@@ -2037,7 +2199,12 @@ async function chooseTenant(force = false): Promise<string> {
             tenants.map((t) => ({
               label: t.name,
               description: t.code,
-              detail: t.code === current ? "지금 작업 중" : undefined,
+              // ⚠ **어디가 열릴지 고르기 전에 보여 준다.** 종전에는 고른 **뒤에** 토스트로
+              //    물었는데, 그 알림은 사라지고 경로도 안 보였다 — 잘못 골랐는지 알 방법이 없었다.
+              detail:
+                t.code === current
+                  ? "지금 작업 중"
+                  : (confirmedFolderFor(t.code) ?? undefined),
             })),
             { title: "어느 사이트로 작업할까요?" },
           )
@@ -2111,16 +2278,7 @@ async function offerFolderElsewhere(
       );
       return;
     }
-    // 받기 흐름은 「폴더를 열면 지금 미리보기는 멈춥니다」를 말한다. 이쪽만 침묵하면 비대칭이다.
-    if (session !== null) {
-      const go = await vscode.window.showWarningMessage(
-        ours("폴더를 열면 지금 미리보기는 멈춥니다 — 새 폴더에서 다시 시작해 주세요."),
-        { modal: true },
-        "폴더 열기",
-      );
-      if (go !== "폴더 열기") return;
-    }
-    await vscode.commands.executeCommand("vscode.openFolder", vscode.Uri.file(dir));
+    await openSiteFolder(dir);
     return;
   }
   // ⚠ **고른 사이트를 붙들고 간다.** 이 창의 유효 사이트는 아직 이 폴더의 것이라, 그냥 부르면
@@ -2305,6 +2463,10 @@ function requireWorkspace(): string {
 /** 사이드바가 보여 줄 사실만 다시 읽는다 — 판정이 아니라 표시다. */
 async function refreshSidebar(): Promise<void> {
   const dir = workspaceDir();
+  // ⚠ **상태바도 같이 갱신한다.** 종전에는 사이드바만 새로 그려, 사이트를 바꾸거나 폴더로
+  //    돌아온 뒤에도 상태바가 낡은 사이트를 말했다 — 경고를 눌러 되돌려도 경고가 그대로였다.
+  //    화면 둘이 같은 사건을 보게 하는 것이 이 한 줄이다(미리보기 중에는 그쪽이 자리를 쓴다).
+  if (session === null) showIdleStatus();
   sidebar.update({
     signedIn: (await store.read()) !== null,
     tenant: tenantCode(),
@@ -2315,11 +2477,34 @@ async function refreshSidebar(): Promise<void> {
   });
 }
 
+/**
+ * 미리보기가 안 도는 창의 상태바를 지금 상태로 맞춘다. **판정은 core 가 한다**(`idleStatusPlan`).
+ *
+ * ⚠ 어긋남 술어를 여기서 다시 쓰지 않는다 — 게이트·사이드바와 갈리면 화면마다 다른 말을 한다.
+ */
+function showIdleStatus(): void {
+  const plan = idleStatusPlan({
+    tenant: tenantCode(),
+    folderTenant: currentFolderBinding(),
+    site: siteDir(),
+  });
+  status.text = plan.text;
+  status.tooltip = plan.tooltip;
+  status.backgroundColor = plan.warning
+    ? new vscode.ThemeColor("statusBarItem.warningBackground")
+    : undefined;
+  status.command = plan.warning ? "zalkera.site.useFolder" : "zalkera.preview.start";
+}
+
 function setStatus(text: string): void {
   status.text = text;
   status.tooltip = session
     ? `미리보기 실행 중 — ${session.server.url}`
     : "잘커라 미리보기 시작";
+  // ⚠ **경고 상태를 되돌린다.** `showIdleStatus` 가 켠 배경·명령이 남아 있으면, 미리보기가
+  //    도는데도 상태바가 주황으로 남고 누르면 엉뚱한 명령이 돈다.
+  status.backgroundColor = undefined;
+  status.command = "zalkera.preview.start";
 }
 
 function log(message: string): void {

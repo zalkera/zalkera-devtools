@@ -82,6 +82,15 @@ const NEEDS: Readonly<Record<string, ReadonlyArray<Need>>> = {
     "zalkera.version.switch": ["signedIn", "tenant"],
     "zalkera.site.open": ["signedIn", "tenant"],
     "zalkera.site.create": ["signedIn", "tenant"],
+    // ⚠ `tenant`·`siteMatches` 를 달지 않는다. 이 명령은 **새 빈 폴더로 가는 길**이고, 소속이
+    //    어긋난 창에서 다음 거래처 zip 을 여는 것이 정상 사용이다. 달면 그 창이 갇힌다.
+    "zalkera.site.importZip": ["signedIn"],
+    // 포장은 **이 폴더를 파일로 만드는 일**이다 — 로그인도 사이트도 필요 없고, 소속과도 무관하다.
+    // 필요한 것은 「열린 폴더」뿐이고 그 판정은 `exportZipCommand` 자신이 한다.
+    //
+    // ⚠ **`site` 를 달면 고리가 생긴다.** 그 요건의 버튼은 `site.open` 인데, 사이트 미선택
+    //    상태에서는 그것도 막힌다. `site` 를 다는 명령은 반드시 `tenant` 가 앞에 있어야 한다.
+    "zalkera.export": [],
     // ⚠ 「폴더 연결」과 「이 폴더의 사이트로 돌아가기」에는 `siteMatches` 를 달지 않는다 —
     //    둘이 곧 어긋난 상태의 정규 탈출구다. 달면 빠져나갈 수 없는 고리가 된다.
     // ⚠ **`tenant` 요건을 달지 마라.** 이 명령은 사이트를 **정하는** 자리이고, 목록을 스스로
