@@ -241,6 +241,14 @@ const TEMPLATE_SCAN_BYTES = 256 * 1024;
  * 하지 않고 `null` 을 준다. 부르는 쪽이 fail-closed 로 처리한다: 못 읽은 것은 안 싣는다.
  */
 function decodeTemplate(data: Buffer): string | null {
+    // ⚠ **UTF-32 를 먼저 배제한다.** UTF-32LE 의 BOM 은 `FF FE 00 00` 이라 **앞 두 바이트가
+    //    UTF-16LE 와 같다.** 아래 분기가 그것을 삼키면 4바이트 코드유닛을 2바이트로 잘라 읽어
+    //    글자 사이마다 `U+0000` 이 끼고, 인접 문자를 보는 패턴이 전부 빗나간다. 그러면서
+    //    문자열을 돌려주므로 「못 읽었다」로도 안 잡힌다 — **잘못 읽고 0건으로 통과**한다
+    //    (심의 실증: 실제 zip 이 빌드까지 완주하고 rc=0 으로 지났다).
+    //    UTF-32BE(`00 00 FE FF`)는 `00` 검사에 걸려 이미 안전하지만 나란히 적어 둔다.
+    if (data.length >= 4 && data[0] === 0xff && data[1] === 0xfe && data[2] === 0x00 && data[3] === 0x00) return null;
+    if (data.length >= 4 && data[0] === 0x00 && data[1] === 0x00 && data[2] === 0xfe && data[3] === 0xff) return null;
     if (data.length >= 2 && data[0] === 0xff && data[1] === 0xfe) {
         return data.subarray(2).toString("utf16le");
     }
