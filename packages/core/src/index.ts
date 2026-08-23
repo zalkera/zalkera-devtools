@@ -166,7 +166,9 @@ export { ensureAgentDocs, type AgentDocsResult } from "./agents.ts";
 export {
   diagnose,
   diagnoseClientUsage,
+  protectedPathKind,
   protectedPathWarning,
+  type ProtectedKind,
   type Diagnostic,
 } from "./diagnostics.ts";
 export { BUSY, createReentrancyGuard } from "./reentrancy.ts";

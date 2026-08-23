@@ -3,6 +3,7 @@ import { test } from "node:test";
 import {
   diagnose,
   diagnoseClientUsage,
+  protectedPathKind,
   protectedPathWarning,
 } from "./diagnostics.ts";
 
@@ -206,5 +207,33 @@ test("규칙 ②의 판정은 종전 정규식과 같다 — 길이까지", () =
   for (const line of ["NEXT_PUBLIC_PREVIEW_KEY", "NEXT_PUBLIC_BASE", "next_public_api_key"]) {
     const hit = diagnose("a.tsx", line).filter((d) => d.rule === "zalkera/no-public-secret");
     strictEqual(hit.length, 0, `거짓 양성: ${line}`);
+  }
+});
+
+test("보호 경로는 **종류 셋**으로만 갈린다 — 그 수가 곧 경고창의 상한이다", () => {
+  // ⚠ 종전에는 경로마다 셌다. VS Code 가 재시작하며 열려 있던 편집기를 되열면 `dist/` 아래
+  //   파일 수만큼 경고창이 떴다(실측: 셋). 종류로 세면 같은 조언이 두 번 뜰 수 없고,
+  //   한 기계에서 평생 뜰 수 있는 경고창이 **셋**으로 묶인다.
+  const kinds = new Set(
+    [
+      ".env", ".env.local", ".env.production", ".envrc",
+      "node_modules/next/index.js", "node_modules/a/b/c.js",
+      ".next/build-manifest.json", "dist/extension.cjs", "out/server.js",
+    ].map((p) => protectedPathKind(p)),
+  );
+  deepStrictEqual([...kinds].sort(), ["build-output", "credential", "dependencies"]);
+});
+
+test("평범한 소스는 종류가 없다 — 없으면 아무 말도 안 한다", () => {
+  for (const p of ["src/app/page.tsx", "src/lib/env.ts", "package.json", "content/pages/home.json"]) {
+    strictEqual(protectedPathKind(p), null, `조용해야 한다: ${p}`);
+  }
+});
+
+test("종류와 문면이 짝이다 — 한쪽만 늘면 조용히 빈 말이 나간다", () => {
+  for (const p of [".env.local", "node_modules/x.js", "dist/x.js"]) {
+    const kind = protectedPathKind(p);
+    ok(kind !== null);
+    ok((protectedPathWarning(p) ?? "").length > 0, `${kind} 의 문면이 비었다`);
   }
 });

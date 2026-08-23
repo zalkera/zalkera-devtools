@@ -11,7 +11,9 @@ import {
   login,
   logout,
   precheck,
+  protectedPathKind,
   protectedPathWarning,
+  type ProtectedKind,
   publish,
   registerMcpServer,
   runDoctor,
@@ -189,6 +191,8 @@ function reapDropped(dropped: readonly IssuedKey[]): void {
   }
 }
 let persistedState: vscode.Memento;
+/** 폴더 단위 기억 — 자격증명 경고가 사이트마다 다시 선다(`stateFor`). */
+let workspaceScopedState: vscode.Memento;
 
 /** 사이트별 마지막 로컬본 폴더. 창 사이에 공유된다. */
 const FOLDER_REGISTRY_STATE = "zalkera.folderRegistry";
@@ -278,8 +282,33 @@ let extensionPath: string;
 let helpUri: vscode.Uri;
 let renewTimer: NodeJS.Timeout | null = null;
 let diagnostics: vscode.DiagnosticCollection;
-/** 보호 경로 경고를 파일마다 한 번만 — 저장할 때마다 같은 말을 반복하면 사람은 그것을 끄고 만다. */
-const warnedPaths = new Set<string>();
+/**
+ * 보호 경로 경고를 **종류마다 한 번만, 영구히.**
+ *
+ * ⚠ 종전에는 파일 경로로 셌고 그 목록이 **모듈 변수**였다. 그래서 「한 번」이 파일당이 아니라
+ *   **세션당**이었고, VS Code 가 재시작하며 열려 있던 편집기를 되열면 경고창이 **한꺼번에 여럿**
+ *   떴다(실측: `dist/` 아래 파일 셋 → 토스트 셋). 사용자가 읽는 것은 조언이 아니라
+ *   「무슨 일이 났나」다. 조언은 파일마다 다르지 않고 셋뿐이므로 종류로 센다.
+ */
+const WARNED_KINDS_STATE = "zalkera.warnedProtectedKinds";
+
+/**
+ * ⚠ **자격증명만 폴더 단위다.** 나머지 둘(`node_modules`·빌드 산출물)은 「이 폴더 종류는 이런
+ *   성질이다」라는 프로젝트 무관 사실이라 기계에서 한 번이면 족하다. 그러나 `.env` 는 **프로젝트
+ *   마다 다른 비밀**을 지킨다 — 기계 단위로 묶으면 처음 연 사이트에서 한 번 뜨고, 몇 달 뒤 다른
+ *   고객사 소스를 처음 손댈 때는 조용하다. 유출은 되돌리기가 가장 어려운 손해다.
+ */
+function stateFor(kind: ProtectedKind): vscode.Memento {
+  return kind === "credential" ? workspaceScopedState : persistedState;
+}
+
+/** 이미 알린 종류. 타이핑마다 저장소를 읽지 않도록 이 창에서 본 것은 기억해 둔다. */
+const warnedThisSession = new Set<ProtectedKind>();
+
+function warnedKinds(kind: ProtectedKind): Set<string> {
+  const raw = stateFor(kind).get(WARNED_KINDS_STATE);
+  return new Set(Array.isArray(raw) ? raw.filter((v) => typeof v === "string") : []);
+}
 
 /**
  * **manifest 에서 읽는다.** 종전에는 `"0.1.0"` 이 소스에 박혀 있어, 0.1.14 를 쓰는 사람도 서버에는
@@ -306,6 +335,7 @@ export function activate(context: vscode.ExtensionContext): void {
   );
   extensionId = context.extension.id || extensionId;
   persistedState = context.globalState;
+  workspaceScopedState = context.workspaceState;
   // ⚠ **이어받지 않는다.** 적어 둔 목록에는 **다른 창이 켠 열쇠**가 섞여 있다. 그것을 이 창의
   //   `issuedKey` 로 삼으면, 시작 실패 롤백이 남의 열쇠를 지우고 제 것을 남긴다. 목록은
   //   로그아웃·초기화가 통째로 읽어 전부 지운다(`revokeRecordedKeys`).
@@ -324,7 +354,12 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.workspace.onDidSaveTextDocument((doc) => refreshDiagnostics(doc)),
     vscode.workspace.onDidOpenTextDocument((doc) => refreshDiagnostics(doc)),
     // F1 — 되돌리기 어려운 자리를 **막지 않고 알린다**(고객 소스는 고객 것이다).
-    vscode.workspace.onDidOpenTextDocument((doc) => warnProtectedPath(doc)),
+    // ⚠ **여는 것이 아니라 고칠 때 본다.** 읽으려고 여는 것은 해가 없고, 손해는 타이핑을
+    //    시작할 때 생긴다. 열 때 보면 VS Code 가 다시 켜며 편집기를 한꺼번에 되열 때마다 경고가
+    //    쏟아진다 — 되열기는 편집이 아니므로 이 자리에서는 구조적으로 안 온다.
+    vscode.workspace.onDidChangeTextDocument((e) => {
+      if (e.contentChanges.length > 0) warnProtectedPath(e.document);
+    }),
     vscode.window.registerTreeDataProvider("zalkera.sidebar", sidebar),
     register("zalkera.signIn", async () => {
       await signIn();
@@ -661,6 +696,12 @@ async function resetAll(): Promise<void> {
   if (!(await signOut({ quiet: true }))) return;
 
   // 사이트 설정은 로그아웃이 이미 지웠다(`ACCOUNT_SCOPED`). 두 벌로 두면 한쪽만 고쳐진다.
+
+  // ⚠ **보호 경로 경고 기록도 지운다.** 「처음 상태로」라고 말해 놓고 이것만 남기면, 초기화한
+  //    사람이 다시는 그 경고를 못 본다 — 그리고 되돌릴 방법이 화면 어디에도 없다.
+  warnedThisSession.clear();
+  await persistedState.update(WARNED_KINDS_STATE, undefined);
+  await workspaceScopedState.update(WARNED_KINDS_STATE, undefined);
 
   log("초기화했습니다 — 로그인·사이트 설정·미리보기 자격증명을 지웠습니다.");
   await refreshSidebar();
@@ -2257,18 +2298,31 @@ function clientExports(projectDir: string): string[] {
 
 const clientExportCache = new Map<string, string[]>();
 
-/** F1 — 되돌리기 어려운 자리를 연 사람에게 한 번 알린다. */
+/** F1 — 되돌리기 어려운 자리를 **고치기 시작한** 사람에게 종류마다 한 번 알린다. */
 function warnProtectedPath(doc: vscode.TextDocument): void {
+  // ⚠ **저장 안 된 편집만 본다.** 변경 알림은 디스크에서 다시 읽힐 때도 오는데, 그중에는
+  //    우리가 쓴 `.env.local` 도 있다 — 우리가 방금 쓴 파일을 두고 사용자에게 경고하게 된다.
+  if (!doc.isDirty) return;
   const dir = workspaceDir();
   if (!dir || doc.uri.scheme !== "file" || !doc.uri.fsPath.startsWith(dir))
     return;
   const relative = doc.uri.fsPath.slice(dir.length + 1);
-  const warning = protectedPathWarning(relative);
-  if (!warning || warnedPaths.has(doc.uri.fsPath)) return;
-  warnedPaths.add(doc.uri.fsPath);
+  const kind = protectedPathKind(relative);
+  const advice = protectedPathWarning(relative);
+  if (kind === null || advice === null) return;
+  if (warnedThisSession.has(kind)) return;
+  const seen = warnedKinds(kind);
+  if (seen.has(kind)) {
+    warnedThisSession.add(kind);
+    return;
+  }
+  seen.add(kind);
+  warnedThisSession.add(kind);
+  void stateFor(kind).update(WARNED_KINDS_STATE, [...seen]);
   // 파일 이름은 **서버가 준 꾸러미의 항목명**에서 올 수 있다 — 우리가 지은 이름이 아니다.
+  // 조언 문면은 우리 표에서 온다(`diagnostics.ts` 의 상수) — 그래서 표기만 붙인다.
   void vscode.window.showWarningMessage(
-    `${plainNotice(relative, 120)} — ${ours(warning)}`,
+    `${plainNotice(relative, 120)} — ${ours(advice)}`,
   );
 }
 

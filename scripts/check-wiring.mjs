@@ -83,6 +83,18 @@ const WIRES = [
         "확인 «뒤»에 멈춰야 한다 — 동의도 안 받고 남의 미리보기를 끊으면 안 된다",
     ],
     [
+        "packages/vscode/src/extension.ts",
+        "vscode.workspace.onDidChangeTextDocument((e) => {",
+        "보호 경로 경고가 **여는 시점**에만 걸린다 — 그러면 `doc.isDirty` 가드에 늘 걸려 경고가 " +
+            "한 번도 안 뜬다(실측: 치환이 안 걸린 채 시험 524개·검사기 14종이 전부 초록이었다). " +
+            "고치는 시점이 없으면 이 안전장치는 꺼진 것이다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "if (!doc.isDirty) return;",
+        "디스크에서 다시 읽힌 것까지 편집으로 본다 — **우리가 쓴 `.env.local`** 을 두고 사용자에게 경고한다",
+    ],
+    [
         "packages/core/src/publish.ts",
         "provenanceTenant: options.tenant,",
         "발행이 출처를 안 찍으면 그 사이트에서 나온 소스가 영원히 «모름»으로 남는다",

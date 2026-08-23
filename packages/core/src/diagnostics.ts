@@ -160,23 +160,46 @@ export function diagnoseClientUsage(content: string, knownExports: readonly stri
 }
 
 /**
- * F1「보호 경로 경고」(§5 F1) — **막지 않고 알린다.**
+ * 보호 경로의 **종류**. 문면이 아니라 이것으로 「이미 알렸는가」를 센다.
  *
- * 고객 소스는 고객 것이라 편집을 막을 권리가 우리에게 없다. 다만 **되돌리기 어려운 손해**로 이어지는 자리는
- * 알려 준다: 자격증명 파일, 의존성 트리(캐시와 하드링크로 묶여 있어 손대면 다른 프로젝트까지 번진다), 빌드 산출물.
+ * ⚠ **경로마다 세면 토스트가 쏟아진다.** VS Code 는 재시작할 때 열려 있던 편집기를 **한꺼번에**
+ *   되열고, 그때 `dist/` 아래 파일 셋이 열려 있으면 경고창이 셋 뜬다. 사용자가 보는 것은
+ *   「무슨 일이 났나」이지 조언이 아니다. 종류로 세면 같은 조언이 두 번 뜰 수 없다 —
+ *   조언은 파일마다 다르지 않고 **셋뿐**이다.
  */
-export function protectedPathWarning(relativePath: string): string | null {
+export type ProtectedKind = "credential" | "dependencies" | "build-output";
+
+/** 이 경로가 어느 종류의 보호 자리인가. 아니면 `null`. */
+export function protectedPathKind(relativePath: string): ProtectedKind | null {
     const normalized = relativePath.replace(/\\/g, "/");
-    // `zip.ts` 의 제외와 **같은 가정을 써야 한다**(클로징 심의) — 종전에는 `.env~` 를 열어도
-    // 아무 말이 없었다. 빼는 규칙과 알리는 규칙이 갈리면, 빠진 줄 모르고 고치게 된다.
-    if (/^\.env/.test(normalized)) {
-        return "이 파일에는 자격증명이 들어 있습니다. 값을 손으로 고치면 미리보기가 끊길 수 있고, 커밋하면 키가 새 나갑니다.";
-    }
-    if (normalized.startsWith("node_modules/")) {
-        return "의존성 폴더는 캐시와 하드링크로 묶여 있어, 여기서 고치면 이 기계의 다른 프로젝트까지 함께 바뀝니다.";
-    }
+    // `zip.ts` 의 제외와 **같은 가정을 써야 한다** — 빼는 규칙과 알리는 규칙이 갈리면,
+    // 빠진 줄 모르고 고치게 된다.
+    if (/^\.env/.test(normalized)) return "credential";
+    if (normalized.startsWith("node_modules/")) return "dependencies";
     if (normalized.startsWith(".next/") || normalized.startsWith("dist/") || normalized.startsWith("out/")) {
-        return "빌드 산출물이라 다음 빌드에 덮어써집니다. 소스를 고치세요.";
+        return "build-output";
     }
     return null;
+}
+
+const PROTECTED_SAY: Readonly<Record<ProtectedKind, string>> = {
+    credential:
+        "이 파일에는 자격증명이 들어 있습니다. 값을 손으로 고치면 미리보기가 끊길 수 있고, 커밋하면 밖으로 나갑니다.",
+    dependencies:
+        "의존성 폴더는 캐시와 하드링크로 묶여 있어, 여기서 고치면 이 기계의 다른 프로젝트까지 번질 수 있습니다.",
+    "build-output": "빌드 산출물이라 다음 빌드에 덮어써집니다. 소스를 고치세요.",
+};
+
+/**
+ * F1「보호 경로 경고」(§5 F1) — **막지 않고 알린다.**
+ *
+ * 고객 소스는 고객 것이라 편집을 막을 권리가 우리에게 없다. 다만 **되돌리기 어려운 손해**로
+ * 이어지는 자리는 알려 준다: 자격증명 파일, 의존성 트리(캐시와 하드링크로 묶여 있어 손대면
+ * 다른 프로젝트까지 번진다), 빌드 산출물.
+ *
+ * 「언제·몇 번 알리는가」는 부르는 쪽이 정한다 — 이 함수는 **무엇을 말할지**만 안다.
+ */
+export function protectedPathWarning(relativePath: string): string | null {
+    const kind = protectedPathKind(relativePath);
+    return kind === null ? null : PROTECTED_SAY[kind];
 }
