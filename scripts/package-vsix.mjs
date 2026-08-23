@@ -224,4 +224,12 @@ console.log(`\n   설치(임시·검증 대기 중일 때): code --install-exten
 //    대상에서 빠진다 — 이 줄만 보고 깐 사람은 다음 판이 나와도 계속 옛 판을 쓴다. 그래서 마켓
 //    경로를 함께 찍는다(발행이 끝난 뒤에는 이쪽이 정본이다).
 console.log(`   설치(정본): code --install-extension ${manifest.publisher}.${manifest.name}`);
+// ⚠ **게시도 `vsce` 를 맨손으로 부르면 죽는다** — 이 파일 머리말이 포장에 대해 적은 것과 **같은
+//    이유다.** `vsce publish` 는 기본적으로 **다시 포장하므로**, 워크스페이스 멤버 폴더에서 부르면
+//    루트를 패키지 루트로 잡아 `invalid relative path: extension/../../tsconfig.base.json` 로 죽는다.
+//    포장은 스크립트로 하고 게시는 손으로 하는 사람이 정확히 그 벽에 부딪힌다(실측 · 두 번).
+//    `--packagePath` 는 포장 단계를 통째로 건너뛰고 준 파일만 올린다.
+console.log(
+    `   게시(오너): npx vsce publish --packagePath shared/${manifest.name}-${manifest.version}.vsix`,
+);
 rmSync(stage, { recursive: true, force: true });
