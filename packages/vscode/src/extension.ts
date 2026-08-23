@@ -358,8 +358,18 @@ export function activate(context: vscode.ExtensionContext): void {
     //    시작할 때 생긴다. 열 때 보면 VS Code 가 다시 켜며 편집기를 한꺼번에 되열 때마다 경고가
     //    쏟아진다 — 되열기는 편집이 아니므로 이 자리에서는 구조적으로 안 온다.
     vscode.workspace.onDidChangeTextDocument((e) => {
-      if (e.contentChanges.length > 0) warnProtectedPath(e.document);
+      // 사람이 **타이핑을 시작한** 순간. 여기서만 `isDirty` 를 요구한다 — 디스크 재읽기도 이
+      // 알림을 내는데, 그중에는 우리가 쓴 `.env.local` 이 있다.
+      if (e.contentChanges.length > 0 && e.document.isDirty) warnProtectedPath(e.document);
     }),
+    // ⚠ **여는 시점도 본다.** 에이전트·`git checkout` 처럼 **디스크에 직접 쓰는** 손은
+    //    편집 알림을 «깨끗한» 문서로 내므로 위 갈래가 구조적으로 못 잡는다(심의 실증).
+    //    그 파일을 사람이 **열어 볼 때**가 남은 유일한 기회다.
+    //
+    //    ⚠ 이 갈래가 옛 판에서 토스트를 쏟은 자리다. 그런데 그 원인은 트리거가 아니라
+    //      **셈의 범위**였다 — 「경로별·세션당」이라 재시작이 편집기를 되열 때마다 처음이 됐다.
+    //      지금은 「종류별·영구」라 한 종류에 평생 한 번이다. 셋을 넘을 수 없다.
+    vscode.workspace.onDidOpenTextDocument((doc) => warnProtectedPath(doc)),
     vscode.window.registerTreeDataProvider("zalkera.sidebar", sidebar),
     register("zalkera.signIn", async () => {
       await signIn();
@@ -2298,11 +2308,14 @@ function clientExports(projectDir: string): string[] {
 
 const clientExportCache = new Map<string, string[]>();
 
-/** F1 — 되돌리기 어려운 자리를 **고치기 시작한** 사람에게 종류마다 한 번 알린다. */
+/**
+ * F1 — 되돌리기 어려운 자리를 **종류마다 한 번** 알린다.
+ *
+ * 부르는 자리가 둘이다: 사람이 타이핑을 시작할 때(그 자리에서 `isDirty` 를 본다)와,
+ * 그 파일을 **열 때**. 둘째가 있어야 «디스크에 직접 쓰는 손»(에이전트·git)이 만든 변화를
+ * 사람이 알 기회가 남는다 — 그 손은 편집 알림을 깨끗한 문서로 내기 때문이다.
+ */
 function warnProtectedPath(doc: vscode.TextDocument): void {
-  // ⚠ **저장 안 된 편집만 본다.** 변경 알림은 디스크에서 다시 읽힐 때도 오는데, 그중에는
-  //    우리가 쓴 `.env.local` 도 있다 — 우리가 방금 쓴 파일을 두고 사용자에게 경고하게 된다.
-  if (!doc.isDirty) return;
   const dir = workspaceDir();
   if (!dir || doc.uri.scheme !== "file" || !doc.uri.fsPath.startsWith(dir))
     return;

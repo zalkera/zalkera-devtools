@@ -91,8 +91,25 @@ const WIRES = [
     ],
     [
         "packages/vscode/src/extension.ts",
-        "if (!doc.isDirty) return;",
+        "vscode.workspace.onDidOpenTextDocument((doc) => warnProtectedPath(doc)),",
+        "에이전트·`git checkout` 처럼 **디스크에 직접 쓰는 손**이 만든 변화를 사람이 알 기회가 사라진다 — " +
+            "그 손은 편집 알림을 «깨끗한» 문서로 내므로 타이핑 갈래가 구조적으로 못 잡는다(심의 실증)",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "if (e.contentChanges.length > 0 && e.document.isDirty) warnProtectedPath(e.document);",
         "디스크에서 다시 읽힌 것까지 편집으로 본다 — **우리가 쓴 `.env.local`** 을 두고 사용자에게 경고한다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        'return kind === "credential" ? workspaceScopedState : persistedState;',
+        "자격증명 경고가 **기계에서 한 번**이 된다 — `.env` 는 사이트마다 다른 비밀을 지키므로, " +
+            "처음 연 사이트에서 한 번 뜨고 다른 고객사 소스를 처음 손댈 때는 조용해진다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "await workspaceScopedState.update(WARNED_KINDS_STATE, undefined);",
+        "「초기화」가 자격증명 경고 기록만 남긴다 — 「처음 상태로」라 말해 놓고 되돌릴 길이 화면에 없어진다",
     ],
     [
         "packages/core/src/publish.ts",
