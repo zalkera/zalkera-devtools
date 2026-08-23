@@ -47,8 +47,9 @@ code --install-extension zalkera.zalkera-devtools --force
 **`zip 으로 교체`** 는 지금 폴더의 내용을 지웁니다. 확인 창이 한 번 뜨고, 거기서 무엇을 남기는지
 보여 드립니다.
 
-- **그대로 두는 것**: `.git` · `.env*` · `.vscode` · `.idea` · `.ssh` · `.aws` · `.npmrc` ·
-  `.mcp.json` · `.claude` · 인증서 파일
+- **그대로 두는 것**: `.git` · `.env`·`.env.local` 같은 실제 환경 파일 · `.vscode` · `.idea` ·
+  `.ssh` · `.aws` · `.npmrc` · `.mcp.json` · `.claude` · 인증서 파일
+- **`.env.example` 류는 남기지 않습니다** — 소스의 일부라 받으신 zip 의 것으로 바뀝니다
 - **지우는 것**: 그 밖의 모든 파일. `node_modules`·`.next` 같은 다시 만들어지는 것도 지웁니다
 - **폴더 바로 아래만 지킵니다** — 하위 폴더 안의 `.env.local` 은 못 지킵니다
 

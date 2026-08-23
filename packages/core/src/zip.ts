@@ -143,6 +143,9 @@ const ALWAYS_EXCLUDED = new Set([
  *
  *  · **반드시 덮는 것** — *우리가 발급한* 비밀. 미리보기 키가 사는 `.env*` 는 접두 규칙으로 전부 뺀다.
  *    우리가 넣은 것이니 우리가 책임진다.
+ *    ⚠ **한 자리만 예외다**: 값이 빈 서식(`.env.example` 류 · [isValueLessTemplate]). 그 자리는
+ *    이름이 아니라 **내용**으로 지킨다([templateHoldsSecret]) — 정규식 휴리스틱이므로 그 파일에
+ *    한해서는 이 등급이 아래의 «최선으로 덮는 것»이다. 좁혀 적는 것이 이 절의 존재 이유다.
  *  · **최선으로 덮는 것** — 널리 쓰이는 표준 자격증명 파일명·확장자(아래 두 표).
  *  · **보증하지 않는 것** — 그 밖의 이름. `media/help.md` 가 같은 말을 사용자 문장으로 적는다.
  *
@@ -179,9 +182,125 @@ function isValueLessTemplate(lower: string): boolean {
     return lower.startsWith(".env") && /\.(example|sample|template)$/.test(lower);
 }
 
-function isSecretFile(name: string): boolean {
+/**
+ * **값 자리에 앉으면 「살아 있는 비밀」로 보는 형상.**
+ *
+ * 표는 정본 팩 게이트(`zalkera-storefront-examples/scripts/verify-zip.mjs` 의 `SECRET_CONTENT`)와
+ * 같다. 두 자를 다르게 두면 「팩 게이트는 잡는데 여기는 흘리는」 값이 생긴다.
+ *
+ * ⚠ **완전하지 않다.** 고엔트로피 문자열 일반은 안 본다 — 그래서 이 함수가 하는 말은
+ *   「알려진 형식의 살아 있는 열쇠가 값 자리에 있다」이지 「비밀이 없다」가 아니다.
+ */
+const LIVE_SECRET: ReadonlyArray<readonly [string, RegExp]> = [
+    ["잘커라 스토어프론트 키", /\boqsk_[0-9A-Za-z_-]{8,}/],
+    ["AWS 액세스키", /\bAKIA[0-9A-Z]{16}\b/],
+    ["개인키 블록", /-----BEGIN [A-Z ]{0,20}PRIVATE KEY-----/],
+    ["결제 라이브 시크릿", /\b(?:sk_live_|live_sk_)[0-9A-Za-z]{8,}/],
+    ["GitHub 토큰", /\b(?:gh[pousr]_[0-9A-Za-z]{20,}|github_pat_[0-9A-Za-z_]{20,})\b/],
+    ["Slack 토큰", /\bxox[abprs]-[0-9A-Za-z-]{10,}\b/],
+    ["Google API 키", /\bAIza[0-9A-Za-z_-]{35}\b/],
+    ["npm 토큰", /\bnpm_[0-9A-Za-z]{36}\b/],
+];
+
+/**
+ * 자격증명이 박힌 URL. **호스트까지 본다** — 표에 두지 않고 따로 다루는 이유가 그것이다.
+ *
+ * ⚠ 형상만 보면 `postgres://user:pass@localhost:5432/db` 가 걸린다. 그것은 Node·Docker Compose
+ *   생태계에서 **가장 흔한 서식 한 줄**이고, `user`·`pass` 는 글자 그대로 자리표시자다. 걸리면
+ *   그 서식 파일이 통째로 빠져, 이 기능이 세운 바로 그 보증("정상 소스가 조용히 안 빠진다")을
+ *   스스로 어긴다(심의 실증 — 전형적 Node/Postgres 서식이 통째로 빠졌다).
+ *
+ * 그래서 **닿을 수 있는 호스트일 때만** 비밀로 본다. 루프백·사설망·예약 접미·단일 라벨(점 없는
+ * compose 서비스 이름)에 박힌 열쇠는 나가도 남이 쓸 수 없다 — 그것이 이 예외의 근거다.
+ */
+const URL_CREDENTIAL = /\b[a-z][a-z0-9+.-]*:\/\/[^\s/:@]+:[^\s/@]{3,}@([^\s/?#]+)/;
+const UNREACHABLE_HOST =
+    /^(?:localhost|0\.0\.0\.0|::1|127\.\d+\.\d+\.\d+|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(?:1[6-9]|2\d|3[01])\.\d+\.\d+)$/i;
+/** RFC 2606·6761 이 문서·내부용으로 못 박은 접미. 여기에 박힌 열쇠는 어디로도 안 간다. */
+const UNREACHABLE_SUFFIX = /\.(?:local|localhost|internal|test|invalid)$/i;
+
+function reachableHost(raw: string): boolean {
+    const host = raw.replace(/:\d+$/, "").replace(/^\[|\]$/g, "");
+    if (UNREACHABLE_HOST.test(host) || UNREACHABLE_SUFFIX.test(host)) return false;
+    // 점이 없으면 단일 라벨 — compose 서비스 이름·내부 별칭이다. 공개 호스트에는 점이 있다.
+    return host.includes(".");
+}
+
+/** 서식 파일에서 훑을 최대 바이트. 서식은 작다 — 이보다 크면 서식이 아니다. */
+const TEMPLATE_SCAN_BYTES = 256 * 1024;
+
+/**
+ * **서식을 글자로 읽는다 — 못 읽으면 `null`.**
+ *
+ * ⚠ `toString("utf8")` 하나로 때우면 **UTF-16 으로 저장한 서식이 검사를 통째로 지나간다.**
+ *   ASCII 가 바이트 사이에 `00` 을 끼고 앉아 어떤 정규식에도 안 걸린다 — 실측으로 라이브 열쇠가
+ *   경고 한 줄 없이 나갔다. Windows PowerShell 5.1 의 `Out-File`·`>` 기본값이 UTF-16LE 라
+ *   「PowerShell 로 서식을 채워 저장」은 드문 경로가 아니다.
+ *
+ * BOM 이 있으면 그대로 읽고, 없는데 `00` 바이트가 섞였으면 **글자가 아니다** — 그때는 읽었다고
+ * 하지 않고 `null` 을 준다. 부르는 쪽이 fail-closed 로 처리한다: 못 읽은 것은 안 싣는다.
+ */
+function decodeTemplate(data: Buffer): string | null {
+    if (data.length >= 2 && data[0] === 0xff && data[1] === 0xfe) {
+        return data.subarray(2).toString("utf16le");
+    }
+    if (data.length >= 2 && data[0] === 0xfe && data[1] === 0xff) {
+        const swapped = Buffer.from(data.subarray(2));
+        swapped.swap16();
+        return swapped.toString("utf16le");
+    }
+    if (data.includes(0x00)) return null;
+    return data.toString("utf8");
+}
+
+/**
+ * **서식이 정말 비어 있는가 — 이름이 아니라 값으로 판정한다.**
+ *
+ * ■ 왜 있나
+ *   `.env.example` 은 이름으로 예외를 받는다([isValueLessTemplate]). 그런데 사람은 서식을
+ *   **복사하지 않고 그 자리에 채운다.** 채운 서식이 그대로 나가면, 이 파일이 스스로 좁혀 둔
+ *   보증("*우리가 발급한* 비밀은 반드시 덮는다")이 파일 이름 하나로 뚫린다.
+ *
+ * ■ **주석도 본다**
+ *   처음에는 `#` 줄을 건너뛰었다. 안내문이 형식 이름을 적는 것을 오인하지 않으려는 것이었는데,
+ *   변이시험이 그 건너뛰기가 **아무것도 지키지 않으면서 구멍만 낸다**는 것을 보였다: 정본 팩의
+ *   안내문에는 `=` 가 없어 애초에 값으로 안 읽히고, 반대로 사람이 자기 열쇠를 **주석 처리해**
+ *   두면(`# KEY=oqsk_…`) 그대로 나간다. 새는 쪽이 조용하고 되돌릴 수 없으므로, 헛디딤을
+ *   감수하고 다 본다 — 헛디딤은 이름과 이유를 대므로 사람이 고칠 수 있다.
+ *
+ * 찾으면 **무엇으로 보였는지**를 돌려준다 — 이름을 대야 사람이 고칠 수 있다.
+ */
+export function templateHoldsSecret(text: string): string | null {
+    // ⚠ **개인키 블록만은 줄 파싱 밖에서 본다.** PEM 을 붙여넣으면 `KEY="` 다음 줄부터 본문이
+    //    오는데, 그 줄에는 `=` 가 없어 값으로 안 읽힌다 — 「가장 흔한 붙여넣기」를 놓치는
+    //    자리였다(심의 실증). 본문 한 줄이면 충분하므로 파일 전체에서 형상만 본다.
+    if (/-----BEGIN [A-Z ]{0,20}PRIVATE KEY-----/.test(text)) return "개인키 블록";
+    for (const raw of text.split(/\r?\n/)) {
+        const line = raw.trim();
+        if (line === "") continue;
+        // `# KEY=…` 도 본다 — 주석 처리한 열쇠가 새는 자리다(위 ■ 참조). `#` 를 떼고 값을 읽는다.
+        const eq = line.replace(/^#+\s*/, "").indexOf("=");
+        if (eq < 0) continue;
+        const value = line.replace(/^#+\s*/, "").slice(eq + 1).trim().replace(/^(["'])(.*)\1$/, "$2");
+        if (value === "") continue;
+        for (const [what, pattern] of LIVE_SECRET) {
+            if (!pattern.test(value)) continue;
+            // AWS 가 자기 문서에서 쓰는 자리표시자. GitHub 의 스캐너도 비-비밀로 안다.
+            if (what === "AWS 액세스키" && /\bAKIA[0-9A-Z]{9}EXAMPLE\b/.test(value)) continue;
+            return what;
+        }
+        const url = URL_CREDENTIAL.exec(value);
+        if (url !== null && reachableHost(url[1] ?? "")) return "URL 내장 자격증명";
+    }
+    return null;
+}
+
+function isSecretFile(name: string, isDirectory = false): boolean {
     const lower = name.toLowerCase();
-    if (isValueLessTemplate(lower)) return false;
+    // ⚠ **서식 예외는 파일에만 준다.** `.env.example/` 라는 **폴더**를 만들면 이름 판정이
+    //    그 폴더를 통과시키고, 그 안의 `notes.txt` 는 이름도 안 걸리고 내용검사 대상도 아니다 —
+    //    양쪽 그물 밖이다(심의 실증: 라이브 열쇠가 그대로 실렸다). 폴더는 `.env` 접두 규칙대로 뺀다.
+    if (!isDirectory && isValueLessTemplate(lower)) return false;
     // ⚠ **접두는 `.env` 다, `.env.` 가 아니다**(클로징 심의 · Fable·Opus 공통 차단 · 실측 유출).
     // 주석과 도움말은 처음부터 "`.env` 로 **시작**하는 것은 전부"라고 적었는데 코드만 점을 하나 더
     // 요구했다. 그 한 글자 틈으로 `.envrc`(direnv — `export AWS_SECRET_ACCESS_KEY=…` 가 관례)와
@@ -297,7 +416,7 @@ export async function packProject(options: PackOptions): Promise<PackResult> {
     const walk = async (dir: string): Promise<void> => {
         for (const item of await readdir(dir, { withFileTypes: true })) {
             if (excluded.has(item.name.toLowerCase())) continue;
-            if (isSecretFile(item.name)) {
+            if (isSecretFile(item.name, item.isDirectory())) {
                 // 디렉터리도 센다 — `config.env/` 하나면 그 아래 소스가 **통째로** 사라지는데,
                 // 파일만 세면 그때가 제일 조용하다(재심의 경고).
                 const shown = relative(options.projectDir, join(dir, item.name));
@@ -338,9 +457,29 @@ export async function packProject(options: PackOptions): Promise<PackResult> {
                             "업로드 자체의 상한은 묶은 뒤 크기 100MB 로 따로 있습니다. 다 담기 전에 멈췄습니다.",
                     );
                 }
+                const data = await readFile(full);
+                // ⚠ **이름으로 받은 예외에 내용 문턱을 단다.** 서식은 「값이 없어」 허용한 것이므로,
+                //    값이 들어 있으면 그 전제가 깨진 것이다. 막지 말고 **빼고 이름을 댄다** —
+                //    규칙을 느슨하게 하는 쪽이 더 나쁘고, 조용히 빼는 쪽도 더 나쁘다.
+                if (isValueLessTemplate(item.name.toLowerCase())) {
+                    // ⚠ **전제가 깨지면 싣지 않는다.** 예외의 근거는 「서식은 작고 값이 없다」이다.
+                    //    스캔 상한을 넘는 파일은 앞부분만 보고 **전체를 싣게** 되므로, 못 본 뒤쪽이
+                    //    그대로 나간다(심의 실증). 서식치고 큰 것은 서식이 아니다.
+                    const text = info.size > TEMPLATE_SCAN_BYTES ? null : decodeTemplate(data);
+                    const found =
+                        text === null
+                            ? info.size > TEMPLATE_SCAN_BYTES
+                                ? "서식치고 너무 큽니다"
+                                : "글자로 읽히지 않습니다"
+                            : templateHoldsSecret(text);
+                    if (found !== null) {
+                        dropped.push(`${relative(options.projectDir, full)} (${found})`);
+                        continue;
+                    }
+                }
                 entries.push({
                     path: relative(options.projectDir, full).split(sep).join("/"),
-                    data: await readFile(full),
+                    data,
                 });
             }
             // 심볼릭 링크는 담지 않는다 — zip 밖을 가리키는 링크는 서버에서 해제할 때 위험하다.
