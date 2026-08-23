@@ -47,7 +47,11 @@ jobs:
         run: |
           set -euo pipefail
           src=packages/vscode/media/help.md
-          test -s "$src"   # 빈 파일이 조용히 배포되지 않게
+          # 빈 파일이 조용히 배포되지 않게 — 그리고 **쪼그라든 것도** 배포되지 않게.
+          # 바닥은 지문이 아니라 하한이다(실측 496줄). 문면을 못으로 박으면 이름을 다듬을
+          # 때마다 CI 가 깨진다 — 종전 판이 그랬다.
+          test -s "$src"
+          test "$(wc -l < "$src")" -ge 300 || { echo "도움말이 너무 짧습니다: $(wc -l < "$src")줄"; exit 1; }
           mkdir -p site
 
           cat > site/_config.yml <<'YAML'
@@ -69,7 +73,13 @@ jobs:
             tail -n +2 "$src"
           } > site/index.md
 
-          grep -q '새 버전 올리기' site/index.md   # tail 이 본문을 자르지 않았는지
+          # 본문이 잘리지 않았는가 — **문면이 아니라 줄 수로 잰다.**
+          # 종전에는 제품 라벨(「새 버전 올리기」)을 못으로 박아, 이름을 다듬을 때마다 CI 가
+          # 깨졌다. 여기서 재려던 것은 `tail` 이 본문을 삼켰는지이지 그 낱말이 남아 있는지가
+          # 아니다. 머리말 4줄 + 빈 줄 1줄 − `tail -n +2` 가 뗀 1줄 = +4.
+          want=$(( $(wc -l < "$src") + 4 ))
+          got=$(wc -l < site/index.md)
+          test "$got" -eq "$want" || { echo "본문이 잘렸습니다: $got 줄(기대 $want)"; exit 1; }
 
       - uses: actions/configure-pages@v5
         with:
