@@ -83,6 +83,35 @@ export const say = {
             `「${shown(picked)}」 로 다시 연결하면, 이 폴더의 소스가 그 사이트로 올라가게 됩니다.`
         );
     },
+    /**
+     * 이미 그 사이트로 작업 중이었다. **「바꿨습니다」로 말하지 않는다** — 아무것도 안 바뀌었다.
+     */
+    alreadyOnSite(tenant: string): string {
+        return `이미 「${shown(tenant)}」 로 작업 중입니다.`;
+    },
+    /** 소속이 다른 폴더에서 사이트를 골랐을 때, 선택지 화면의 제목. */
+    elsewhereTitle(picked: string, binding: string): string {
+        return `「${shown(picked)}」 작업은 다른 폴더에서 합니다 — 이 폴더는 「${shown(binding)}」 의 소스입니다`;
+    },
+    /**
+     * 그 사이트에 받을 판이 없다. **왜 받기가 목록에 없는지**를 말하는 자리다 — 항목을 조용히
+     * 빼면 사람은 그것이 고장인지 정상인지 모른다.
+     */
+    noSourceYet(picked: string): string {
+        return `「${shown(picked)}」 에는 아직 받을 소스가 없습니다 — zip 으로 시작하실 수 있습니다.`;
+    },
+    /** 사람이 직접 고른 폴더가 남의 사이트 소스였다. **열지 않았다**는 사실이 요점이다. */
+    pickedFolderBoundElsewhere(bound: string, picked: string): string {
+        return `고르신 폴더는 「${shown(bound)}」 의 소스입니다 — 「${shown(picked)}」 폴더가 아니라서 열지 않았습니다.`;
+    },
+    /** 소속 없는 폴더에 소속을 **처음** 줄 때의 동의. 재연결과 달리 덮어쓰는 것이 없다. */
+    pickedFolderLinkConfirm(picked: string): { message: string; detail: string; action: string } {
+        return {
+            message: `고르신 폴더를 「${shown(picked)}」 에 연결할까요?`,
+            detail: "연결하면 이 폴더의 소스가 그 사이트로 올라가게 됩니다.",
+            action: "연결하고 열기",
+        };
+    },
     /** 이 폴더의 사이트로 돌아왔을 때. */
     backToFolderSite(tenant: string): string {
         return `사이트 「${shown(tenant)}」 — 이 폴더의 사이트로 돌아왔습니다.`;

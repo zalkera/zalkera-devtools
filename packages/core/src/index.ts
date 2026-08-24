@@ -191,9 +191,15 @@ export {
     folderBinding,
     decideTenantScope,
     decideSiteChoice,
+    elsewhereOptions,
+    decidePickedFolder,
+    decideFetchTargetPlan,
     needsRelinkConsent,
     type TenantScope,
     type SiteChoice,
+    type ElsewhereOption,
+    type PickedFolderPlan,
+    type FetchTargetPlan,
 } from "./siteBinding.ts";
 export { sidebarPlan } from "./sidebarPlan.ts";
 export { idleStatusPlan, type StatusPlan } from "./statusPlan.ts";

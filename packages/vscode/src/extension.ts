@@ -69,6 +69,11 @@ import {
   decideTenantScope,
   type TenantScope,
   decideSiteChoice,
+  decideFetchTargetPlan,
+  decidePickedFolder,
+  elsewhereOptions,
+  isReceivable,
+  type ElsewhereOption,
   needsRelinkConsent,
   writeBindingMarkTo,
   isCancelled,
@@ -342,6 +347,11 @@ export function activate(context: vscode.ExtensionContext): void {
   helpUri = vscode.Uri.joinPath(context.extensionUri, "media", "help.md");
   sidebar = new ZalkeraSidebar();
   void refreshSidebar();
+  // ⚠ **여는 제스처가 기억을 되살린다.** 레지스트리는 계정 자료라 로그아웃이 통째로 버리는데,
+  //    디스크의 폴더는 그대로 남는다. 그 상태로 다시 로그인하면 로컬본이 있는데도 「받기」를
+  //    권하게 된다 — 소속은 폴더 안 표식이 알고 있으므로, 그 폴더를 연 것만으로 되살린다.
+  //    **표식이 정본이라 이 쓰기는 기억을 고칠 뿐 소속을 정하지 않는다.**
+  rememberOpenFolder();
 
   diagnostics = vscode.languages.createDiagnosticCollection("zalkera");
 
@@ -541,6 +551,20 @@ function currentFolderBinding(): string | null {
     vscode.workspace.getConfiguration("zalkera").inspect<string>("tenant")
       ?.workspaceValue ?? null;
   return folderBinding(readSourceMarkAt(dir), linked);
+}
+
+/**
+ * 지금 열린 폴더가 자기 사이트를 말하면 레지스트리에 다시 적는다.
+ *
+ * 같은 값이면 안 쓴다 — 창을 열 때마다 도는 자리라, 안 바뀐 값을 매번 쓰면 전역 상태가 창 수만큼
+ * 흔들린다.
+ */
+function rememberOpenFolder(): void {
+  const dir = workspaceDir();
+  if (dir === undefined) return;
+  const binding = currentFolderBinding();
+  if (binding === null || folderRegistry()[binding] === dir) return;
+  rememberFolder(binding, dir);
 }
 
 function register(
@@ -885,7 +909,25 @@ async function chooseFetchTarget(
   revisionNo: number,
   openDir: string | undefined,
 ): Promise<string | undefined> {
-  const suggestion = openDir ? suggestSibling(openDir, revisionNo) : null;
+  // ⚠ **빈 폴더를 열어 두고 온 사람에게 「빈 폴더를 고르세요」라고 다시 묻지 않는다.** 그 사람은
+  //    이미 자리를 골랐다 — 못 읽으면 탐색기로 올라가 새 폴더를 만들게 하는 왕복이 생기고, 그것이
+  //    비개발자가 멈추는 자리다. 판정은 core 가 하고 빈 폴더 여부만 여기서 잰다.
+  const plan = decideFetchTargetPlan({
+    openDir: openDir ?? null,
+    openDirReceivable: openDir !== undefined && (await isReceivable(openDir)),
+    siteFolderOpen: siteDir() !== null,
+  });
+  if (plan.kind === "here") {
+    const HERE = "이 폴더에 받기";
+    const answer = await vscode.window.showInformationMessage(
+      ours(say.fetchTargetHere(tenant, revisionNo, plan.dir)),
+      HERE,
+      "다른 폴더 고르기…",
+    );
+    if (answer === undefined) return undefined;
+    if (answer === HERE) return plan.dir;
+  }
+  const suggestion = plan.kind === "sibling" && openDir ? suggestSibling(openDir, revisionNo) : null;
   if (suggestion) {
     // 같은 판을 이미 받아 둔 폴더가 있으면 사본을 하나 더 만들기 전에 그 사실을 말한다.
     // **막지는 않는다** — 사본이 망가져서 다시 받는 경우가 있다.
@@ -1596,6 +1638,27 @@ async function useFolderSite(): Promise<void> {
   void vscode.window.showInformationMessage(say.backToFolderSite(mark.tenant));
 }
 
+/**
+ * 소속 표식을 `linked` 로 남긴다. **링크 쓰기와 짝으로만 부른다** — 둘이 갈리면 「어긋남은
+ * 사고다」가 성립하지 않는다(어느 쪽을 믿을지 알 수 없는 폴더가 생긴다).
+ *
+ * ⚠ **한 자리에 모아 둔다.** 두 경로(「사이트에 연결」·「로컬본 폴더 직접 고르기」)가 각자 쓰면
+ *   언젠가 한쪽만 고쳐지고, 그 한쪽이 표식 없이 링크만 남기는 자리가 된다. 배선 검사가 이 자리
+ *   하나를 센다.
+ *
+ * 실패는 로그만 남긴다 — 연결 자체를 실패로 만들지 않는다(받기·발행과 같은 규율).
+ */
+async function markFolderLinked(dir: string, tenant: string): Promise<void> {
+  const marked = await writeBindingMarkTo(dir, {
+    origin: "linked",
+    tenant,
+    linkedAt: new Date().toISOString(),
+  });
+  if (!marked.ok) {
+    log(`소속 표식을 남기지 못했습니다(${marked.reason}) — 연결 자체는 끝났습니다.`);
+  }
+}
+
 async function linkFolder(): Promise<void> {
   // 폴더가 없으면 연결할 대상이 없다 — 종전에는 전역에 적어 놓고 "이 작업 공간을" 이라고 말했다.
   if (workspaceDir() === undefined) {
@@ -1634,14 +1697,7 @@ async function linkFolder(): Promise<void> {
   // ⚠ **소속이 안 바뀌면 표식은 그대로 둔다.** 같은 사이트를 다시 골랐을 뿐인데 덮으면,
   //    받기 표식의 판 번호·sha256 이 사라져 「이미 받아 두셨습니다」 힌트가 죽는다.
   if (binding !== choice.description) {
-    const marked = await writeBindingMarkTo(dir, {
-      origin: "linked",
-      tenant: choice.description,
-      linkedAt: new Date().toISOString(),
-    });
-    if (!marked.ok) {
-      log(`소속 표식을 남기지 못했습니다(${marked.reason}) — 연결 자체는 끝났습니다.`);
-    }
+    await markFolderLinked(dir, choice.description);
   }
   rememberFolder(choice.description, dir);
   log(
@@ -2582,18 +2638,25 @@ async function chooseTenant(force = false): Promise<string> {
 /** 사이드바·팔레트에서 부르는 사이트 선택. 취소는 조용히 끝낸다. */
 async function chooseSite(): Promise<void> {
   try {
-    // ⚠ **소속을 고르기 전에 읽는다.** `chooseTenant` 가 설정을 쓰고 나면 이 값이 오염된다.
+    // ⚠ **둘 다 고르기 전에 읽는다.** `chooseTenant` 가 설정을 쓰고 나면 소속도 유효 사이트도
+    //    오염된다 — 특히 `current` 는 늘 고른 값과 같아져 모든 전환이 「이미 그 사이트」로 접힌다.
     const binding = currentFolderBinding();
+    const current = tenantCode();
     const code = await chooseTenant(true);
     const choice = decideSiteChoice({
       picked: code,
       binding,
       siteFolderOpen: siteDir() !== null,
-      knownFolderConfirmed: confirmedFolderFor(code) !== null,
+      current,
     });
     await refreshSidebar();
     // `code`·`binding` 은 서버·폴더가 정한 값이다 — 소독 없이 알림에 넣으면 비-모달이 명령
     // 링크로 렌더한다(재심의 실증).
+    if (choice.kind === "unchanged") {
+      // **아무것도 안 바뀌었다.** 「바꿨습니다」로 말하면 화면과 실제가 갈린다.
+      void vscode.window.showInformationMessage(say.alreadyOnSite(code));
+      return;
+    }
     if (choice.kind === "switched") {
       log(`작업 사이트를 ${code} 로 바꿨습니다.`);
       void vscode.window.showInformationMessage(`사이트: ${plainNotice(code, 64)}`);
@@ -2601,10 +2664,15 @@ async function chooseSite(): Promise<void> {
     }
     if (choice.kind === "adopted") {
       log(`이 폴더를 ${code} 사이트에 연결했습니다.`);
-      void vscode.window.showInformationMessage(say.folderAdopted(code));
+      // 잘못 고른 사람에게 **되돌리는 길**을 준다 — 입양은 조용히 일어나고, 그 사실만 알리면
+      // 다음에 할 일이 화면에 없다. 막지는 않는다(표식 부재로는 아무것도 막지 않는다).
+      const RELINK = "다시 연결";
+      if ((await vscode.window.showInformationMessage(say.folderAdopted(code), RELINK)) === RELINK) {
+        await vscode.commands.executeCommand("zalkera.site.link");
+      }
       return;
     }
-    await offerFolderElsewhere(code, binding, choice.offer);
+    await offerElsewhere(code, binding ?? "");
   } catch (error) {
     if (isCancelled(error)) return;
     throw error;
@@ -2612,39 +2680,190 @@ async function chooseSite(): Promise<void> {
 }
 
 /**
- * 고른 사이트가 **이 폴더의 것이 아닐 때** 폴더 전환을 권한다.
+ * 고른 사이트가 **이 폴더의 것이 아닐 때** 무엇을 할지 고르게 한다.
  *
- * ⚠ **이 창의 사이트는 바뀌지 않았다**(`saveTenant` 가 아무것도 안 적었다). 그러니 「바꿨습니다」로
- *   말하면 안 된다 — 화면과 실제가 갈린다.
+ * ⚠ **이 창의 사이트는 바뀌지 않았다**(`decideTenantScope` 가 `none` 이라 아무것도 안 적혔다).
+ *   그러니 「바꿨습니다」로 말하면 안 된다 — 화면과 실제가 갈린다.
+ *
+ * ⚠ **알림이 아니라 고르는 화면이다.** 알림은 단추 두셋이 한계이고 저절로 사라진다 — 여기서
+ *   내야 할 길은 그보다 많고, 사라지면 사람은 자기가 고른 것이 무시당했다고 읽는다. Esc 가 곧
+ *   취소이고, 그때 아무것도 안 적히는 것은 위 `none` 판정이 이미 담보한다.
  */
-async function offerFolderElsewhere(
+async function offerElsewhere(picked: string, binding: string): Promise<void> {
+  log(`이 폴더는 ${binding || "다른"} 사이트의 소스라 ${picked} 작업은 다른 폴더에서 합니다.`);
+  // 고른 사이트를 **여기서 잡는다.** 이 창의 유효 사이트는 아직 이 폴더의 것이라, 캡처 없이
+  // 부르면 받기가 엉뚱한 사이트의 소스를 내려받는다.
+  const pinned = captureTenant(picked);
+
+  const quick = vscode.window.createQuickPick<
+    vscode.QuickPickItem & { option: ElsewhereOption }
+  >();
+  quick.title = say.elsewhereTitle(picked, binding);
+  quick.ignoreFocusOut = true;
+  try {
+    quick.busy = true;
+    quick.placeholder = "무엇을 할지 고르세요";
+    quick.show();
+
+    const fetchable = await probeFetchable(pinned);
+    const { options, note } = elsewhereOptions({
+      confirmedDir: confirmedFolderFor(picked),
+      fetchable,
+    });
+    quick.busy = false;
+    if (note === "no-source") quick.placeholder = say.noSourceYet(picked);
+    quick.items = options.map((option) => ({ ...describeOption(option), option }));
+
+    const chosen = await new Promise<ElsewhereOption | undefined>((resolve) => {
+      quick.onDidAccept(() => resolve(quick.selectedItems[0]?.option));
+      quick.onDidHide(() => resolve(undefined));
+    });
+    quick.hide();
+    if (!chosen) return;
+    await runElsewhere(chosen, pinned, picked);
+  } finally {
+    quick.dispose();
+  }
+}
+
+/**
+ * 그 사이트에 **받을 판이 있는가.**
+ *
+ * ⚠ **모르는 것으로는 막지 않는다.** 조회가 실패하면 `unknown` 이고 받기 항목은 남는다 — 서버가
+ *   잠시 흔들린 것을 「소스가 없다」로 접으면 정상 경로가 사라진다.
+ *
+ * ⚠ **제어 평면 상한(30초)을 그대로 쓰지 않는다.** 이것은 목록을 다듬는 **곁들이 조회**이지
+ *   사람이 시킨 동작이 아니다. 서버가 붙들면 고르는 화면이 그만큼 멈춰 있게 되므로 여기서만
+ *   짧게 끊고 `unknown` 으로 간다 — 그래도 잃는 것은 「받기 항목을 뺄 기회」뿐이다.
+ */
+const FETCHABLE_PROBE_MS = 4_000;
+
+async function probeFetchable(
+  pinned: CapturedTenant,
+): Promise<"yes" | "none" | "unknown"> {
+  try {
+    const { api } = await ensureApiFor(pinned);
+    const revisions = await Promise.race([
+      api.listRevisions(),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), FETCHABLE_PROBE_MS)),
+    ]);
+    if (revisions === null) {
+      log("사이트의 판 목록을 제때 받지 못해 받기 항목을 그대로 둡니다.");
+      return "unknown";
+    }
+    return pickRevision(revisions) === null ? "none" : "yes";
+  } catch (error) {
+    log(
+      `사이트의 판 목록을 확인하지 못했습니다 — ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return "unknown";
+  }
+}
+
+/** 항목의 라벨은 **리터럴**이다 — 서버 값은 `detail` 로만 간다. */
+function describeOption(option: ElsewhereOption): vscode.QuickPickItem {
+  switch (option.kind) {
+    case "open":
+      return {
+        label: "$(folder-opened) 그 사이트 폴더 열기",
+        detail: plainNotice(option.dir, 120),
+      };
+    case "fetch":
+      return {
+        label: "$(cloud-download) 그 사이트 소스 다운로드",
+        detail: "새 빈 폴더에 받습니다 — 지금 폴더는 그대로 둡니다",
+      };
+    case "pick-folder":
+      return {
+        label: "$(search) 로컬본 폴더 직접 고르기…",
+        detail: "이미 받아 두신 폴더가 있으면 그것을 엽니다",
+      };
+    case "import-zip":
+      return {
+        label: "$(file-zip) 받은 zip 으로 시작…",
+        detail: "새 빈 폴더에 zip 을 풉니다",
+      };
+  }
+}
+
+async function runElsewhere(
+  option: ElsewhereOption,
+  pinned: CapturedTenant,
   picked: string,
-  binding: string | null,
-  offer: "open" | "fetch",
 ): Promise<void> {
-  log(`이 폴더는 ${binding ?? "다른"} 사이트의 소스라 ${picked} 작업은 다른 폴더에서 합니다.`);
-  const label = offer === "open" ? "그 사이트 폴더 열기" : "그 사이트 소스 다운로드";
-  const answer = await vscode.window.showInformationMessage(
-    say.pickedElsewhere(picked, binding ?? ""),
-    label,
-  );
-  if (answer !== label) return;
-  if (offer === "open") {
-    const dir = confirmedFolderFor(picked);
-    // 확증은 물어보기 전에도 했지만 **누른 시점에 다시 한다** — 그 사이 폴더가 사라지거나
-    // 다른 사이트를 담게 됐을 수 있고, 그때 여는 것이 이 설계가 막으려는 사고다.
-    if (dir === null) {
-      void vscode.window.showInformationMessage(
-        ours("그 사이트의 로컬본을 찾지 못했습니다 — 「내려받기」로 소스를 받아 주세요."),
-      );
+  switch (option.kind) {
+    case "open": {
+      // 확증은 목록을 만들 때도 했지만 **누른 시점에 다시 한다** — 그 사이 폴더가 사라지거나
+      // 다른 사이트를 담게 됐을 수 있고, 그때 여는 것이 이 설계가 막으려는 사고다.
+      const dir = confirmedFolderFor(picked);
+      if (dir === null) {
+        void vscode.window.showInformationMessage(
+          ours("그 사이트의 로컬본을 찾지 못했습니다 — 「내려받기」로 소스를 받아 주세요."),
+        );
+        return;
+      }
+      await openSiteFolder(dir);
       return;
     }
-    await openSiteFolder(dir);
+    case "fetch":
+      await withReceiveGuard(() => openSite(pinned));
+      return;
+    case "pick-folder":
+      await openPickedLocalFolder(pinned, picked);
+      return;
+    case "import-zip":
+      await vscode.commands.executeCommand("zalkera.site.importZip");
+      return;
+  }
+}
+
+/**
+ * 「로컬본 폴더 직접 고르기」 — 사람이 아는 자리를 우리가 못 기억할 때의 길.
+ *
+ * ⚠ **이 동사는 재연결이 아니다.** 소속이 있는 폴더는 열지 않고 거절한다 — 남의 사이트 소스를
+ *   「그 사이트 폴더」로 내주지 않는 것은 레지스트리 확증과 같은 잣대다. 소속을 **바꾸는** 것은
+ *   「사이트에 연결」 하나로 남는다.
+ */
+async function openPickedLocalFolder(
+  pinned: CapturedTenant,
+  picked: string,
+): Promise<void> {
+  const chosen = await vscode.window.showOpenDialog({
+    canSelectFolders: true,
+    canSelectFiles: false,
+    openLabel: "이 폴더 열기",
+    title: `「${picked}」 의 소스 폴더 고르기`,
+  });
+  const dir = chosen?.[0]?.fsPath;
+  if (dir === undefined) return;
+
+  const plan = decidePickedFolder(
+    folderBinding(readSourceMarkAt(dir), workspaceLinkAt(dir)),
+    picked,
+  );
+  if (plan.kind === "refuse") {
+    void vscode.window.showWarningMessage(
+      say.pickedFolderBoundElsewhere(plan.bound, picked),
+    );
     return;
   }
-  // ⚠ **고른 사이트를 붙들고 간다.** 이 창의 유효 사이트는 아직 이 폴더의 것이라, 그냥 부르면
-  //   받기가 **엉뚱한 사이트의 소스**를 내려받는다.
-  await withReceiveGuard(() => openSite(captureTenant(picked)));
+  if (plan.kind === "link-consent") {
+    const ask = say.pickedFolderLinkConfirm(picked);
+    const answer = await vscode.window.showWarningMessage(
+      ask.message,
+      { modal: true, detail: ask.detail },
+      ask.action,
+    );
+    // ⚠ **취소하면 열지도 않는다.** 연결 없이 열면 새 창의 유효 사이트가 전역 잔값이 되어,
+    //    소속 없는 폴더 + 잘못된 유효 사이트라는 형상을 우리 제안이 만들어 준다.
+    if (answer !== ask.action) return;
+    await markFolderLinked(dir, String(pinned));
+  }
+  // 링크는 두 갈래 모두 쓴다 — `open` 은 표식에 맞추는 복원이고, 연결은 표식과 짝이다.
+  const linked = await linkFolderToTenant(dir, String(pinned));
+  if (!linked.ok) log(`폴더 설정을 적지 못했습니다(${linked.reason}).`);
+  rememberFolder(String(pinned), dir);
+  await openSiteFolder(dir);
 }
 
 async function ensureApi(): Promise<ZalkeraApi> {

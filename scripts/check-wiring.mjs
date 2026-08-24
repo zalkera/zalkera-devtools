@@ -163,7 +163,7 @@ const WIRES = [
     ],
     [
         "packages/vscode/src/extension.ts",
-        "await withReceiveGuard(() => openSite(captureTenant(picked)))",
+        "await withReceiveGuard(() => openSite(pinned))",
         "제안 흐름의 받기가 겹쳐 돌거나, 라이브 사이트를 읽어 엉뚱한 사이트의 소스를 내려받는다",
     ],
     [
