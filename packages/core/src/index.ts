@@ -110,12 +110,7 @@ export { isReceivable, meaningfulEntries, removeAdded, snapshotEntries } from ".
 
 export { waitForBuild, type BuildOutcome, type WaitOptions } from "./build.ts";
 
-export {
-  captureTenant,
-  decideReadyPrompt,
-  decideSwitch,
-  resolveHelpUrl,
-} from "./tenantScope.ts";
+export { captureTenant, resolveHelpUrl } from "./tenantScope.ts";
 export {
   httpUrl,
   isLoopback,
@@ -144,13 +139,8 @@ export {
   UPGRADE_NOTICE_INTERVAL_MS,
   type UpgradeNoticeState,
 } from "./upgradeNotice.ts";
-export { plainNotice, ours, count } from "./notice.ts";
-export {
-  say,
-  type CapturedTenant,
-  type ReadyPrompt,
-  type SwitchDecision,
-} from "./tenantScope.ts";
+export { plainNotice, ours, count, countJosa } from "./notice.ts";
+export { say, type CapturedTenant } from "./tenantScope.ts";
 export { fetchPresetZip, type PresetZip } from "./presets.ts";
 export {
   precheck,

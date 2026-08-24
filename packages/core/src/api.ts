@@ -19,6 +19,17 @@ export interface ApiOptions {
 export interface TenantSummary {
     code: string;
     name: string;
+    /**
+     * 이 사이트의 대표 주소(호스트만 — 스킴 없음). 백엔드 `MeResponse.TenantSummary.primaryDomain` 이다:
+     * 검증된 커스텀 도메인이 있으면 그것이고, 없으면 플랫폼 호스트로 접힌다.
+     *
+     * ⚠ **빈 문자열이 올 수 있다.** 서버가 `.orEmpty()` 로 채우는 자리이고, 실제로 비는 것은
+     *   폐기된 테넌트다. 주소를 못 구한 것과 같은 뜻이므로 부르는 쪽은 비면 링크를 내지 않는다.
+     *
+     * ⚠ 여기서 `code` 로 호스트를 조립하지 마라. 베이스 도메인 지식의 사본이 하나 더 생기고,
+     *   커스텀 도메인을 쓰는 사이트에서는 그 사본이 **틀린 주소**를 연다.
+     */
+    primaryDomain?: string;
 }
 
 export interface IssuedPreviewKey {

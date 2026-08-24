@@ -132,8 +132,63 @@ export function plainNotice(text: unknown, limit = 300): string {
  * 숫자로 읽히면 숫자를, 아니면 `?` 를 돌려준다. **모르면 보여 주지 않는 쪽**이다.
  */
 export const count = (value: unknown): string => {
-  const n = typeof value === "bigint" ? Number(value) : Number(value);
+  // ⚠ **`Number(...)` 에 바로 넘기지 않는다.** `Number(null)`·`Number("")`·`Number([])`·
+  //    `Number(false)` 는 **전부 0** 이다. 서버가 `revisionNo` 를 null 로 보내면 화면에
+  //    「버전 0」이 뜬다 — 모르는 것을 아는 척하는 자리이고, 이 함수가 배격한 바로 그것이다.
+  //    문자열도 받지 않는다: `"5"` 를 5 로 읽어 주면 `"1 [열기](command:…)"` 만 걸러지고
+  //    **서버가 숫자 자리에 뭘 넣었는지**는 계속 안 보인다.
+  if (typeof value !== "number" && typeof value !== "bigint") return "?";
+  const n = Number(value);
   return Number.isFinite(n) ? String(n) : "?";
+};
+
+/**
+ * 숫자 뒤에 붙일 조사. **이름만 받고, 글자는 이 파일이 낸다.**
+ *
+ * ⚠ **부르는 쪽에서 리터럴 두 개를 받지 않는다.** 그러면 그 두 글자가 소독을 안 지나고 문장에
+ *   그대로 이어 붙는다 — 유니온이 생 `string` 을 막지만 캐스트 한 줄이면 뚫리고, 알림 소독
+ *   검사기는 소독기의 **인자를 보지 않으므로** 초록인 채로 나간다(변이로 실측: 알림에 클릭
+ *   링크가 살았다). 키만 받고 표에서 꺼내면 그 갈래가 구조적으로 사라진다.
+ */
+export type Josa = "이/가" | "을/를" | "은/는" | "으로/로";
+
+const JOSA_PAIRS: Record<Josa, readonly [string, string]> = {
+    "이/가": ["이", "가"],
+    "을/를": ["을", "를"],
+    "은/는": ["은", "는"],
+    "으로/로": ["으로", "로"],
+};
+
+/**
+ * **숫자 + 조사.** `버전 ${count(n)} 가` 는 1·3·6·7·8·10 에서 전부 틀린다 — 조사는 숫자를 **읽는
+ * 소리**의 받침이 정하기 때문이다(1=일·10=십 은 받침이 있고 2=이·5=오 는 없다).
+ *
+ * ⚠ **「으로/로」은 규칙이 다르다.** ㄹ 받침 뒤에는 「으로」가 아니라 「로」다(1=일 → "1로",
+ *   7=칠 → "7로"). 다른 조사에서 ㄹ 은 받침으로 치므로("1이"·"1은"·"1을"), 받침을 있다/없다
+ *   둘로만 나누면 이 자리가 반드시 틀린다. 그래서 세 갈래로 나눈다: 없음 · ㄹ · 그 밖.
+ *
+ * 판정은 [count] 가 **실제로 그린 문자열의 끝 글자**로 한다. 값을 다시 해석하지 않으므로 화면에
+ * 뜬 글자와 조사가 어긋날 수 없고, 숫자가 아닌 값이 와서 [count] 가 `?` 를 돌려준 자리에도
+ * 조사는 붙어야 하므로 받침 없는 쪽으로 접는다.
+ *
+ * 끝자리 0 은 언제나 받침이다 — 마지막으로 읽는 소리가 십·백·천·만(0 자체는 영)이기 때문이다.
+ *
+ * ⚠ **던지지 않는다.** 표에 없는 이름이 오면 조사 없이 숫자만 돌려준다. 소독기 한 벌 중 하나만
+ *   예외를 내면 알림 경로에 새 실패 모드가 생긴다 — `plainNotice`·`count` 는 어떤 입력에도
+ *   안 던진다.
+ *
+ * ⚠ **[count] 를 감싼다** — 소독 보장을 물려받는다. 돌려주는 것은 `count` 의 출력과 [JOSA_PAIRS]
+ *   의 글자뿐이고 **둘 다 이 파일의 것**이라, 서버 문자열이 실릴 자리가 없다.
+ */
+export const countJosa = (value: unknown, josa: Josa): string => {
+    const drawn = count(value);
+    const pair = JOSA_PAIRS[josa];
+    if (!pair) return drawn;
+    const last = drawn.slice(-1);
+    // 없음 = 2·4·5·9(이·사·오·구) · ㄹ = 1·7·8(일·칠·팔) · 그 밖 = 0·3·6(영/십·삼·육)
+    const kind = /[2459]/.test(last) ? "none" : /[178]/.test(last) ? "rieul" : /[036]/.test(last) ? "other" : "none";
+    const withoutFinal = kind === "none" || (kind === "rieul" && josa === "으로/로");
+    return `${drawn}${withoutFinal ? pair[1] : pair[0]}`;
 };
 
 /**

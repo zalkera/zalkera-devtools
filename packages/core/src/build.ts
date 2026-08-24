@@ -5,13 +5,21 @@ import { DevtoolsError } from "./errors.ts";
  * 올린 버전이 **서버에서 빌드될 때까지** 기다린다(memo76 §7 상태 게이트).
  *
  * ■ 왜 필요한가
- *   `STATIC` 은 올리는 즉시 `READY` 지만, `NEXT_SOURCE` 는 서버가 빌드를 마쳐야 `READY` 가 된다.
- *   그때까지 활성 전환은 409 `REVISION_NOT_READY` 로 거절된다. 종전에는 확장이 이 사실을 몰라
- *   **"올렸습니다"에서 이야기가 끊겼고**, 사용자는 왜 못 켜는지 알 수 없었다.
+ *   `STATIC` 은 올리는 즉시 `READY` 이고 그 순간 게시되지만, `NEXT_SOURCE` 는 서버가 빌드를 마쳐야
+ *   `READY` 가 되고 **그때 게시된다.** 확장이 이 사실을 모르면 "올렸습니다"에서 이야기가 끊겨,
+ *   사용자는 언제 손님에게 나가는지 알 수 없다.
  *
  * ■ 무엇을 하지 않는가
- *   **켜지 않는다.** 여기서 하는 일은 "켤 수 있게 됐는가"를 지켜보는 것뿐이다. 올리기와 켜기를 한 번에
- *   이으면 확인 없이 손님에게 가고, 그건 오너가 금지한 자리다(무검수 자동배포 금지).
+ *   **켜지 않는다** — 켤 필요가 없기 때문이다. 게시는 서버가 한다(빌드 콜백이 활성 포인터를 옮긴다).
+ *   여기서 하는 일은 **그것이 언제 일어나는지 지켜보는 것**뿐이다.
+ *
+ *   ⚠ 「확인 없이 손님에게 가지 않게 여기서 안 켠다」는 근거는 쓸 수 없다. **그 게이트는 없다** —
+ *     백엔드가 켠다.
+ *
+ * ■ 빌드가 끝나면 곧 반영인가
+ *   아니다. 활성 포인터가 서는 것과 방문자가 새 화면을 보는 것 사이에 서빙 반영 시간이 있다.
+ *   **그 시간을 여기서 숫자로 말할 수는 없다** — 오케스트레이터의 스냅샷 주기이고 확장이 소유하지
+ *   않는 값이다. 문면은 "잠시 걸립니다"까지만 말한다.
  *
  * ■ 왜 폴링인가
  *   서버가 완료를 알려 줄 통로가 없다(웹훅도, 스트림도). 있는 것은 버전 목록뿐이라 그것을 다시 본다.
@@ -19,6 +27,12 @@ import { DevtoolsError } from "./errors.ts";
  */
 export type BuildOutcome =
     | { kind: "ready"; revision: SiteRevision }
+    /**
+     * 빌드는 끝났는데 **그 판이 안 켜졌다.** 기다리는 사이 다른 판이 활성이 된 경우다 —
+     * 백엔드가 활성 역전을 막느라 완료를 기록만 하고 포인터를 안 옮긴다. 「게시됐다」로 접으면
+     * 거짓이 나간다.
+     */
+    | { kind: "superseded"; revision: SiteRevision }
     | { kind: "failed"; revision: SiteRevision; reason: string | null }
     /** 상한까지 안 끝났다. **실패가 아니다** — 계속 빌드 중일 수 있다. */
     | { kind: "timeout" }
@@ -77,7 +91,12 @@ export async function waitForBuild(options: WaitOptions): Promise<BuildOutcome> 
 
         const mine = revisions.find((r) => r.revisionNo === options.revisionNo);
         if (!mine) return { kind: "gone" };
-        if (mine.status === "READY") return { kind: "ready", revision: mine };
+        if (mine.status === "READY") {
+            // ⚠ **READY 는 「서빙 가능」이지 「서빙 중」이 아니다.** 빌드 콜백에 단조 가드가 있어,
+            //    기다리는 수 분 사이에 다른 판이 켜졌으면 완료를 READY 로 **기록만 하고** 활성
+            //    포인터는 그대로 둔다. 판정에 필요한 값은 같은 응답에 이미 실려 있다 — 왕복 0회.
+            return mine.isActive ? { kind: "ready", revision: mine } : { kind: "superseded", revision: mine };
+        }
         if (mine.status === "FAILED") return { kind: "failed", revision: mine, reason: mine.failReason ?? null };
 
         // BUILDING. 경과를 알려 준다 — 몇 분짜리 기다림에서 숫자가 움직이는 것이 곧 "살아 있다"는 신호다.

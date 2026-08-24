@@ -1,4 +1,4 @@
-import {ours, plainNotice, count} from "./notice.ts";
+import {ours, plainNotice, countJosa} from "./notice.ts";
 /**
  * **"어느 사이트냐"를 판정하고 말하는 자리.** 순수 함수만 있고 `vscode` 를 모른다.
  *
@@ -36,50 +36,6 @@ export type CapturedTenant = string & { readonly __capturedTenant: unique symbol
  */
 export function captureTenant(tenant: string): CapturedTenant {
     return tenant as CapturedTenant;
-}
-
-/** 「지금 전환」을 눌렀을 때, 그 버전을 올린 사이트와 지금 작업 사이트가 같은가. */
-export type SwitchDecision =
-    | { ok: true }
-    /** 기다리는 사이 사이트가 바뀌었다. **아무것도 하지 않는다** — 조용히 남의 사이트를 켜는 것보다 낫다. */
-    | { ok: false; reason: "TENANT_CHANGED"; message: string };
-
-/**
- * 전환 대상이 올린 곳과 같은지 본다.
- *
- * `expected` 가 없으면(팔레트에서 직접 「버전 전환」을 부른 경우) 대조할 것이 없으므로 통과다 —
- * 그 경로는 사용자가 목록에서 눈으로 보고 고른다.
- */
-export function decideSwitch(expected: CapturedTenant | undefined, current: string): SwitchDecision {
-    if (expected === undefined || expected === current) return { ok: true };
-    return {
-        ok: false,
-        reason: "TENANT_CHANGED",
-        message: `작업 사이트가 「${shown(current)}」 로 바뀌어 전환하지 않았습니다(그 버전은 「${shown(expected)}」 의 것입니다).`,
-    };
-}
-
-/** 빌드가 끝난 뒤 무엇을 보여 줄지. */
-export type ReadyPrompt =
-    /** 같은 사이트다 — 원클릭 전환을 권한다. */
-    | { kind: "offer"; message: string; action: string }
-    /** 사이트가 바뀌었다 — 원클릭을 내리고 **어디로 가야 하는지** 말한다. */
-    | { kind: "redirect"; message: string };
-
-export function decideReadyPrompt(uploaded: CapturedTenant, current: string, revisionNo: number): ReadyPrompt {
-    if (uploaded !== current) {
-        return {
-            kind: "redirect",
-            message:
-                `「${shown(uploaded)}」 버전 ${count(revisionNo)} 가 준비됐습니다. 지금 작업 사이트는 「${shown(current)}」 라서 ` +
-                `여기서 바로 전환하지 않습니다 — 「${shown(uploaded)}」 로 돌아가 「버전 전환」에서 고르십시오.`,
-        };
-    }
-    return {
-        kind: "offer",
-        message: `「${shown(uploaded)}」 버전 ${count(revisionNo)} 가 준비됐습니다. 사이트는 아직 바뀌지 않았습니다.`,
-        action: "지금 전환",
-    };
 }
 
 /**
@@ -137,7 +93,7 @@ export const say = {
     },
     /** 받기 — 어느 사이트의 어느 판을, 어디로. 「지금 폴더는 그대로」가 이 문장의 요점이다. */
     fetchTargetTitle(tenant: CapturedTenant, revisionNo: number): string {
-        return `「${shown(tenant)}」 버전 ${count(revisionNo)} 를 받을 새 빈 폴더를 고르세요 — 지금 폴더는 그대로 둡니다`;
+        return `「${shown(tenant)}」 버전 ${countJosa(revisionNo, "을/를")} 받을 새 빈 폴더를 고르세요 — 지금 폴더는 그대로 둡니다`;
     },
     /**
      * 옆에 만들 폴더를 **본문에** 적는다.
@@ -149,39 +105,60 @@ export const say = {
         // ⚠ **안심 문구가 경로 앞이다.** 비-모달 알림은 한 줄로 잘리는데, 경로는 길이가
         //    사람 폴더 깊이에 따라 정해진다(윈도우에서 65자가 흔하다). 경로 뒤에 두면
         //    「지금 폴더는 그대로」가 잘려 사라지고, 그것이 이 화면의 **요점**이다.
-        return `지금 폴더는 그대로 둡니다. 「${shown(tenant)}」 버전 ${count(revisionNo)} 를 ${ours(path)} 로 받습니다.`;
+        return `지금 폴더는 그대로 둡니다. 「${shown(tenant)}」 버전 ${countJosa(revisionNo, "을/를")} ${ours(path)} 로 받습니다.`;
     },
     /** 같은 판을 담은 폴더가 **어디인지**까지 말한다. */
     alreadyFetchedAt(tenant: CapturedTenant, revisionNo: number, path: string): string {
-        return `「${shown(tenant)}」 버전 ${count(revisionNo)} 는 이미 ${ours(path)} 에 받아 두셨습니다.`;
+        return `「${shown(tenant)}」 버전 ${countJosa(revisionNo, "은/는")} 이미 ${ours(path)} 에 받아 두셨습니다.`;
     },
     fetchProgress(tenant: CapturedTenant, revisionNo: number): string {
-        return `「${shown(tenant)}」 버전 ${count(revisionNo)} 를 받는 중`;
+        return `「${shown(tenant)}」 버전 ${countJosa(revisionNo, "을/를")} 받는 중`;
     },
     /** 받기 완료. `hadOpenSite` 면 **지금 폴더가 안 바뀌었다**는 사실을 같이 말한다. */
     fetched(tenant: CapturedTenant, revisionNo: number, hadOpenSite: boolean): string {
         // 소독 검사기는 **표시 문장 안의 보간**을 하나씩 본다. 중간 변수로 묶으면 그 변수가
         // 「허용 목록 밖」이 된다 — 묶지 않고 자리마다 소독기를 그대로 둔다.
         return hadOpenSite
-            ? `「${shown(tenant)}」 버전 ${count(revisionNo)} 를 새 폴더로 받았습니다. 지금 폴더는 바뀌지 않았습니다.`
-            : `「${shown(tenant)}」 버전 ${count(revisionNo)} 를 받았습니다.`;
+            ? `「${shown(tenant)}」 버전 ${countJosa(revisionNo, "을/를")} 새 폴더로 받았습니다. 지금 폴더는 바뀌지 않았습니다.`
+            : `「${shown(tenant)}」 버전 ${countJosa(revisionNo, "을/를")} 받았습니다.`;
     },
     /** 켜진 판이 없어 최근 것을 고른 경우. 말없이 고르면 화면과 실제가 갈린다. */
     pickedLatestReady(tenant: CapturedTenant, revisionNo: number): string {
-        return `「${shown(tenant)}」 에 켜진 판이 없어, 가장 최근에 만들어진 버전 ${count(revisionNo)} 를 받습니다.`;
+        return `「${shown(tenant)}」 에 켜진 판이 없어, 가장 최근에 만들어진 버전 ${countJosa(revisionNo, "을/를")} 받습니다.`;
     },
+    /**
+     * 올리기 확인 — **이 문이 곧 배포다.**
+     *
+     * 백엔드는 업로드로 만든 판을 자동으로 켠다 — STATIC 은 확정 즉시, NEXT_SOURCE 는 빌드가
+     * 끝나는 순간이다. 그러니 이 모달이 **마지막 확인 지점**이고, 여기서 "안 바뀐다"고 말하면
+     * 사람은 읽지 않고 넘긴 뒤 미검수 소스를 손님에게 보낸다.
+     */
     publishConfirm(tenant: CapturedTenant): { message: string; detail: string; action: string } {
         return {
-            message: `「${shown(tenant)}」 사이트에 지금 소스를 새 버전으로 올립니다.`,
+            message: `「${shown(tenant)}」 사이트를 지금 이 폴더의 소스로 바꿉니다.`,
             detail:
-                "올리기만 합니다 — 방문자가 보는 사이트는 그대로입니다.\n" +
-                "그 버전으로 바꾸려면 올린 뒤 따로 전환하십시오.",
-            action: "올리기",
+                "올리면 방문자가 보는 사이트가 이 소스로 바뀝니다.\n" +
+                "이전에 올리신 판은 「버전 전환」에 남습니다.",
+            action: "올리고 게시",
         };
+    },
+
+    /**
+     * 게시 완료 — **사실을 말한다.**
+     *
+     * ⚠ **반영 시간을 숫자로 적지 않는다.** 서빙 반영은 오케스트레이터의 스냅샷 주기에 달려 있고
+     *   그 값은 확장이 소유하지 않는다. 여기 숫자를 박으면 저쪽 설정이 바뀌는 날 조용히 거짓이 된다
+     *   — 모르는 것은 모른다고 말하는 편이 낫다.
+     */
+    published(tenant: CapturedTenant, revisionNo: number): string {
+        return (
+            `「${shown(tenant)}」 사이트에 버전 ${countJosa(revisionNo, "을/를")} 배포했습니다. ` +
+            `방문자에게 반영되기까지 잠시 걸립니다.`
+        );
     },
     switchConfirm(tenant: CapturedTenant, revisionNo: number): { message: string; detail: string; action: string } {
         return {
-            message: `「${shown(tenant)}」 사이트를 버전 ${count(revisionNo)} 로 바꿉니다.`,
+            message: `「${shown(tenant)}」 사이트를 버전 ${countJosa(revisionNo, "으로/로")} 바꿉니다.`,
             detail: "방문자가 보는 화면이 바로 바뀝니다.",
             action: "바꾸기",
         };
@@ -203,21 +180,22 @@ export const say = {
             message: `「${shown(tenant)}」 에 아직 게시하지 않은 AI 변경이 있습니다.`,
             detail:
                 `${plainNotice(serverMessage, 200)}\n` +
-                "버전을 바꾸면 그 변경은 사라집니다. 되돌릴 수 없습니다.",
-            action: "버리고 바꾸기",
+                "계속하면 그 변경은 사라집니다. 되돌릴 수 없습니다.",
+            action: "버리고 계속",
         };
     },
     switched(tenant: CapturedTenant, revisionNo: number): string {
-        return `「${shown(tenant)}」 사이트를 버전 ${count(revisionNo)} 로 바꿨습니다.`;
+        return `「${shown(tenant)}」 사이트를 버전 ${countJosa(revisionNo, "으로/로")} 바꿨습니다.`;
     },
     building(tenant: CapturedTenant, revisionNo: number): string {
-        return `「${shown(tenant)}」 버전 ${count(revisionNo)} 를 서버가 빌드하는 중`;
+        return `「${shown(tenant)}」 버전 ${countJosa(revisionNo, "을/를")} 서버가 빌드하는 중`;
     },
     buildFailed(tenant: CapturedTenant, revisionNo: number): string {
-        return `「${shown(tenant)}」 버전 ${count(revisionNo)} 를 서버가 만들지 못했습니다. 사이트는 그대로입니다.`;
+        return `「${shown(tenant)}」 버전 ${countJosa(revisionNo, "을/를")} 서버가 만들지 못했습니다. 사이트는 그대로입니다.`;
     },
     buildTimedOut(tenant: CapturedTenant, revisionNo: number): string {
-        return `「${shown(tenant)}」 버전 ${count(revisionNo)} 가 아직 빌드 중입니다. 끝나면 「버전 전환」에서 고르실 수 있습니다.`;
+        return `「${shown(tenant)}」 버전 ${countJosa(revisionNo, "이/가")} 아직 빌드 중입니다. 끝나면 게시됩니다 — ` +
+            `그 사이 다른 판을 올리시면 그쪽이 켜집니다.`;
     },
     /**
      * 기다리기를 그만뒀을 때. ⚠ **취소는 빌드를 멈추는 것이 아니다** — 서버는 계속 짓는다.
@@ -227,15 +205,19 @@ export const say = {
      * 사용자가 "어느 사이트가 빌드 중이라는 거지"로 오독하는 자리였다.
      */
     buildWaitCancelled(tenant: CapturedTenant, revisionNo: number): string {
-        return `「${shown(tenant)}」 버전 ${count(revisionNo)} 는 서버에서 계속 빌드됩니다. 기다리기만 그만뒀습니다 — ` +
-            `끝나면 「버전 전환」에 나옵니다.`;
+        return `「${shown(tenant)}」 버전 ${countJosa(revisionNo, "은/는")} 서버에서 계속 빌드됩니다. 기다리기만 그만뒀습니다 — ` +
+            `끝나면 게시됩니다 — 그 사이 다른 판을 올리시면 그쪽이 켜집니다.`;
     },
-    /** 전환 대상이 목록에 없을 때(빌드 중·실패·이미 활성). */
-    cannotSwitch(tenant: CapturedTenant, revisionNo: number): string {
-        return `「${shown(tenant)}」 버전 ${count(revisionNo)} 로 바꿀 수 없습니다.`;
+    /**
+     * 빌드는 끝났는데 그 판이 안 켜졌다 — 기다리는 사이 다른 판이 활성이 됐다.
+     * **「배포했습니다」로 접지 않는다**: 사람이 방금 올린 소스가 지금 손님에게 나가는 것이 아니다.
+     */
+    supersededByOther(tenant: CapturedTenant, revisionNo: number): string {
+        return `「${shown(tenant)}」 버전 ${countJosa(revisionNo, "은/는")} 다 만들어졌지만 켜지지 않았습니다 — ` +
+            `기다리는 사이 다른 판이 켜졌습니다. 「버전 전환」에서 고르실 수 있습니다.`;
     },
     buildGone(tenant: CapturedTenant, revisionNo: number): string {
-        return `「${shown(tenant)}」 에서 버전 ${count(revisionNo)} 를 찾지 못했습니다.`;
+        return `「${shown(tenant)}」 에서 버전 ${countJosa(revisionNo, "을/를")} 찾지 못했습니다.`;
     },
 };
 

@@ -1,7 +1,7 @@
 import { ok, strictEqual } from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { MAX_CAP, plainNotice } from "./notice.ts";
+import { MAX_CAP, countJosa, plainNotice } from "./notice.ts";
 
 /** 알림이 링크로 만드는 형태. 이 시험이 재는 것은 «이것이 안 남는가» 하나다. */
 const RENDERS_AS_LINK = /\[[^\]]*\]\s*\(\s*[A-Za-z][A-Za-z0-9+.-]*:/;
@@ -228,4 +228,65 @@ test("회수를 다 써도 안 끝나면 문법 글자 자체를 지운다 — �
   const out = plainNotice(deep, 512);
   ok(!RENDERS_AS_LINK.test(out), out);
   ok(!/\]\s*\(/.test(out), `링크 문법이 남았다: ${out}`);
+});
+
+// ── 숫자 뒤 조사 ────────────────────────────────────────────────────────────
+//
+// 실사용 신고: 「버전 1 가 준비됐습니다」. 조사는 숫자의 **읽는 소리**가 정한다.
+
+test("받침 있는 소리 뒤에는 받침용 조사가 붙는다", () => {
+  // 0=영/십 · 1=일 · 3=삼 · 6=육 · 7=칠 · 8=팔 — 전부 받침이 있다.
+  for (const n of [0, 1, 3, 6, 7, 8, 10, 20, 100, 1000]) {
+    strictEqual(countJosa(n, "이/가"), `${n}이`, `${n}`);
+    strictEqual(countJosa(n, "을/를"), `${n}을`, `${n}`);
+    strictEqual(countJosa(n, "은/는"), `${n}은`, `${n}`);
+  }
+});
+
+test("받침 없는 소리 뒤에는 받침 없는 조사가 붙는다", () => {
+  // 2=이 · 4=사 · 5=오 · 9=구 — 받침이 없다.
+  for (const n of [2, 4, 5, 9, 12, 25, 39]) {
+    strictEqual(countJosa(n, "이/가"), `${n}가`, `${n}`);
+    strictEqual(countJosa(n, "을/를"), `${n}를`, `${n}`);
+    strictEqual(countJosa(n, "은/는"), `${n}는`, `${n}`);
+  }
+});
+
+test("「으로/로」만 ㄹ 받침을 예외로 둔다", () => {
+  // 1=일 · 7=칠 · 8=팔 은 ㄹ 받침이라 「으로」가 아니라 「로」다. 다른 조사에서는 받침으로 친다
+  // — 이 두 갈래를 한 판정으로 묶으면 반드시 한쪽이 틀린다(초판이 그랬다).
+  for (const n of [1, 7, 8, 11, 17, 21]) {
+    strictEqual(countJosa(n, "으로/로"), `${n}로`, `${n}`);
+    strictEqual(countJosa(n, "이/가"), `${n}이`, `${n} — ㄹ 은 다른 조사에서 받침이다`);
+  }
+  for (const n of [0, 3, 6, 10, 100]) strictEqual(countJosa(n, "으로/로"), `${n}으로`, `${n}`);
+  for (const n of [2, 4, 5, 9]) strictEqual(countJosa(n, "으로/로"), `${n}로`, `${n}`);
+});
+
+test("숫자로 못 읽는 값은 `?` 로 접히고 조사는 그대로 붙는다", () => {
+  // `count` 를 감싸므로 소독 보장을 물려받는다 — 적대적 서버 문자열이 문장에 실릴 자리가 없다.
+  // ⚠ `null`·`""`·`[]`·`false` 는 `Number(...)` 가 **0 으로 읽는다**. 그대로 두면 서버가 안 보낸
+  //    값이 화면에 「버전 0」으로 뜬다 — 여기가 그 회귀를 잠근다.
+  for (const evil of ["1 [열기](command:x)", "abc", "5", "", null, undefined, [], false, {}, Number.NaN]) {
+    const out = countJosa(evil, "이/가");
+    strictEqual(out, "?가", JSON.stringify(evil));
+    ok(!RENDERS_AS_LINK.test(out), out);
+  }
+});
+
+test("표에 없는 조사 이름이 와도 던지지 않는다", () => {
+  // 유니온이 막지만 캐스트 한 줄이면 뚫린다. 소독기 한 벌 중 하나만 예외를 내면 알림 경로에
+  // 새 실패 모드가 생긴다 — `plainNotice`·`count` 는 어떤 입력에도 안 던진다.
+  for (const bad of [undefined, null, 42, {}, "no-slash", ""]) {
+    strictEqual(countJosa(7, bad as never), "7", JSON.stringify(bad));
+  }
+});
+
+test("조사 글자는 **이 파일의 것**이다 — 부르는 쪽 문자열이 문장에 못 실린다", () => {
+  // 종전에는 리터럴 두 개를 인자로 받아 그대로 이어 붙였다. 캐스트 한 줄로 알림에 클릭 링크가
+  // 살았고(변이 실측) 소독 검사기는 소독기의 인자를 안 보므로 초록이었다.
+  const evil = "x](command:workbench.action.terminal.new)";
+  const out = countJosa(3, evil as never);
+  strictEqual(out, "3");
+  ok(!RENDERS_AS_LINK.test(out), out);
 });
