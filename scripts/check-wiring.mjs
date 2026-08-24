@@ -64,6 +64,11 @@ const WIRES = [
     ],
     [
         "packages/vscode/src/extension.ts",
+        "await markFolderLinked(dir, String(pinned));",
+        "직접 고른 폴더에 링크만 남고 표식이 없어, 어느 쪽을 믿을지 알 수 없는 폴더가 생긴다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
         'origin: "linked"',
         "재연결이 표식을 안 남겨 링크와 표식이 갈리고, 「어긋남은 사고다」가 성립하지 않는다",
     ],
