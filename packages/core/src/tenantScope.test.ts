@@ -1,6 +1,6 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
-import { captureTenant, decideReadyPrompt, decideSwitch, resolveHelpUrl, say } from "./tenantScope.ts";
+import { captureTenant, resolveHelpUrl, say } from "./tenantScope.ts";
 
 /**
  * `extension.ts` 의 판정부를 core 로 내린 뒤 처음 붙는 시험(memo146 §18.2).
@@ -9,44 +9,47 @@ import { captureTenant, decideReadyPrompt, decideSwitch, resolveHelpUrl, say } f
  * 여기 있는 것은 그중 **가장 비쌌던 축**을 잠근다 — 표기와 동작이 서로 다른 시점을 보던 자리.
  */
 
-// ── 전환 대상이 올린 곳과 같은가 ────────────────────────────────────────────
+// ── 올리기는 곧 배포다 ──────────────────────────────────────────────────────
+//
+// 백엔드는 업로드로 만든 판을 **자동으로 켠다**: STATIC 은 확정 즉시, NEXT_SOURCE 는 빌드 콜백에서.
+// 확장은 오랫동안 없는 2단 게이트를 가정했고, 그 위에 발행 후 「지금 전환」 단추가 서 있었다.
+// 그 단추는 **누르면 반드시 실패했다** — 방금 올린 판은 이미 활성이라 전환 후보에서 빠지기 때문이다.
+//
+// 여기 있는 시험은 그 거짓이 돌아오지 못하게 잠근다.
 
-test("같은 사이트면 전환한다", () => {
-    deepStrictEqual(decideSwitch(captureTenant("bix"), "bix"), { ok: true });
+test("올리기 확인창은 **사이트가 바뀐다**고 말한다", () => {
+    const ask = say.publishConfirm(captureTenant("bix"));
+    match(ask.message, /「bix」/);
+    match(ask.detail, /방문자가 보는 사이트가 이 소스로 바뀝니다/);
 });
 
-test("기다리는 사이 사이트가 바뀌었으면 **아무것도 하지 않는다**", () => {
-    // 원 결함: 빌드 대기(수 분·비모달) 중에 사이드바로 사이트를 바꿀 수 있다. 그때 「지금 전환」이
-    // 그대로 살아 있으면 **다른 사이트를 켠다** — 리비전 번호는 테넌트별 순번이라 겹친다.
-    const decision = decideSwitch(captureTenant("bix"), "credium");
-    strictEqual(decision.ok, false);
-    if (decision.ok) return;
-    strictEqual(decision.reason, "TENANT_CHANGED");
-    // 메시지가 **양쪽을 다 말해야** 사용자가 무슨 일이 났는지 안다.
-    match(decision.message, /credium/);
-    match(decision.message, /bix/);
+test("올리기 확인창은 **안 바뀐다고 말하지 않는다**", () => {
+    // 종전 문면이 정확히 그 약속이었고 시험이 그것을 잠그고 있었다. 방향을 뒤집어 다시 건다 —
+    // 이 문장이 어떤 형태로든 돌아오면 배포 게이트가 다시 거짓말을 하는 것이다.
+    const ask = say.publishConfirm(captureTenant("bix"));
+    for (const text of [ask.message, ask.detail]) {
+        ok(!/사이트는 그대로/.test(text), `안 바뀐다는 약속이 돌아왔다: ${text}`);
+        ok(!/올리기만 합니다/.test(text), `안 바뀐다는 약속이 돌아왔다: ${text}`);
+    }
 });
 
-test("팔레트에서 직접 부른 경로는 대조할 것이 없어 통과한다", () => {
-    // 그 경로는 사용자가 목록에서 눈으로 보고 고른다 — 여기서 막으면 정상 업무가 죽는다.
-    deepStrictEqual(decideSwitch(undefined, "bix"), { ok: true });
+test("게시 완료 문면은 **바뀌었다**고 말하고 되돌리기를 권하지 않는다", () => {
+    const line = say.published(captureTenant("bix"), 5);
+    match(line, /「bix」/);
+    match(line, /버전 5로 게시됐습니다/);
+    ok(!/아직 바뀌지 않았습니다/.test(line), `거짓 문장이 돌아왔다: ${line}`);
 });
 
-// ── 빌드가 끝난 뒤 무엇을 보여 주나 ─────────────────────────────────────────
-
-test("같은 사이트면 원클릭 전환을 권한다", () => {
-    const prompt = decideReadyPrompt(captureTenant("bix"), "bix", 5);
-    strictEqual(prompt.kind, "offer");
-    if (prompt.kind !== "offer") return;
-    match(prompt.message, /버전 5/);
-    match(prompt.message, /아직 바뀌지 않았습니다/);
+test("게시 완료 문면은 **반영 시간을 숫자로 말하지 않는다**", () => {
+    // 서빙 반영은 오케스트레이터의 스냅샷 주기이고 확장이 소유하지 않는 값이다. 여기에 숫자를 박으면
+    // 저쪽 설정이 바뀌는 날 조용히 거짓이 된다 — 모르는 것은 모른다고 말한다.
+    const line = say.published(captureTenant("bix"), 5);
+    ok(!/\d+\s*(초|분|시간)/.test(line), `소유하지 않은 숫자를 약속했다: ${line}`);
 });
 
-test("사이트가 바뀌었으면 원클릭을 내리고 **어디로 가야 하는지** 말한다", () => {
-    const prompt = decideReadyPrompt(captureTenant("bix"), "credium", 5);
-    strictEqual(prompt.kind, "redirect", "원클릭이 남아 있으면 다른 사이트를 켠다");
-    // "안 된다"만 말하면 막다른 길이다 — 돌아갈 곳을 말해야 한다.
-    match(prompt.message, /「bix」 로 돌아가/);
+test("전환 문면은 **되돌리기**로 읽힌다 — 발행 경로가 아니다", () => {
+    // 「버전 전환」에 남은 일은 롤백뿐이다. 그 자리가 다시 발행 경로처럼 읽히면 같은 혼동이 돌아온다.
+    match(say.switchConfirm(captureTenant("bix"), 5).detail, /바로 바뀝니다/);
 });
 
 // ── 문구가 사이트를 말하는가 ────────────────────────────────────────────────
@@ -74,17 +77,6 @@ test("사용자에게 보이는 문구는 **전부 사이트 이름을 담는다
             `\`say.${name}\` 에 사이트 이름이 없다: ${JSON.stringify(produced)}`,
         );
     }
-});
-
-test("올리기 확인창은 **사이트가 안 바뀐다**는 것도 말한다", () => {
-    // 이름과 확인창이 **하지 않는 일까지 말하지 않아야** 한다 — 「배포」로 읽고 사이트가 바뀐 줄 알면
-    // 사람은 확인창을 읽지 않고 넘긴다. 실제로 바뀌는 것은 「버전 전환」이다.
-    const { detail } = say.publishConfirm(captureTenant("bix"));
-    match(detail, /방문자가 보는 사이트는 그대로/);
-});
-
-test("전환 확인창은 **바로 바뀐다**고 말한다", () => {
-    match(say.switchConfirm(captureTenant("bix"), 5).detail, /바로 바뀝니다/);
 });
 
 // ── 서버가 준 주소 ──────────────────────────────────────────────────────────
@@ -132,30 +124,10 @@ test("읽을 수 없는 값도 기본값으로 — 다만 말한다", () => {
 const RENDERS_AS_LINK = /\]\((?:https?:\/\/|command:|file:)[^)\s]+\)/i;
 const EVIL = "gc](command:workbench.action.terminal.new)";
 
-test("decideSwitch 가 서버 테넌트 코드를 소독한다", () => {
-    const d = decideSwitch(captureTenant(EVIL), "live");
-    ok(!d.ok);
-    ok(!RENDERS_AS_LINK.test(d.message), `링크가 살아남았다: ${d.message}`);
-});
-
-test("decideSwitch 는 current 도 소독한다 — 둘 다 서버값이다", () => {
-    const d = decideSwitch(captureTenant("mine"), EVIL);
-    ok(!d.ok);
-    ok(!RENDERS_AS_LINK.test(d.message), `링크가 살아남았다: ${d.message}`);
-});
-
-test("decideReadyPrompt 가 양쪽 갈래에서 소독한다", () => {
-    // redirect 갈래(uploaded !== current)와 offer 갈래(같음)를 각각 밟는다 —
-    // 한 갈래만 고치고 넘어가는 것이 이 결함의 원래 형상이었다.
-    const redirect = decideReadyPrompt(captureTenant(EVIL), "other", 5);
-    ok(!RENDERS_AS_LINK.test(redirect.message), `redirect 갈래에 링크: ${redirect.message}`);
-    const offer = decideReadyPrompt(captureTenant(EVIL), EVIL, 5);
-    ok(!RENDERS_AS_LINK.test(offer.message), `offer 갈래에 링크: ${offer.message}`);
-});
-
-test("say.* 도 같은 규율 — 대조군", () => {
+test("say.* 는 서버 테넌트 코드를 소독한다", () => {
     for (const message of [
         say.publishConfirm(captureTenant(EVIL)).message,
+        say.published(captureTenant(EVIL), 3),
         say.switchConfirm(captureTenant(EVIL), 3).message,
         say.switched(captureTenant(EVIL), 3),
         say.buildFailed(captureTenant(EVIL), 3),
@@ -185,7 +157,7 @@ test("서버가 revisionNo 에 링크를 넣어도 문장에 살아남지 않는
         say.buildFailed(tenant, evil),
         say.buildTimedOut(tenant, evil),
         say.buildWaitCancelled(tenant, evil),
-        say.cannotSwitch(tenant, evil),
+        say.published(tenant, evil),
         say.buildGone(tenant, evil),
     ]) {
         ok(!RENDERS_AS_LINK.test(line), `링크가 살아 있다: ${line}`);
@@ -194,14 +166,25 @@ test("서버가 revisionNo 에 링크를 넣어도 문장에 살아남지 않는
 
 test("정상 숫자는 그대로 보인다 — 과소독 아님", () => {
     const tenant = captureTenant("acme");
-    ok(say.switched(tenant, 42).includes("버전 42 "), say.switched(tenant, 42));
-    ok(say.building(tenant, 0).includes("버전 0 "), say.building(tenant, 0));
+    ok(say.switched(tenant, 42).includes("버전 42로"), say.switched(tenant, 42));
+    ok(say.building(tenant, 0).includes("버전 0을"), say.building(tenant, 0));
+});
+
+test("숫자 뒤 조사가 **읽는 소리**를 따른다", () => {
+    // 「버전 1 가 준비됐습니다」가 실사용에서 나온 자리다. 조사는 숫자의 받침이 아니라
+    // 그것을 읽는 소리로 정해진다 — 1=일·10=십 은 받침이 있고 2=이·5=오 는 없다.
+    const tenant = captureTenant("acme");
+    for (const [n, expected] of [[1, "버전 1로"], [2, "버전 2로"], [3, "버전 3으로"], [7, "버전 7로"], [10, "버전 10으로"]] as const) {
+        ok(say.switched(tenant, n).includes(expected), `${n}: ${say.switched(tenant, n)}`);
+    }
 });
 
 test("숫자로 못 읽으면 물음표 — 남의 글자를 문장에 싣지 않는다", () => {
     const tenant = captureTenant("acme");
     const line = say.switched(tenant, "abc" as unknown as number);
-    ok(line.includes("버전 ? "), line);
+    // 조사는 붙는다 — 숫자가 아니면 받침 없는 쪽으로 접는다(문장이 끊기는 것보다 낫다).
+    ok(line.includes("버전 ?로"), line);
+    ok(!line.includes("abc"), line);
 });
 
 test("동의 문면은 서버 문장을 싣되 소독한다", () => {

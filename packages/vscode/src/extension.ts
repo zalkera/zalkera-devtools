@@ -29,8 +29,7 @@ import {
   ours,
   plainNotice,
   count,
-  decideReadyPrompt,
-  decideSwitch,
+  countJosa,
   resolveHelpUrl,
   type NpmPreference,
   shouldShowUpgradeNotice,
@@ -1468,21 +1467,16 @@ async function updateZipCommand(): Promise<void> {
  *   전환은 **방문자가 보는 화면이 즉시 바뀌는** 동작이다. 잘못 누르면 손님이 다른 화면을 본다.
  *   「새 버전 배포」가 조용한 대신 여기가 시끄러워야 한다 — 두 단계로 나눈 이유가 그것이다.
  */
-async function switchVersion(
-  preselected?: number,
-  expectedTenant?: CapturedTenant,
-): Promise<void> {
+async function switchVersion(): Promise<void> {
   const { api, tenant } = await ensureApiFor();
-  // 「지금 전환」이 눌린 시점과 여기서 API 가 묶이는 시점 사이에도 사이트는 바뀔 수 있다.
-  // 올린 곳과 켤 곳이 다르면 **아무것도 하지 않는다** — 조용히 남의 사이트를 켜는 것보다 낫다.
-  const decision = decideSwitch(expectedTenant, tenant);
-  if (!decision.ok) {
-    void vscode.window.showWarningMessage(decision.message);
-    return;
-  }
   const revisions = await api.listRevisions();
   // **켤 수 있는 것만 고르게 한다.** BUILDING·FAILED 를 목록에 넣으면 골랐다가 409 로 거절당한다 —
   // 고를 수 없는 것을 보여 주고 거절하는 것은 화면이 사람에게 거짓말을 하는 것이다.
+  //
+  // ⚠ **켜진 판을 목록에서 빼는 것은 취향이 아니라 방어다.** 백엔드의 `activate` 는 이미 활성인
+  //    번호를 받으면 전환이 아니라 「지금으로 되돌리기」로 갈라져 **편집 중인 파일과 게시 대기 AI
+  //    변경을 버린다.** 이 필터가 그 문 앞을 막고 있다 — 걷어내면 롤백 목록에서 지금 판을 골랐다가
+  //    작업이 사라진다.
   const candidates = revisions.filter(
     (r) => !r.isActive && r.status === "READY",
   );
@@ -1491,7 +1485,7 @@ async function switchVersion(
     void vscode.window.showInformationMessage(
       building > 0
         ? `지금 바꿀 수 있는 버전이 없습니다(빌드 중 ${count(building)}개). 끝나면 다시 보십시오.`
-        : "바꿀 다른 버전이 없습니다.",
+        : "되돌릴 이전 버전이 없습니다 — 지금 켜진 판이 처음이자 마지막입니다.",
     );
     return;
   }
@@ -1500,38 +1494,23 @@ async function switchVersion(
   // 외우고 있지는 않다.
   const active = revisions.find((r) => r.isActive);
 
-  // 방금 올려 놓고 "지금 전환"을 누른 경우 — 고르라고 다시 묻지 않는다. 이미 고른 것이다.
-  const direct =
-    preselected === undefined
-      ? undefined
-      : candidates.find((r) => r.revisionNo === preselected);
-  if (preselected !== undefined && !direct) {
-    void vscode.window.showWarningMessage(
-      say.cannotSwitch(tenant, preselected),
-    );
-    return;
-  }
-
-  const choice = direct
-    ? { label: `버전 ${direct.revisionNo}` }
-    : await vscode.window.showQuickPick(
-        candidates.map((r, index) => ({
-          label: `버전 ${r.revisionNo}`,
-          description: r.label
-            ? `${plainNotice(r.label, 60)} · ${revisionWhen(r.createdAt)}`
-            : revisionWhen(r.createdAt),
-          detail:
-            index === 0 &&
-            (active === undefined || r.revisionNo > active.revisionNo)
-              ? `${r.status} · 가장 최근에 올린 것`
-              : r.status,
-        })),
-        {
-          title: active
-            ? `지금은 버전 ${active.revisionNo} 입니다 — 어느 버전으로 바꿀까요?`
-            : "어느 버전으로 바꿀까요?",
-        },
-      );
+  const choice = await vscode.window.showQuickPick(
+    candidates.map((r, index) => ({
+      label: `버전 ${r.revisionNo}`,
+      description: r.label
+        ? `${plainNotice(r.label, 60)} · ${revisionWhen(r.createdAt)}`
+        : revisionWhen(r.createdAt),
+      detail:
+        index === 0 && (active === undefined || r.revisionNo > active.revisionNo)
+          ? `${r.status} · 가장 최근에 올린 것`
+          : r.status,
+    })),
+    {
+      title: active
+        ? `지금은 버전 ${active.revisionNo} 입니다 — 어느 버전으로 바꿀까요?`
+        : "어느 버전으로 바꿀까요?",
+    },
+  );
   const target = candidates.find(
     (r) => `버전 ${r.revisionNo}` === choice?.label,
   );
@@ -1549,7 +1528,7 @@ async function switchVersion(
     vscode.window.withProgress(
       {
         location: vscode.ProgressLocation.Notification,
-        title: `버전 ${count(target.revisionNo)} 로 바꾸는 중`,
+        title: `버전 ${countJosa(target.revisionNo, "으로/로")} 바꾸는 중`,
       },
       () => api.activateRevision(target.revisionNo, discardPendingChanges),
     );
@@ -1563,7 +1542,7 @@ async function switchVersion(
     if (!(await askDiscardConsent(tenant, (error as Error).message))) return;
     await activate(true);
   }
-  log(`사이트를 버전 ${target.revisionNo} 로 바꿨습니다.`);
+  log(`사이트를 버전 ${target.revisionNo} 로 되돌렸습니다.`);
   void vscode.window.showInformationMessage(
     say.switched(tenant, target.revisionNo),
   );
@@ -2053,15 +2032,80 @@ async function publishCommand(): Promise<void> {
   }
   rememberFolder(String(tenant), dir);
 
-  // `STATIC` 은 올리는 즉시 READY 지만 `NEXT_SOURCE` 는 서버가 빌드해야 한다. 종전에는 여기서
-  // 이야기가 끝나 **왜 못 켜는지 알 수 없었다.**
+  // `STATIC` 은 올리는 즉시 READY·활성이지만 `NEXT_SOURCE` 는 서버가 빌드를 마쳐야 게시된다.
+  // 기다리는 이유가 그것이다 — 여기서 이야기를 끊으면 언제 손님에게 나가는지 알 수 없다.
   const ready =
     result.status === "READY"
       ? true
       : await awaitBuild(api, result.revisionNo, tenant);
   if (!ready) return;
 
-  await offerSwitch(result.revisionNo, tenant);
+  await announcePublished(api, result.revisionNo, tenant);
+}
+
+/**
+ * 게시됐다고 **알리고 끝낸다.** 물어볼 것이 없다 — 사이트는 이미 바뀌었다.
+ *
+ * ⚠ 종전에는 여기가 「지금 전환」을 권했고, 그 단추는 **누르면 반드시 실패했다**. 방금 올린 판이
+ *   이미 활성이라 전환 후보에서 빠지기 때문이다(`switchVersion` 의 필터). 첫 판이면 「바꿀 다른
+ *   버전이 없습니다」, 그 뒤로는 「버전 N 로 바꿀 수 없습니다」가 떴다 — 둘 다 사용자가 무엇을
+ *   잘못해서 난 것이 아니었다.
+ *
+ * 대신 **가서 확인할 길**을 준다. 확인 없이 나가는 것을 우리가 막을 수는 없게 됐지만(백엔드가
+ * 자동으로 켠다), 나갔다는 사실과 볼 자리를 숨기지는 않는다.
+ */
+async function announcePublished(
+  api: ZalkeraApi,
+  revisionNo: number,
+  tenant: CapturedTenant,
+): Promise<void> {
+  const url = await siteUrlOf(api, tenant);
+  // ⚠ **문구를 지역 변수로 빼지 않는다.** 알림 소독 검사기는 본문이 `say.*` 호출 **그 자리**에
+  //    있는지를 보고, 한 번 변수를 거치면 허용 목록 밖으로 떨어진다. 주소가 없으면 단추도 없으므로
+  //    호출을 둘로 가르는 대신 **단추 목록을 편다** — 부르는 자리는 하나로 남는다.
+  const actions = url ? [OPEN_SITE] : [];
+  const chosen = await vscode.window.showInformationMessage(
+    say.published(tenant, revisionNo),
+    ...actions,
+  );
+  if (!url || chosen !== OPEN_SITE) return;
+
+  // 브라우저를 못 여는 자리가 실제로 있다(원격 호스트·오프너 부재). 그때도 **게시는 끝났다** —
+  // 실패로 말하지 않고 주소만 알려 준다(미리보기 시작이 같은 규율을 쓴다).
+  const opened = await vscode.env
+    .openExternal(vscode.Uri.parse(url))
+    .then((ok) => ok, () => false);
+  if (!opened) log(`브라우저를 열지 못했습니다 — 주소를 직접 여세요: ${url}`);
+}
+
+/** 게시 알림의 단추. 문면과 판정이 같은 글자를 보게 상수로 둔다. */
+const OPEN_SITE = "사이트 열기";
+
+/**
+ * 게시된 사이트의 주소. **서버가 준 값만 쓴다**(`/api/me` 의 `tenants[].primaryDomain`) —
+ * 베이스 도메인을 확장이 조립하면 그 지식의 사본이 하나 더 생기고, 커스텀 도메인을 쓰는 사이트에서는
+ * 그 사본이 **틀린 주소**를 연다.
+ *
+ * 못 구하면 `null` 이다 — 본사 계정은 소속 목록이 비어 있고, 서버도 서빙 호스트가 없는 사이트에는
+ * 빈 문자열을 보낸다. 그때는 단추를 안 낸다. **없는 주소를 여는 것보다 안 내는 편이 낫다.**
+ *
+ * ⚠ 호스트 모양을 검사한다. 이 값은 서버가 주고 우리는 그것으로 **브라우저를 연다** — 경로·자격증명·
+ *   공백이 섞인 값이 그대로 `https://` 뒤에 붙으면 엉뚱한 곳이 열린다. 조회 실패는 삼킨다: 여기서
+ *   던지면 **이미 끝난 게시**가 실패로 보고된다.
+ */
+async function siteUrlOf(
+  api: ZalkeraApi,
+  tenant: CapturedTenant,
+): Promise<string | null> {
+  const tenants = await api.listMyTenants().then(
+    (list) => list,
+    () => [],
+  );
+  const host = tenants
+    .find((t) => t.code === (tenant as string))
+    ?.primaryDomain?.trim();
+  if (!host || !/^[a-z0-9][a-z0-9.-]*[a-z0-9]$/i.test(host)) return null;
+  return httpUrl(`https://${host}`)?.toString() ?? null;
 }
 
 /**
@@ -2121,30 +2165,6 @@ async function awaitBuild(
       void vscode.window.showWarningMessage(say.buildGone(tenant, revisionNo));
       return false;
   }
-}
-
-/**
- * 켤 수 있게 됐다고 알리고 **한 번 물어본다.**
- *
- * 자동으로 켜지 않는 이유가 여기 있다 — 확인 없이 켜면 잘못 고친 것이 바로 손님에게 간다.
- * 다만 "이제 켤 수 있다"는 사실까지 숨기면 사람이 콘솔을 뒤지게 된다. 알리되, 누르는 것은 사람이다.
- */
-async function offerSwitch(
-  revisionNo: number,
-  tenant: CapturedTenant,
-): Promise<void> {
-  // 기다리는 동안 사이트를 바꿨을 수 있다. 그때 「지금 전환」을 그대로 두면 **다른 사이트를 켠다** —
-  // 알리되 원클릭은 내린다. 판정은 core 가 하고 여기서는 그리기만 한다(시험이 그 판정을 잠근다).
-  const prompt = decideReadyPrompt(tenant, tenantCode(), revisionNo);
-  if (prompt.kind === "redirect") {
-    void vscode.window.showInformationMessage(prompt.message);
-    return;
-  }
-  const choice = await vscode.window.showInformationMessage(
-    prompt.message,
-    prompt.action,
-  );
-  if (choice === prompt.action) await switchVersion(revisionNo, tenant);
 }
 
 /**

@@ -55,13 +55,16 @@ import { parse, walk } from "./lib/ast.mjs";
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 /** 소독을 거쳤다고 인정하는 호출. 별칭은 아래 [assertDefinitionsAreReal] 이 정의까지 확인한다. */
-const SANITIZERS = new Set(["plainNotice", "shown", "count"]);
+const SANITIZERS = new Set(["plainNotice", "shown", "count", "countJosa"]);
 /** "서버가 정하지 않았다"는 사람의 판단 표기. 값을 바꾸지 않으므로 정의도 확인한다. */
 const MARKER = "ours";
 /** 별칭 → 그 정의가 반드시 불러야 하는 진짜 소독기. */
-const ALIAS_MUST_CALL = new Map([["shown", "plainNotice"]]);
+const ALIAS_MUST_CALL = new Map([["shown", "plainNotice"], ["countJosa", "count"]]);
 /** 소독기 중 **정의가 이 파일에 있어야** 하는 것. 이름만 흉내 낸 가짜를 막는다. */
-const SANITIZER_HOME = new Map([["count", "packages/core/src/notice.ts"]]);
+const SANITIZER_HOME = new Map([
+    ["count", "packages/core/src/notice.ts"],
+    ["countJosa", "packages/core/src/notice.ts"],
+]);
 /** 표기 `ours` 의 정의가 사는 자리. [assertMarkerIsIdentity] 가 그것을 확인한다. */
 const MARKER_HOME = "packages/core/src/notice.ts";
 
@@ -612,6 +615,17 @@ for (const rel of NOTICE_SOURCES) {
         process.exit(2);
     }
     scan(rel, { allTemplates: true });
+}
+// ⚠ **별칭 정의는 그 정의가 사는 파일에서 확인한다.** 종전에는 이 검사가 [NOTICE_SOURCES] 만
+//    돌았다 — 정의가 `notice.ts` 에 있는 소독기는 **한 번도 검사되지 않았다.** 변이로 실측해
+//    뚫었다: `count` 를 안 부르는 가짜 `countJosa` 가 초록이었다. `shown` 이 마침 tenantScope 에
+//    살아서 이 구멍이 안 보였던 것이고, 등록만 하고 집이 다른 소독기가 생기는 순간 열린다.
+//    [HOMES] 는 소독기·표기의 집과 문구 정본을 모두 담으므로 그것으로 돈다.
+for (const rel of HOMES) {
+    if (!existsSync(join(root, rel))) {
+        console.error(`❌ 알림 소독 검사 — ${rel} 이 없습니다(통과가 아닙니다).`);
+        process.exit(2);
+    }
     assertDefinitionsAreReal(rel);
 }
 for (const rel of notifiers) {
