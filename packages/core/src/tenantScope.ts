@@ -268,7 +268,7 @@ export const say = {
             detail:
                 `${plainNotice(serverMessage, 200)}\n` +
                 "그 편집을 먼저 처분해 주세요 — 새 버전으로 발행하거나, 지금 켜져 있는 버전으로 되돌리면 됩니다.\n" +
-                "잘커라 콘솔의 「소스」 화면 또는 사이트에 연결한 AI 대화에서 할 수 있습니다.",
+                "잘커라 콘솔의 「사이트 소스」 화면 또는 사이트에 연결한 AI 대화에서 할 수 있습니다.",
         };
     },
     switched(tenant: CapturedTenant, revisionNo: number): string {
