@@ -54,31 +54,163 @@ export function decideTenantScope(input: ScopeInput): TenantScope {
 
 /** 사이트를 고른 뒤 화면이 할 일. */
 export type SiteChoice =
-    /** 폴더 없음 · 소속 없음 · 같은 사이트 — 창의 사이트가 실제로 바뀌었다. */
+    /** 이미 그 사이트로 작업 중이었다 — **아무것도 안 바뀌었다.** 재확인만 말한다. */
+    | {kind: "unchanged"}
+    /** 창의 대상이 실제로 바뀌었다(어긋난 링크의 복원 포함). */
     | {kind: "switched"}
     /** 소속 없던 소스 폴더가 이 사이트를 입양했다 — 연결 사실을 알린다. */
     | {kind: "adopted"}
-    /** 소속이 다르다 — 이 창은 그대로 두고 폴더 전환을 제안한다. */
-    | {kind: "elsewhere"; offer: "open" | "fetch"};
+    /** 소속이 다르다 — 이 창은 그대로 두고 [ElsewhereOption] 을 낸다. */
+    | {kind: "elsewhere"};
 
 export interface ChoiceInput {
     picked: string;
     binding: string | null;
     siteFolderOpen: boolean;
     /**
-     * 레지스트리가 기억하는 그 사이트의 폴더를 **확증까지 마쳤는가**.
+     * **고르기 전**의 유효 사이트. `unchanged` 를 가리는 데만 쓴다.
      *
-     * ⚠ 기억만으로 열기를 제안하면 안 된다. 경로가 재활용돼 다른 사이트를 담게 된 폴더를
-     *   「그 사이트 폴더」로 열어 주는 것이 이 설계가 막으려는 바로 그 사고다.
+     * ⚠ 고른 **뒤**에 읽으면 안 된다 — 사이트 선택이 설정을 쓰고 나면 이 값이 늘 `picked` 와
+     *   같아져 모든 전환이 `unchanged` 로 접힌다.
      */
-    knownFolderConfirmed: boolean;
+    current: string;
 }
 
+/**
+ * ⚠ **`unchanged` 와 `switched` 를 가르는 것은 「무엇이 실제로 바뀌었나」다.** 종전에는 둘이 한
+ *   칸이라, 이미 그 사이트인데 다시 고른 사람에게 「바꿨습니다」라고 말했다 — 아무것도 안 한 것을
+ *   한 것처럼 말하는 자리다.
+ *
+ *   다만 **어긋난 창에서 자기 사이트를 다시 고르는 것은 복원이라 `switched` 가 참이다**: 표식은
+ *   x 인데 링크 잔재로 유효 사이트가 y 인 창에서 x 를 고르면 링크가 표식에 맞춰지므로 실제로
+ *   바뀐다. 그래서 소속이 있으면 그것과 견주고, 없을 때만 유효 사이트와 견준다.
+ */
 export function decideSiteChoice(input: ChoiceInput): SiteChoice {
-    if (!input.siteFolderOpen) return {kind: "switched"};
-    if (input.binding === null) return {kind: "adopted"};
-    if (input.binding === input.picked) return {kind: "switched"};
-    return {kind: "elsewhere", offer: input.knownFolderConfirmed ? "open" : "fetch"};
+    // ⚠ **소속이 판정을 지배한다 — [decideTenantScope] 와 같은 순서여야 한다.** 폴더 유무를 먼저
+    //    보면 「소속은 있는데 소스가 아닌 폴더」(package.json 을 지웠거나 아직 안 받은 자리)에서
+    //    둘이 갈린다: 이쪽은 `switched` 라 「사이트: y」라고 말하는데 저쪽은 `none` 이라 **아무것도
+    //    안 적힌다.** 그 어긋남에 이름을 붙여 둔 것이 저 함수의 KDoc 이고, 여기서 순서를 뒤집으면
+    //    그 실패를 그대로 재현한다(실측으로 3칸이 갈렸다).
+    if (input.binding !== null) {
+        if (input.binding !== input.picked) return {kind: "elsewhere"};
+        return input.current === input.picked ? {kind: "unchanged"} : {kind: "switched"};
+    }
+    if (input.siteFolderOpen) return {kind: "adopted"};
+    return input.current === input.picked ? {kind: "unchanged"} : {kind: "switched"};
+}
+
+/**
+ * 소속이 다른 폴더에서 사이트를 골랐을 때 사람에게 낼 선택지.
+ *
+ * **배열 순서가 곧 화면 순서이자 권고다** — 첫 항목이 기본 포커스를 받는다.
+ */
+export type ElsewhereOption =
+    /** 확증된 로컬본을 연다. */
+    | {kind: "open"; dir: string}
+    /** 새 빈 폴더로 받는다. */
+    | {kind: "fetch"}
+    /** 로컬본 폴더를 사람이 직접 고른다. */
+    | {kind: "pick-folder"}
+    /** 받아 둔 zip 으로 시작한다. */
+    | {kind: "import-zip"};
+
+export interface ElsewhereInput {
+    /**
+     * **확증까지 마친** 레지스트리 값. 기억만 있는 값을 넣으면 안 된다 — 경로가 재활용돼 다른
+     * 사이트를 담게 된 폴더를 「그 사이트 폴더」로 열어 주는 것이 이 설계가 막으려는 사고다.
+     */
+    confirmedDir: string | null;
+    /**
+     * 고른 사이트에 **받을 판이 있는가**.
+     *
+     * ⚠ **「없다」를 두 사유로 가른다.** `no-revision` 은 아직 아무도 안 올린 사이트이고,
+     *   `no-ready` 는 올렸는데 빌드 중이거나 실패한 것이다. 뭉개면 **빌드가 도는 사이트의
+     *   사용자에게 「소스가 없으니 zip 으로 시작하라」는 오진**이 나가고, 잠시 기다리면 될 사람을
+     *   엉뚱한 길로 보낸다(`noRevisionError` 가 이미 그 둘을 가른다).
+     *
+     * `unknown` 은 조회 실패다 — 「없다」가 아니다. 그 둘을 뭉개면 서버가 잠시 흔들린 것으로
+     * 정상 경로가 사라진다.
+     */
+    fetchable: "yes" | "no-revision" | "no-ready" | "unknown";
+}
+
+/**
+ * ⚠ **`none` 이면 받기를 안 낸다.** 판이 없는 사이트에서 받기는 누르는 순간 실패한다 —
+ *   제안 표면이 실패를 약속하면 사람은 자기가 뭘 잘못한 줄 안다.
+ *
+ * ⚠ **`unknown` 에서는 남긴다.** 모르는 것으로는 막지 않는다(이 레포의 이행 원칙). 눌러서
+ *   실패하면 그때 진단이 두 갈래로 정직하게 말한다.
+ *
+ * 판이 없는 사이트로 옮기는 사람의 흔한 형상은 **zip 입고**(신규 테넌트 온보딩)라, 그때만
+ * `import-zip` 이 `pick-folder` 앞에 선다.
+ */
+export function elsewhereOptions(input: ElsewhereInput): {
+    options: ElsewhereOption[];
+    note: "no-revision" | "no-ready" | null;
+} {
+    const blocked = input.fetchable === "no-revision" || input.fetchable === "no-ready" ? input.fetchable : null;
+    const options: ElsewhereOption[] = [];
+    if (input.confirmedDir !== null) options.push({kind: "open", dir: input.confirmedDir});
+    if (blocked === null) options.push({kind: "fetch"});
+    // 판이 아예 없는 사이트로 옮기는 사람의 흔한 형상은 zip 입고(신규 테넌트 온보딩)다.
+    // **빌드 대기(`no-ready`)에서는 안 올린다** — 그 사람은 잠시 뒤 받으면 되지 새로 시작할 일이 아니다.
+    if (input.fetchable === "no-revision") {
+        options.push({kind: "import-zip"}, {kind: "pick-folder"});
+    } else {
+        options.push({kind: "pick-folder"}, {kind: "import-zip"});
+    }
+    return {options, note: blocked};
+}
+
+/** 사람이 직접 고른 폴더를 어떻게 할 것인가. */
+export type PickedFolderPlan =
+    /** 그 사이트의 소스다 — 링크를 소속에 맞추고 연다(복원이라 동의가 필요 없다). */
+    | {kind: "open"}
+    /** 소속이 없다 — 동의를 받고 소속을 **처음** 준 뒤 연다. */
+    | {kind: "link-consent"}
+    /** 다른 사이트의 소스다 — **열지 않는다.** */
+    | {kind: "refuse"; bound: string};
+
+/**
+ * ⚠ **이 동사는 재연결이 아니다.** `link-consent` 는 소속이 **없는** 폴더에 소속을 처음 주는 것이고,
+ *   소속이 있는 폴더는 [PickedFolderPlan] `refuse` 로 거절한다. 소속을 **바꾸는** 것은 「사이트에
+ *   연결」 하나로 남는다 — 가장 위험한 동사를 가장 흔한 흐름의 한 클릭 거리에 두지 않는다.
+ */
+export function decidePickedFolder(binding: string | null, chosen: string): PickedFolderPlan {
+    if (binding === null) return {kind: "link-consent"};
+    return binding === chosen ? {kind: "open"} : {kind: "refuse", bound: binding};
+}
+
+/** 받기·zip 풀기가 **어디로** 갈지의 첫 제안. */
+export type FetchTargetPlan =
+    /** 지금 열어 둔 빈 폴더 — 사람이 이미 고른 자리다. */
+    | {kind: "here"; dir: string}
+    /** 소스 폴더 옆의 새 이름. */
+    | {kind: "sibling"}
+    /** 제안할 자리가 없다 — 대화상자로만 받는다. */
+    | {kind: "pick-only"};
+
+export interface FetchTargetInput {
+    /** 지금 창에 열린 폴더(없으면 `null`). */
+    openDir: string | null;
+    /** 그 폴더가 **받아도 되는 빈 폴더**인가(`isReceivable` — 확장이 재서 넘긴다). */
+    openDirReceivable: boolean;
+    /** 그 폴더가 사이트 소스인가(`siteDir() !== null`). */
+    siteFolderOpen: boolean;
+}
+
+/**
+ * ⚠ **빈 폴더를 열어 두고 온 사람에게 「빈 폴더를 고르세요」라고 다시 묻지 않는다.** 그 사람은
+ *   이미 자리를 골랐다 — 그 뜻을 못 읽으면 탐색기로 올라가 새 폴더를 만들게 하는 왕복이 생기고,
+ *   그것이 비개발자가 멈추는 자리다.
+ *
+ * ⚠ **소스 폴더에는 안 푼다.** 열려 있는 소스를 덮어쓰는 일이 없어야 하므로 그 창에서는 옆 자리를
+ *   제안한다(현행). 빈 폴더 판정은 확장이 `isReceivable` 로 재서 넘긴다.
+ */
+export function decideFetchTargetPlan(input: FetchTargetInput): FetchTargetPlan {
+    if (input.siteFolderOpen) return {kind: "sibling"};
+    if (input.openDir !== null && input.openDirReceivable) return {kind: "here", dir: input.openDir};
+    return {kind: "pick-only"};
 }
 
 /**

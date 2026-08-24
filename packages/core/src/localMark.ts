@@ -16,9 +16,9 @@
  */
 
 /** 프로젝트 루트 기준 상대 경로. 조회는 이 상수 하나로 한다. */
-import {mkdir, readFile} from "node:fs/promises";
+import {readFile} from "node:fs/promises";
 import {join} from "node:path";
-import {writeOwnFile} from "./safeWrite.ts";
+import {ensureOwnDir, writeOwnFile} from "./safeWrite.ts";
 
 export const SOURCE_MARK_PATH = ".zalkera/source.json";
 
@@ -187,7 +187,9 @@ export async function writeBindingMarkTo(
 
 async function writeMarkText(root: string, text: string): Promise<MergeResult> {
     try {
-        await mkdir(join(root, ".zalkera"), {recursive: true});
+        // ⚠ `mkdir(recursive)` 를 쓰지 않는다 — `.zalkera` **자체**가 심링크면 무동작이 되고
+        //    뒤의 쓰기가 폴더 밖으로 나간다(잎만 보는 검사는 그것을 못 본다).
+        await ensureOwnDir(root, ".zalkera");
         await writeOwnFile(join(root, SOURCE_MARK_PATH), text);
         return {ok: true, text: ""};
     } catch (error) {
@@ -225,7 +227,8 @@ export async function linkFolderToTenant(root: string, tenant: string): Promise<
     }
     if (!merged.ok) return merged;
     try {
-        await mkdir(join(root, ".vscode"), {recursive: true});
+        // ⚠ `.vscode` 자체가 심링크면 남의 공유 설정에 쓰게 된다 — 조각마다 확인하고 만든다.
+        await ensureOwnDir(root, ".vscode");
         await writeOwnFile(path, merged.text);
         return {ok: true, text: merged.text};
     } catch (error) {

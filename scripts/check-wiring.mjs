@@ -64,6 +64,76 @@ const WIRES = [
     ],
     [
         "packages/vscode/src/extension.ts",
+        "await markFolderLinked(dir, String(pinned));",
+        "직접 고른 폴더의 소속이 링크에만 실려, zip·git 으로 안 따라가고 손 편집·구판 확장에 덮인다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "await markFolderLinked(dir, choice.description);",
+        "재연결이 표식을 안 남겨 링크와 표식이 갈리고, 「어긋남은 사고다」가 성립하지 않는다",
+    ],
+    [
+        // ⚠ **효과를 센다.** 호출부 문자열만 고정하면 헬퍼 본체를 무동작으로 바꿔도 초록이다 —
+        //    두 경로의 표식 쓰기가 한꺼번에 죽는데 아무도 안 잡는다(변이로 실측해 뚫렸다).
+        "packages/vscode/src/extension.ts",
+        "linkedAt: new Date().toISOString(),",
+        "표식 헬퍼가 이름만 남고 아무것도 안 써도 검사가 초록이 된다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "const linked = await linkFolderToTenant(dir, String(pinned));",
+        "직접 고르기가 링크를 안 써 새 창의 유효 사이트가 전역 잔값이 된다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "if (plan.kind === \"refuse\") {",
+        "남의 사이트 소스 폴더를 그 사이트 폴더로 열어 주고, 그 폴더의 링크를 덮는다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "elsewhereOptions({ confirmedDir, fetchable: \"unknown\" })",
+        "선택지를 손으로 짜면 판 없는 사이트에 「누르면 실패하는 받기」가 되살아난다",
+    ],
+    [
+        // ⚠ **첫 그리기만 고정하면 절반이다.** 화면을 안 막게 바꾼 뒤로 「받기를 뺀다」는 일은
+        //    전적으로 이 조회와 다시 그리는 줄이 한다 — 그 둘이 리팩터링에서 떨어지면 첫 배선은
+        //    그대로라 전건 초록인 채 P0 받기 항목이 **상시로** 되살아난다.
+        "packages/vscode/src/extension.ts",
+        "void probeFetchable(pinned).then((fetchable) => {",
+        "조회가 없어져 판 없는 사이트에서도 받기 항목이 그대로 남는다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "quick.items = optionItems(options);",
+        "조회 결과가 화면에 반영되지 않아 받기 항목이 그대로 남는다",
+    ],
+    [
+        // ⚠ **이 자리는 두 번 틀렸다**(받은 곳이 지금 폴더 자신인 칸 · 꾸러미가 한 겹 감싼 칸).
+        //    세 번째로 고치면서 판정을 core 로 내렸는데, 호출을 지우고 종전 삼항을 되살려도
+        //    시험·검사기가 전건 초록이었다(변이 실측). 형제 판정은 이미 등재돼 있는데 이 자리만
+        //    빠져 있었다.
+        "packages/vscode/src/extension.ts",
+        "const { into, needsOpen } = decideFetchedInto({",
+        "받기 완료 문면 판정이 확장 안 조건문으로 돌아가, 지금 폴더에 받고도 「바뀌지 않았습니다」가 되살아난다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "const plan = decideFetchTargetPlan({",
+        "받을 자리 판정이 확장 안 조건문으로 흩어져 열어 둔 빈 폴더 활용이 조용히 꺼진다",
+        2,
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "rememberOpenFolder();",
+        "로그아웃 뒤 로컬본이 디스크에 있는데도 「받기」를 권하는 상태로 되돌아간다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "await vscode.commands.executeCommand(\"zalkera.site.link\");",
+        "잘못 입양된 폴더를 되돌리는 길이 화면에서 사라진다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
         'origin: "linked"',
         "재연결이 표식을 안 남겨 링크와 표식이 갈리고, 「어긋남은 사고다」가 성립하지 않는다",
     ],
@@ -163,7 +233,7 @@ const WIRES = [
     ],
     [
         "packages/vscode/src/extension.ts",
-        "await withReceiveGuard(() => openSite(captureTenant(picked)))",
+        "await withReceiveGuard(() => openSite(pinned))",
         "제안 흐름의 받기가 겹쳐 돌거나, 라이브 사이트를 읽어 엉뚱한 사이트의 소스를 내려받는다",
     ],
     [

@@ -93,3 +93,41 @@ export function noRevisionError(revisions: readonly RevisionLike[]): DevtoolsErr
         "올린 판이 아직 만들어지는 중이거나 실패했습니다. 「버전 이력」에서 확인해 주세요.",
     );
 }
+
+/**
+ * 받기가 끝난 뒤 **무엇을 말하고 무엇을 낼지**.
+ *
+ * ⚠ **두 축이다.** 「어디에 풀렸나」(문면)와 「열 것이 있나」(단추)는 다른 물음인데, 한 판정으로
+ *   뭉치면 어느 쪽이든 한 칸이 거짓이 된다 — 이 자리는 그렇게 **두 번** 틀렸다:
+ *
+ *   ⑴ 받은 곳이 지금 열린 폴더 자신인데 「새 폴더로 받았습니다 · 지금 폴더는 바뀌지
+ *      않았습니다」라고 말했다(두 문장 다 거짓).
+ *   ⑵ 그것을 `findProjectRoot` 결과로 고쳤더니, 꾸러미가 한 겹 감싼 경우 루트가 한 단계 내려가
+ *      같은 거짓이 되살아났다.
+ *
+ * ⚠ **`target` 과 `root` 를 갈라 받는 이유.** `target` 은 사람이 동의한 자리이고 `root` 는
+ *   푼 뒤에 찾은 프로젝트 루트다. 감싸기가 있으면 둘이 다르고, 그때 **문면은 `target` 이,
+ *   단추는 `root` 가** 정한다. 감싸기 칸에서 단추를 없애면 하위 폴더로 갈 길이 사라진다.
+ */
+export interface FetchedIntoInput {
+    /** 지금 창에 열린 폴더. 없으면 `null`. */
+    openDir: string | null;
+    /** 사람이 동의한 받을 자리. */
+    target: string;
+    /** 푼 뒤 찾은 프로젝트 루트(감싸기가 있으면 `target` 보다 아래). */
+    root: string;
+}
+
+export interface FetchedIntoPlan {
+    /** 문면 갈래(`say.fetched`). */
+    into: "into-open" | "into-open-nested" | "sibling" | "only";
+    /** 열 것이 남았는가 — 이미 그 폴더가 열려 있으면 `false`. */
+    needsOpen: boolean;
+}
+
+export function decideFetchedInto(input: FetchedIntoInput): FetchedIntoPlan {
+    const needsOpen = input.root !== input.openDir;
+    if (input.openDir === null) return {into: "only", needsOpen};
+    if (input.target !== input.openDir) return {into: "sibling", needsOpen};
+    return {into: needsOpen ? "into-open-nested" : "into-open", needsOpen};
+}

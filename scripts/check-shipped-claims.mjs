@@ -28,7 +28,7 @@ import { dirname, join } from "node:path";
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 /** 사람이 확장 밖에서 읽는 문서. 마켓 개요·고객 PDF·동봉 매뉴얼. */
-const SHIPPED = ["packages/vscode/README.md", "doc/GONE.md", "packages/vscode/media/help.md"];
+const SHIPPED = ["packages/vscode/README.md", "doc/MANUAL.md", "packages/vscode/media/help.md"];
 
 /** 폐기된 주장. 전부 「올리기 ≠ 배포」를 가르치던 문장이다. */
 const RETIRED = [
@@ -41,6 +41,11 @@ const RETIRED = [
     "두 단계로 나눈 이유",
     "지금 전환",
     "아직 바뀌지 않았습니다",
+    // ⚠ 받기가 **열어 둔 빈 폴더**로 갈 수 있게 된 뒤로 거짓이 된 약속들. 「지금 폴더」가 아니라
+    //    「소스가 들어 있는 폴더」가 안 바뀌는 것이다.
+    "지금 폴더를 안 건드립니다",
+    "지금 폴더는 바뀌지 않습니다",
+    "빈 새 폴더로만",
 ];
 
 const problems = [];

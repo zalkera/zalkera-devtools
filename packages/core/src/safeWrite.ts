@@ -138,11 +138,9 @@ export async function assertNotSymlink(path: string, name: string): Promise<void
  *   **사람에게 말하고 멈춘다.** 하드링크·교체(TOCTOU)처럼 말해 줄 수 없는 형태는 `rename` 이 막는다.
  *   ⚠ `lstat` 를 **경계로 읽지 마라** — 그것은 예의이고, 경계는 `rename` 이다.
   *
- * ⚠ **막는 것은 잎(leaf) 심링크뿐이다.** 부모 디렉터리(`.vscode`·`.zalkera` 자체)가 링크면
- *   `mkdir(recursive)` 가 무동작이 되고 `rename` 이 폴더 밖에 쓴다. 지금 호출부에서는 해제기가
- *   심링크를 실현하지 않고 빈 폴더 판정이 링크 자식을 「비어 있음」으로 안 보아 도달할 수 없지만,
- *   **그 전제를 안 지나는 호출부가 생기면 이 갭이 살아난다.** 「심링크를 안 따라간다」는 주장은
- *   그 한정 안에서만 참이다.
+ * ⚠ **이 함수가 막는 것은 잎(leaf) 심링크뿐이다.** 부모 디렉터리(`.vscode`·`.zalkera` 자체)가
+ *   링크면 `mkdir(recursive)` 가 무동작이 되고 `rename` 이 폴더 밖에 쓴다. 부모를 만드는 자리는
+ *   [ensureOwnDir] 을 지나야 하고, 그것이 조각마다 확인한다.
  */
 export async function writeOwnFile(path: string, data: string | Uint8Array, mode = 0o644): Promise<void> {
     const info = await lstat(path).catch(() => null);
@@ -164,6 +162,45 @@ export async function writeOwnFile(path: string, data: string | Uint8Array, mode
         await rm(tmp, {force: true}).catch(() => undefined);
         throw error;
     }
+}
+
+/**
+ * 우리가 만드는 자리(`.vscode`·`.zalkera`)를 **조각마다 확인하며** 만든다.
+ *
+ * ■ 왜 `mkdir(recursive: true)` 가 아닌가
+ *   그 호출은 **이미 있으면 무동작**이고, 「이미 있다」에 **심링크인 경우가 포함된다.** 그러면
+ *   뒤따르는 [writeOwnFile] 의 `rename` 이 링크가 가리키는 **폴더 밖**에 쓰고 성공을 보고한다.
+ *   잎만 보는 검사로는 이 형상을 못 본다 — 잎은 링크가 아니기 때문이다.
+ *
+ * ■ 언제 실제로 밟히나
+ *   해제기는 심링크를 실현하지 않지만 **`git clone` 은 실현한다.** 사람이 대화상자로 고른 폴더나
+ *   BYO 레포를 대상으로 쓰는 자리가 생기면 그 순간 도달 가능해진다 — 그런 호출부가 실제로 생겼다.
+ *
+ * 되돌려주는 것은 만들어진 경로다. 링크를 만나면 **쓰지 않고 던진다** — 조용히 고치면 사람은
+ * 자기가 건 링크가 무시된 것을 모른다.
+ */
+export async function ensureOwnDir(root: string, ...segments: string[]): Promise<string> {
+    let current = root;
+    for (const part of segments) {
+        const next = join(current, part);
+        const info = await lstat(next).catch(() => null);
+        if (info?.isSymbolicLink()) {
+            throw new DevtoolsError(
+                "NOT_A_SITE",
+                `${part} 이 링크라 쓰지 않았습니다.`,
+                "이 폴더는 확장이 만들어 주는 자리입니다. 링크를 지우고 다시 시도해 주세요.",
+            );
+        }
+        if (!info) {
+            await mkdir(next).catch((error: unknown) => {
+                if ((error as NodeJS.ErrnoException | undefined)?.code !== "EEXIST") throw error;
+            });
+        } else if (!info.isDirectory()) {
+            throw new DevtoolsError("NOT_A_SITE", `${part} 이 폴더가 아니라 쓰지 않았습니다.`);
+        }
+        current = next;
+    }
+    return current;
 }
 
 /**

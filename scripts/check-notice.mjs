@@ -73,6 +73,9 @@ const MARKER_HOME = "packages/core/src/notice.ts";
 
 const NOTIFY = new Set(["showInformationMessage", "showWarningMessage", "showErrorMessage"]);
 
+/** 고르는 화면(QuickPick·InputBox)의 **글자 칸** — 대입으로 들어간다. */
+const QUICK_TEXT = new Set(["title", "placeholder", "prompt"]);
+
 const findings = [];
 let scanned = 0;
 let spansSeen = 0;
@@ -371,6 +374,31 @@ function scan(rel, { allTemplates }) {
             const body = node.arguments[0];
             if (body) inspect(body, rel, "알림 본문");
         }
+
+        // ⑷ **고르는 화면도 사람이 읽는 자리다.** `title`·`placeholder`·`prompt` 대입은 [NOTIFY]
+        //    어디에도 안 걸려 **사각지대**였다(변이 실측: 생 보간으로 바꿔도 보간 수가 안 늘었다).
+        //
+        //    ⚠ 명령 링크를 렌더하는 자리는 아니다(`@types/vscode` 는 `$(icon)` 문법만 해석한다고
+        //      적는다). 그래도 같은 잣대를 대는 이유는 제어문자·초장문이고, 무엇보다 이 표면이
+        //      **「어느 사이트로 갈지」를 고르는 화면**이라 이름을 위조당하면 안 되기 때문이다.
+        //
+        //    ⚠ **속성 이름만으로 잡지 않는다.** `label`·`detail` 은 흔한 이름이라 모달 옵션
+        //      (`{modal: true, detail: …}`)까지 물어 정상 코드가 빨개진다 — ⑶ 이 이미 기각한
+        //      오검이다. 그래서 **대입 자리**만 본다.
+        //
+        //    ⚠ **항목 라벨은 아직 관할 밖이다(구멍).** `showQuickPick(xs.map(x => ({label: x.name})))`
+        //      형태로 서버 값이 라벨·설명에 그대로 실리는 자리가 여럿 있다(프리셋·버전·사이트 목록).
+        //      명령 링크를 렌더하는 자리는 아니지만 **이름을 위조당할 수 있는 표면**이라 닫아야 한다.
+        //      여기서 같이 닫지 않는 이유는 그 자리들이 이 판의 변경과 무관하고, 검사기를 넓혀
+        //      기존 코드를 끌고 가는 것이 근거를 위협이 아니라 검사기 출력에 두는 일이기 때문이다.
+        //      **별건으로 닫는다** — 그때 `createQuickPick` 의 `items` 간접까지 함께 본다.
+        if (ts.isBinaryExpression(node) &&
+            node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+            ts.isPropertyAccessExpression(node.left) &&
+            QUICK_TEXT.has(node.left.name.getText())) {
+            inspect(node.right, rel, `고르는 화면 ${node.left.name.getText()}`);
+        }
+
     });
 }
 

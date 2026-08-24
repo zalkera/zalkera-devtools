@@ -118,7 +118,7 @@ export {
   mcpServerName,
   type McpServerName,
 } from "./serverUrl.ts";
-export { safeFileName, writeOwnFile } from "./safeWrite.ts";
+export { safeFileName, writeOwnFile, ensureOwnDir } from "./safeWrite.ts";
 export {
   chooseNpm,
   describeNpm,
@@ -162,7 +162,14 @@ export {
   type Diagnostic,
 } from "./diagnostics.ts";
 export { BUSY, createReentrancyGuard } from "./reentrancy.ts";
-export { pickRevision, noRevisionError, suggestFolderName, nextAvailableName } from "./fetchTarget.ts";
+export {
+  pickRevision,
+  noRevisionError,
+  suggestFolderName,
+  nextAvailableName,
+  decideFetchedInto,
+  type FetchedIntoPlan,
+} from "./fetchTarget.ts";
 export { decideErrorNotice, isCancelled, type ErrorNotice } from "./errorNotice.ts";
 export { decideBlocked, commandsWithNeeds, type Blocked, type Readiness } from "./whyBlocked.ts";
 export { ACCOUNT_SCOPED, type AccountScoped } from "./accountState.ts";
@@ -191,9 +198,15 @@ export {
     folderBinding,
     decideTenantScope,
     decideSiteChoice,
+    elsewhereOptions,
+    decidePickedFolder,
+    decideFetchTargetPlan,
     needsRelinkConsent,
     type TenantScope,
     type SiteChoice,
+    type ElsewhereOption,
+    type PickedFolderPlan,
+    type FetchTargetPlan,
 } from "./siteBinding.ts";
 export { sidebarPlan } from "./sidebarPlan.ts";
 export { idleStatusPlan, type StatusPlan } from "./statusPlan.ts";
