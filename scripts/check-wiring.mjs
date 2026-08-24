@@ -381,6 +381,26 @@ const WIRES = [
         3,
     ],
     [
+        "packages/vscode/src/extension.ts",
+        "if (isDraftInProgress(error)) {",
+        "발행 전 편집 거절이 빨간 오류창에 서버 문장만 남기고 끝난다 — 어디서 처분하는지가 없어 " +
+            "재업로드·판 전환이 막다른 길로 회귀한다(memo183 §7). **두 자리다**: zip 재업로드와 판 전환이 " +
+            "같은 가드를 지나므로 한쪽만 걸면 다른 문은 그대로 막힌다",
+        2,
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "await tellDraftBlocked(tenant, (error as Error).message);",
+        "판정을 부르고도 아무 말을 안 한다 — 조용히 `return` 하면 사용자는 눌렀는데 아무 일도 안 " +
+            "일어난 화면을 본다(거절보다 나쁘다)",
+        2,
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "const notice = say.draftBlocked(tenant, serverMessage);",
+        "안내 문면을 core 가 아닌 확장이 짓게 되어, 소독·동의어휘 금지 시험이 무는 자리를 벗어난다",
+    ],
+    [
         "packages/core/src/fetchSource.ts",
         "if (!choice) throw noRevisionError(revisions);",
         "공개 API 로 판을 안 주고 부르면 BUILDING·FAILED 판을 받으러 가고, 「없다」 문면도 옛 사본이 나온다",

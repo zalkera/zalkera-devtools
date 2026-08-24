@@ -26,6 +26,7 @@ export {
 export {
   ZalkeraApi,
   needsDiscardConsent,
+  isDraftInProgress,
   revisionWhen,
   type ApiOptions,
   type IssuedPreviewKey,

@@ -1,6 +1,6 @@
 import { ok, rejects, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
-import { ZalkeraApi, needsDiscardConsent, revisionWhen } from "./api.ts";
+import { ZalkeraApi, needsDiscardConsent, isDraftInProgress, revisionWhen } from "./api.ts";
 import { DevtoolsError } from "./errors.ts";
 
 function api(handler: (url: string, init: RequestInit) => Response): ZalkeraApi {
@@ -162,6 +162,10 @@ test("동의로 넘어갈 수 있는 거절만 그렇다고 말한다", async ()
     ["AI_WORK_IN_PROGRESS", false],
     ["PUBLISH_IN_PROGRESS", false],
     ["REPO_ALREADY_CONNECTED", false],
+    // ⚠ **발행 전 편집은 동의로 못 넘어간다.** 서버에 이 거절을 넘기는 인자 자체가 없다
+    //    (`SiteBaselineShiftErrorCode.DRAFT_IN_PROGRESS` — 동의 플래그를 일부러 안 뒀다).
+    //    여기가 `true` 가 되면 「버리고 계속」을 눌러도 같은 409 가 돌아온다.
+    ["DRAFT_IN_PROGRESS", false],
     ["", false],
   ] as [string, boolean][]) {
     const api = new ZalkeraApi({
@@ -187,6 +191,69 @@ test("동의 판정은 오류 코드만 본다 — 메시지 문면으로 흉내
   strictEqual(needsDiscardConsent(impostor), false);
   strictEqual(needsDiscardConsent(new Error("아무거나")), false);
   strictEqual(needsDiscardConsent(undefined), false);
+});
+
+test("발행 전 편집 거절만 그렇다고 말한다", async () => {
+  const reject = (errorCode: string) =>
+    new Response(JSON.stringify({ errorCode, message: "거절" }), { status: 409 });
+  for (const [code, expected] of [
+    ["DRAFT_IN_PROGRESS", true],
+    ["PENDING_AI_CHANGES_CONFIRM_REQUIRED", false],
+    ["AI_WORK_IN_PROGRESS", false],
+    ["PUBLISH_IN_PROGRESS", false],
+    ["", false],
+  ] as [string, boolean][]) {
+    const api = new ZalkeraApi({
+      apiBase: "https://example.test",
+      accessToken: async () => "t",
+      tenantCode: () => "bix",
+      fetchImpl: async () => reject(code),
+    });
+    const error = await api.activateRevision(7).then(
+      () => null,
+      (e: unknown) => e,
+    );
+    ok(error instanceof DevtoolsError, `${code}: DevtoolsError 가 아니다`);
+    strictEqual(isDraftInProgress(error), expected, `${code} 판정이 틀렸다`);
+  }
+});
+
+test("두 판정은 **동시에 참일 수 없다** — 물을 것인가 알릴 것인가가 갈린다", async () => {
+  // 한 오류가 둘 다 참이면 호출부의 분기 순서가 화면을 정한다. 그건 판정이 아니라 우연이다.
+  const reject = (errorCode: string) =>
+    new Response(JSON.stringify({ errorCode, message: "거절" }), { status: 409 });
+  for (const code of [
+    "DRAFT_IN_PROGRESS",
+    "PENDING_AI_CHANGES_CONFIRM_REQUIRED",
+    "AI_WORK_IN_PROGRESS",
+    "PUBLISH_IN_PROGRESS",
+    "",
+  ]) {
+    const api = new ZalkeraApi({
+      apiBase: "https://example.test",
+      accessToken: async () => "t",
+      tenantCode: () => "bix",
+      fetchImpl: async () => reject(code),
+    });
+    const error = await api.activateRevision(7).then(
+      () => null,
+      (e: unknown) => e,
+    );
+    ok(
+      !(needsDiscardConsent(error) && isDraftInProgress(error)),
+      `${code}: 두 판정이 함께 참이다`,
+    );
+  }
+});
+
+test("발행 전 편집 판정도 오류 코드만 본다 — 문면으로 흉내 낼 수 없다", () => {
+  const impostor = new DevtoolsError(
+    "SERVER_REJECTED",
+    "DRAFT_IN_PROGRESS 편집 중인 내용이 있습니다.",
+  );
+  strictEqual(isDraftInProgress(impostor), false);
+  strictEqual(isDraftInProgress(new Error("아무거나")), false);
+  strictEqual(isDraftInProgress(undefined), false);
 });
 
 test("시각이 없거나 이상하면 「시각 모름」 — 1970-01-01 은 거짓말이다", () => {

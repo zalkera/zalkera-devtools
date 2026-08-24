@@ -340,6 +340,24 @@ export function needsDiscardConsent(error: unknown): boolean {
 }
 
 /**
+ * 사장님이 **자기 LLM 으로 고친 것이 아직 발행 전**이라 서버가 막은 거절(memo183 T2a 가드 5층).
+ *
+ * ⚠ **동의로 뚫는 길이 없다 — 그래서 [needsDiscardConsent] 와 다른 함수다.** 저쪽은 「버리고 계속」이
+ *   성립하지만(서버가 `discardPendingChanges=true` 를 받는다), 이쪽은 서버에 그런 인자가 없다.
+ *   설계가 일부러 거절형으로 둔 자리다: AI 변경 폐기에 동의한 사람이 **손으로 쓴 편집까지** 침묵으로
+ *   잃는 창을 만들지 않으려는 것이다.
+ *
+ * 그래서 확장이 할 일은 동의를 묻는 것이 아니라 **처분하러 보내는 것**이다. 여기서 「409 니까 물어보자」로
+ * 넓히면 뚫을 수 없는 거절에 동의 창을 띄우고, 눌러도 같은 거절이 돌아온다 — 그것이 막다른 길이다.
+ */
+const DRAFT_IN_PROGRESS = "DRAFT_IN_PROGRESS";
+
+/** 발행 전 편집이 남아 막힌 거절인가. 동의가 아니라 **안내**가 답이다. */
+export function isDraftInProgress(error: unknown): boolean {
+    return error instanceof DevtoolsError && error.serverCode === DRAFT_IN_PROGRESS;
+}
+
+/**
  * 버전 행의 시각을 **사람이 읽을 말**로. 없거나 못 읽으면 「시각 모름」이다.
  *
  * ⚠ **`new Date(...)` 를 표시 자리에 두지 않는다.** 널이면 1970-01-01, 이상한 문자열이면

@@ -205,6 +205,41 @@ test("동의 문면도 사이트 이름을 소독한다", () => {
   ok(!/\]\(command:/.test(ask.message), ask.message);
 });
 
+test("발행 전 편집 안내는 **처분하는 두 길**을 말한다", () => {
+    // 이 문면의 존재 이유가 그것이다. 「막혔습니다」만 말하면 서버 원문과 다를 게 없고, 사용자는
+    // 같은 거절을 반복해서 본다.
+    const notice = say.draftBlocked(captureTenant("bix"), "편집 중인 내용이 있습니다.");
+    match(notice.detail, /발행/);
+    match(notice.detail, /되돌리/);
+    ok(notice.message.includes("bix"), notice.message);
+});
+
+test("발행 전 편집 안내에는 **동의 어휘가 없다**", () => {
+    // 동의 인자가 없는 거절이라 「버리고 계속」류의 말이 새면 사용자가 누를 것을 찾다가 못 찾는다.
+    // `discardPendingConfirm` 문면을 복사해 오는 실수를 여기서 잡는다.
+    const notice = say.draftBlocked(captureTenant("bix"), "편집 중인 내용이 있습니다.");
+    const whole = `${notice.message}\n${notice.detail}`;
+    for (const word of ["버리고", "계속하면", "취소됩니다", "사라집니다"]) {
+        ok(!whole.includes(word), `동의 어휘가 샜다(${word}): ${whole}`);
+    }
+    // 그리고 **누를 것이 없다** — 반환에 `action` 이 없다는 것이 곧 「묻지 않는다」이다.
+    ok(!("action" in notice), "안내에 행동 버튼이 붙었다 — 동의 창으로 회귀");
+});
+
+test("발행 전 편집 안내도 서버 문장·사이트 이름을 소독한다", () => {
+    const notice = say.draftBlocked(
+        captureTenant(EVIL),
+        "편집 3건 [열기](command:workbench.action.terminal.new)",
+    );
+    ok(!/\]\(command:/.test(notice.detail), notice.detail);
+    ok(!/\]\(command:/.test(notice.message), notice.message);
+});
+
+test("발행 전 편집 안내도 긴 서버 문장에 밀리지 않는다", () => {
+    const notice = say.draftBlocked(captureTenant("bix"), "가".repeat(5000));
+    ok(notice.detail.length < 400, `detail 이 ${notice.detail.length}자다`);
+});
+
 test("서버 문장이 길어도 모달을 밀어내지 않는다", () => {
   const ask = say.discardPendingConfirm(captureTenant("bix"), "가".repeat(5000));
   ok(ask.detail.length < 400, `detail 이 ${ask.detail.length}자다`);

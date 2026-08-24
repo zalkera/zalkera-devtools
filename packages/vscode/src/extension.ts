@@ -85,6 +85,7 @@ import {
   type IssuedKey,
   noRevisionError,
   needsDiscardConsent,
+  isDraftInProgress,
   revisionWhen,
   suggestFolderName,
   nextAvailableName,
@@ -1641,6 +1642,12 @@ async function switchVersion(): Promise<void> {
     // 서버가 「계속하려면 확인해 주세요」라고 말했는데 확인할 자리가 없으면 그 문장이 곧 막다른
     // 길이다. **여기 하나만 뚫는다** — 다른 거절(게시 진행 중·AI 작업 중)에는 동의로 넘어가는
     // 길이 없고, 넓히면 뚫을 수 없는 거절에도 동의 창을 띄우게 된다.
+    // 발행 전 편집은 **동의로 못 뚫는다** — 안내하고 멈춘다. 그냥 던지면 빨간 오류창에 서버
+    // 문장만 뜨고 **어디로 가야 하는지가 없다**(= 막다른 길).
+    if (isDraftInProgress(error)) {
+      await tellDraftBlocked(tenant, (error as Error).message);
+      return;
+    }
     if (!needsDiscardConsent(error)) throw error;
     if (!(await askDiscardConsent(tenant, (error as Error).message))) return;
     await activate(true);
@@ -2083,6 +2090,27 @@ async function stopPreview(): Promise<void> {
  * 백엔드는 재업로드·버전 전환·프리셋 재개시 **세 문이 같은 가드**를 지난다. 그러니 사람이 보는
  * 문면도 하나여야 한다 — 자리마다 다른 말을 하면 같은 일인 줄 모른다.
  */
+/**
+ * 발행 전 편집에 막혔다 — **묻지 않고 알린다.**
+ *
+ * 옆의 [askDiscardConsent] 와 짝처럼 보이지만 반환값이 없는 것이 핵심이다. 서버에 이 거절을 넘기는
+ * 인자가 없으므로 「계속할까요」를 물을 수 없다 — 물으면 눌러도 같은 409 가 돌아오고, 그것이 정확히
+ * 이 자리가 막으려는 막다른 길이다.
+ *
+ * 모달로 낸다. 처분은 **다른 화면에서** 해야 하는데, 비-모달 알림은 사람이 못 보고 지나칠 수 있어
+ * 「왜 안 올라가지」로 되돌아온다.
+ */
+async function tellDraftBlocked(
+  tenant: CapturedTenant,
+  serverMessage: string,
+): Promise<void> {
+  const notice = say.draftBlocked(tenant, serverMessage);
+  await vscode.window.showWarningMessage(notice.message, {
+    modal: true,
+    detail: notice.detail,
+  });
+}
+
 async function askDiscardConsent(
   tenant: CapturedTenant,
   serverMessage: string,
@@ -2110,19 +2138,32 @@ async function publishCommand(): Promise<void> {
   );
   if (confirm !== ask.action) return;
 
-  const result = await vscode.window.withProgress<PublishResult>(
-    { location: vscode.ProgressLocation.Notification, title: "올리는 중" },
-    () =>
-      publish({
-        projectDir: dir,
-        api,
-        tenant,
-        onProgress: log,
-        // 서버가 「계속하려면 확인해 주세요」라고 말한 자리 — 확인할 곳을 준다. 전환 쪽과
-        // **같은 문면**을 쓴다: 두 문이 같은 가드를 지나므로 사람이 보는 말도 같아야 한다.
-        onConsent: (serverMessage) => askDiscardConsent(tenant, serverMessage),
-      }),
-  );
+  // ⚠ **`onConsent` 로는 이 갈래를 못 받는다.** 동의 콜백은 「동의로 넘어갈 수 있는 거절」에만
+  //    불린다(core `needsDiscardConsent`). 발행 전 편집은 동의 인자가 없는 거절형이라 그대로
+  //    던져져 나오고, 여기서 안 받으면 빨간 오류창에 서버 문장만 남는다 — 어디로 가야 하는지가
+  //    없는 것이 곧 막다른 길이다(memo183 §7).
+  let result: PublishResult;
+  try {
+    result = await vscode.window.withProgress<PublishResult>(
+      { location: vscode.ProgressLocation.Notification, title: "올리는 중" },
+      () =>
+        publish({
+          projectDir: dir,
+          api,
+          tenant,
+          onProgress: log,
+          // 서버가 「계속하려면 확인해 주세요」라고 말한 자리 — 확인할 곳을 준다. 전환 쪽과
+          // **같은 문면**을 쓴다: 두 문이 같은 가드를 지나므로 사람이 보는 말도 같아야 한다.
+          onConsent: (serverMessage) => askDiscardConsent(tenant, serverMessage),
+        }),
+    );
+  } catch (error) {
+    if (isDraftInProgress(error)) {
+      await tellDraftBlocked(tenant, (error as Error).message);
+      return;
+    }
+    throw error;
+  }
   // ⚠ **유형을 함께 남긴다.** 이 값이 뒤 흐름을 통째로 가른다 — `STATIC` 은 확정 즉시 게시라
   //    빌드 대기가 아예 없고(진행 표시도 없다), `NEXT_SOURCE` 는 서버가 빌드를 마쳐야 게시된다.
   //    같은 소스를 다른 기계에서 올렸는데 화면이 다르면 첫 질문이 "무엇으로 판별됐나"인데,

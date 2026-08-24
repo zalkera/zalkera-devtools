@@ -250,6 +250,27 @@ export const say = {
             action: "버리고 계속",
         };
     },
+    /**
+     * 발행 전 편집이 남아 막혔다 — **동의를 묻지 않는다.**
+     *
+     * 서버 가드 5층은 거절형이라 「버리고 계속」이 성립하지 않는다(위 [discardPendingConfirm] 과
+     * 여기가 다른 이유다). 확장이 할 일은 **무엇이 걸려 있고 어디서 처분하는가**를 말하는 것이다 —
+     * 그 두 가지를 안 주면 사용자는 같은 거절을 반복해서 보고, 그게 막다른 길이다.
+     *
+     * 처분하는 길이 둘이라 둘 다 말한다: 발행하면 그 편집이 새 버전이 되고, 되돌리면 사라진다.
+     */
+    draftBlocked(
+        tenant: CapturedTenant,
+        serverMessage: string,
+    ): { message: string; detail: string } {
+        return {
+            message: `「${shown(tenant)}」 에 아직 발행하지 않은 편집이 있어 올릴 수 없습니다.`,
+            detail:
+                `${plainNotice(serverMessage, 200)}\n` +
+                "그 편집을 먼저 처분해 주세요 — 새 버전으로 발행하거나, 지금 켜져 있는 버전으로 되돌리면 됩니다.\n" +
+                "잘커라 콘솔의 「소스」 화면 또는 사이트에 연결한 AI 대화에서 할 수 있습니다.",
+        };
+    },
     switched(tenant: CapturedTenant, revisionNo: number): string {
         return `「${shown(tenant)}」 사이트를 버전 ${countJosa(revisionNo, "으로/로")} 바꿨습니다.`;
     },
