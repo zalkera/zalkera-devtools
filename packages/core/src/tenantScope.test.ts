@@ -36,7 +36,7 @@ test("올리기 확인창은 **안 바뀐다고 말하지 않는다**", () => {
 test("게시 완료 문면은 **바뀌었다**고 말하고 되돌리기를 권하지 않는다", () => {
     const line = say.published(captureTenant("bix"), 5);
     match(line, /「bix」/);
-    match(line, /버전 5로 게시됐습니다/);
+    match(line, /버전 5를 배포했습니다/);
     ok(!/아직 바뀌지 않았습니다/.test(line), `거짓 문장이 돌아왔다: ${line}`);
 });
 

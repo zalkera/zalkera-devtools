@@ -2006,11 +2006,28 @@ async function publishCommand(): Promise<void> {
         onConsent: (serverMessage) => askDiscardConsent(tenant, serverMessage),
       }),
   );
+  // ⚠ **유형을 함께 남긴다.** 이 값이 뒤 흐름을 통째로 가른다 — `STATIC` 은 확정 즉시 게시라
+  //    빌드 대기가 아예 없고(진행 표시도 없다), `NEXT_SOURCE` 는 서버가 빌드를 마쳐야 게시된다.
+  //    같은 소스를 다른 기계에서 올렸는데 화면이 다르면 첫 질문이 "무엇으로 판별됐나"인데,
+  //    종전에는 그 답이 어디에도 안 남아 되물을 수밖에 없었다.
   log(
-    `버전 ${count(result.revisionNo)} 로 올렸습니다 — 파일 ${count(result.fileCount)}개 · ${Math.round(result.byteSize / 1024)}KB`,
+    `버전 ${count(result.revisionNo)} 로 올렸습니다 — 파일 ${count(result.fileCount)}개 · ${Math.round(result.byteSize / 1024)}KB · 유형 ${result.siteType} · 상태 ${result.status}`,
   );
   // 서버가 보낸 한계·상태 안내는 **그대로 보여 준다**(memo66 §4 거짓 성공 차단).
-  if (result.capabilityNote) log(result.capabilityNote);
+  //
+  // ⚠ **출력 패널에만 적는 것은 차단이 아니다.** 이 문장이 「정적 사이트로 게시됐습니다 — 상품·
+  //    재고·예약 등 실시간 데이터는 표시되지 않습니다」를 말하는 자리인데, 확장은 그 패널을
+  //    자동으로 열지 않는다. 사람은 사이트가 왜 다른지 모른 채로 남고, 같은 소스를 다른 기계에서
+  //    올렸을 때 결과가 갈리는 이유도 여기 적혀 있다가 그대로 묻힌다.
+  //
+  //    서버 문장이라 표시 자리에서 소독한다. 유형별로 낼지 말지 고르지 않는다 — 무엇이 고지할
+  //    값인지는 서버가 정하고, 확장이 문장을 읽어 판단하면 서버가 말을 바꾸는 날 조용히 삼킨다.
+  if (result.capabilityNote) {
+    log(result.capabilityNote);
+    void vscode.window.showInformationMessage(
+      plainNotice(result.capabilityNote, 300),
+    );
+  }
 
   // ⚠ **여기서 이 폴더의 소속이 사실이 된다.** 표식 없이 발행한 폴더(프리셋 시작·구판 받기·타
   //    입구)는 그때까지 어느 사이트의 것도 아니었는데, 사이트 이름을 박은 확인 모달을 지난 이

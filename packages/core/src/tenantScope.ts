@@ -160,7 +160,7 @@ export const say = {
      */
     published(tenant: CapturedTenant, revisionNo: number): string {
         return (
-            `「${shown(tenant)}」 사이트가 버전 ${countJosa(revisionNo, "으로/로")} 게시됐습니다. ` +
+            `「${shown(tenant)}」 사이트에 버전 ${countJosa(revisionNo, "을/를")} 배포했습니다. ` +
             `방문자에게 반영되기까지 잠시 걸립니다.`
         );
     },
