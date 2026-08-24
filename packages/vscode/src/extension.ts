@@ -1285,6 +1285,51 @@ async function downloadSourceZipCommand(): Promise<void> {
  * 대신 `decideImportPlan` 이 **쓰기 전에** 구조를 판정하고, 통과 못 하면 파일을 하나도 안 만든다.
  * 완료 문면도 「검증됐다」고 말하지 않는다.
  */
+/**
+ * zip 을 풀 자리. **받기와 같은 판정을 지난다**(`decideFetchTargetPlan`) — 빈 폴더를 열어 두고 온
+ * 사람에게 「빈 폴더를 고르세요」라고 다시 묻지 않는 것이 그 판정의 요점이다.
+ *
+ * ⚠ **`here` 갈래만 산다.** 받기의 `sibling`(옆에 `이름-v판`)은 판 번호를 아는 쪽의 제안이고,
+ *   zip 은 어느 판인지 모른다 — 소스 폴더 옆에 뜻 없는 이름을 지어 주지 않는다.
+ *
+ * 빈 폴더 **강제**는 여기가 아니라 `importZipInto` 가 실행 시점에 다시 잰다. 제안과 강제를 한
+ * 판정으로 합치지 않는다 — 고르고 푸는 사이에 파일이 생길 수 있다.
+ */
+async function chooseImportTarget(): Promise<string | undefined> {
+  const openDir = workspaceDir();
+  // ⚠ **`siteFolderOpen` 을 먼저 잰다** — 참이면 판정이 `sibling` 을 돌려주며 빈 폴더 판정을
+  //    버린다(그 자리에서 `readdir` 을 미리 돌면 매번 버려질 I/O 다).
+  const siteFolderOpen = siteDir() !== null;
+  const plan = decideFetchTargetPlan({
+    openDir: openDir ?? null,
+    openDirReceivable:
+      !siteFolderOpen && openDir !== undefined && (await isReceivable(openDir)),
+    siteFolderOpen,
+  });
+  if (plan.kind === "here") {
+    const HERE = "이 폴더에 풀기";
+    const answer = await vscode.window.showInformationMessage(
+      // ⚠ **사이트 이름을 적지 않는다.** 「zip 으로 시작」은 로그인만 요구하고 그 zip 이 어느
+      //    사이트 것인지 알 방법이 없다 — 지금 고른 사이트를 적으면 **그 zip 이 그 사이트 것이라고
+      //    우리가 말해 주는 셈**이 된다. 그래서 문면 정본(`say`)에도 두지 않는다: 그 객체의 계약이
+      //    「전부 사이트를 말한다」이고 시험이 그것을 전수로 문다.
+      ours(`지금 열어 두신 ${plainNotice(plan.dir, 120)} 에 이 zip 을 풉니다.`),
+      HERE,
+      "다른 폴더 고르기…",
+    );
+    if (answer === undefined) return undefined;
+    if (answer === HERE) return plan.dir;
+  }
+  const picked = await vscode.window.showOpenDialog({
+    canSelectFolders: true,
+    canSelectFiles: false,
+    openLabel: "여기에 풀기",
+    defaultUri: openDir ? vscode.Uri.file(dirname(openDir)) : undefined,
+    title: "소스를 풀 빈 폴더를 고르세요",
+  });
+  return picked?.[0]?.fsPath;
+}
+
 async function importZipCommand(): Promise<void> {
   const chosen = await vscode.window.showOpenDialog({
     canSelectFiles: true,
@@ -1297,13 +1342,7 @@ async function importZipCommand(): Promise<void> {
   const zipPath = chosen?.[0]?.fsPath;
   if (!zipPath) return;
 
-  const picked = await vscode.window.showOpenDialog({
-    canSelectFolders: true,
-    canSelectFiles: false,
-    openLabel: "여기에 풀기",
-    title: "소스를 풀 빈 폴더를 고르세요",
-  });
-  const target = picked?.[0]?.fsPath;
+  const target = await chooseImportTarget();
   if (!target) return;
 
   const result = await vscode.window.withProgress(
@@ -1318,6 +1357,14 @@ async function importZipCommand(): Promise<void> {
   }
   await refreshSidebar();
 
+  // ⚠ **푼 곳이 지금 열린 폴더 자신일 수 있다.** 그때 「폴더 열기」는 이미 열려 있는 것을 다시
+  //    여는 죽은 단추이고, 「폴더를 열고」라는 안내도 할 일이 없는 말이 된다.
+  if (target === workspaceDir()) {
+    void vscode.window.showInformationMessage(
+      ours("사이트 소스를 이 폴더에 풀었습니다. 「사이트에 연결」로 사이트에 붙이면 미리보기·올리기가 됩니다."),
+    );
+    return;
+  }
   const open = await vscode.window.showInformationMessage(
     ours("사이트 소스를 풀었습니다. 폴더를 열고 「사이트에 연결」로 사이트에 붙이면 미리보기·올리기가 됩니다."),
     "폴더 열기",

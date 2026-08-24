@@ -95,9 +95,23 @@ const WIRES = [
         "선택지를 손으로 짜면 판 없는 사이트에 「누르면 실패하는 받기」가 되살아난다",
     ],
     [
+        // ⚠ **첫 그리기만 고정하면 절반이다.** 화면을 안 막게 바꾼 뒤로 「받기를 뺀다」는 일은
+        //    전적으로 이 조회와 다시 그리는 줄이 한다 — 그 둘이 리팩터링에서 떨어지면 첫 배선은
+        //    그대로라 전건 초록인 채 P0 받기 항목이 **상시로** 되살아난다.
+        "packages/vscode/src/extension.ts",
+        "void probeFetchable(pinned).then((fetchable) => {",
+        "조회가 없어져 판 없는 사이트에서도 받기 항목이 그대로 남는다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "quick.items = optionItems(options);",
+        "조회 결과가 화면에 반영되지 않아 받기 항목이 그대로 남는다",
+    ],
+    [
         "packages/vscode/src/extension.ts",
         "const plan = decideFetchTargetPlan({",
         "받을 자리 판정이 확장 안 조건문으로 흩어져 열어 둔 빈 폴더 활용이 조용히 꺼진다",
+        2,
     ],
     [
         "packages/vscode/src/extension.ts",
