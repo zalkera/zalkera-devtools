@@ -221,6 +221,25 @@ test("지금 폴더에 풀었으면 **바뀌었다**고 말한다", () => {
   ok(!/새 폴더/.test(line), line);
 });
 
+test("감싼 꾸러미를 지금 폴더에 풀면 **소스가 하위에 있다**고 말한다", () => {
+  // 받은 tar 가 한 겹 감싸면 프로젝트 루트가 하위 폴더다. 「이 폴더가 그 사이트의 소스가
+  // 됐습니다」는 그때 거짓이고, 사람은 그 하위 폴더를 열어야 미리보기·올리기가 된다.
+  const line = say.fetched(captureTenant("bix"), 5, "into-open-nested");
+  match(line, /지금 폴더에 풀었습니다/);
+  match(line, /하위 폴더/);
+  // 「새 폴더로 받았습니다 · 지금 폴더는 바뀌지 않았습니다」로 접히면 안 된다 — 그것이 원 결함이다.
+  ok(!/바뀌지 않았습니다/.test(line), line);
+  ok(!/새 폴더/.test(line), line);
+});
+
+test("네 갈래가 서로 다른 문장을 낸다 — 뭉치면 한 칸이 거짓이 된다", () => {
+  const t = captureTenant("bix");
+  const lines = (["into-open", "into-open-nested", "sibling", "only"] as const).map((k) =>
+    say.fetched(t, 5, k),
+  );
+  ok(new Set(lines).size === 4, lines.join("\n"));
+});
+
 test("옆 폴더로 받았으면 **안 바뀌었다**고 말한다 — 그 문장은 여전히 참이다", () => {
   match(say.fetched(captureTenant("bix"), 5, "sibling"), /지금 폴더는 바뀌지 않았습니다/);
 });

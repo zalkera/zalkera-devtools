@@ -877,24 +877,41 @@ async function openSite(pinned?: CapturedTenant): Promise<void> {
   //    머물러 미리보기·발행으로 가는 길이 화면에서 끊긴다.
   await refreshSidebar();
 
-  // ⚠ **받은 곳이 지금 열린 폴더 자신일 수 있다.** 그때 「새 폴더로 받았습니다 · 지금 폴더는
-  //    바뀌지 않았습니다」는 두 문장 다 거짓이고, 사람이 이 알림에서 가장 확인하고 싶은 사실
-  //    (내 폴더가 바뀌었나)을 정확히 반대로 말한다. 열 것도 없다 — 이미 열려 있다.
-  const intoOpen = openDir !== undefined && root === openDir;
-  const into = intoOpen ? "into-open" : openDir !== undefined ? "sibling" : "only";
+  // ⚠ **두 축을 가른다.** 「어디에 풀렸나」(문면)와 「열 것이 있나」(단추)는 다른 물음이다.
+  //
+  //    ⑴ 받은 곳이 지금 열린 폴더 자신일 수 있다 — 그때 「새 폴더로 받았습니다 · 지금 폴더는
+  //       바뀌지 않았습니다」는 두 문장 다 거짓이고, 사람이 이 알림에서 가장 확인하고 싶은
+  //       사실(내 폴더가 바뀌었나)을 정확히 반대로 말한다. 판정은 **사람이 동의한 대상**인
+  //       `target` 으로 한다.
+  //    ⑵ 받은 꾸러미가 한 겹 감싸고 있으면 `findProjectRoot` 가 한 단계 내려가, 지금 폴더에
+  //       풀었어도 **소스는 하위 폴더**다. 그때 단추를 없애면 그리로 갈 길이 사라진다.
+  //       두 축을 한 판정으로 뭉치면 어느 쪽이든 한 칸이 거짓이 된다.
+  const intoOpen = openDir !== undefined && target === openDir;
+  const needsOpen = root !== openDir;
+  const into = !intoOpen
+    ? openDir !== undefined
+      ? "sibling"
+      : "only"
+    : needsOpen
+      ? "into-open-nested"
+      : "into-open";
   const message =
     say.fetched(tenant, result.revisionNo, into) +
     (into === "sibling" && session !== null
       ? " 폴더를 열면 지금 미리보기는 멈춥니다 — 새 폴더에서 다시 시작해 주세요."
       : "");
-  if (intoOpen) {
+  if (!needsOpen) {
     // `say` 가 만든 문장이다 — 서버 값은 그 안에서 이미 소독을 지났다(`tenantScope.ts` 의 `shown`).
     void vscode.window.showInformationMessage(ours(message));
     return;
   }
   const open = await vscode.window.showInformationMessage(
     ours(message),
-    into === "sibling" ? "새 폴더 열기" : "이 폴더 열기",
+    into === "into-open-nested"
+      ? "소스 폴더 열기"
+      : into === "sibling"
+        ? "새 폴더 열기"
+        : "이 폴더 열기",
   );
   if (open) {
     await vscode.commands.executeCommand(

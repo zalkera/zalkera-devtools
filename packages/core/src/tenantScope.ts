@@ -167,11 +167,21 @@ export const say = {
      *   **받은 곳이 지금 폴더 자신**이라 그 문장이 거짓이 된다. 둘을 한 문장으로 접으면 사람이
      *   가장 확인하고 싶은 사실(내 폴더가 바뀌었나)을 정확히 반대로 말하게 된다.
      */
-    fetched(tenant: CapturedTenant, revisionNo: number, into: "into-open" | "sibling" | "only"): string {
+    fetched(
+        tenant: CapturedTenant,
+        revisionNo: number,
+        into: "into-open" | "into-open-nested" | "sibling" | "only",
+    ): string {
         // 소독 검사기는 **표시 문장 안의 보간**을 하나씩 본다. 중간 변수로 묶으면 그 변수가
         // 「허용 목록 밖」이 된다 — 묶지 않고 자리마다 소독기를 그대로 둔다.
         if (into === "into-open") {
             return `「${shown(tenant)}」 버전 ${countJosa(revisionNo, "을/를")} 지금 폴더에 풀었습니다. 이 폴더가 그 사이트의 소스가 됐습니다.`;
+        }
+        // ⚠ **받은 꾸러미가 한 겹 감싸고 있으면 소스는 하위 폴더다.** 「이 폴더가 그 사이트의
+        //    소스가 됐습니다」는 그때 거짓이고, 사람은 그 하위 폴더를 열어야 미리보기·올리기가
+        //    된다 — 여기서 단추를 없애면 갈 길이 사라진다(`openSite` 가 그 갈래에 단추를 남긴다).
+        if (into === "into-open-nested") {
+            return `「${shown(tenant)}」 버전 ${countJosa(revisionNo, "을/를")} 지금 폴더에 풀었습니다. 소스는 그 안의 하위 폴더에 있습니다.`;
         }
         if (into === "sibling") {
             return `「${shown(tenant)}」 버전 ${countJosa(revisionNo, "을/를")} 새 폴더로 받았습니다. 지금 폴더는 바뀌지 않았습니다.`;
