@@ -30,13 +30,20 @@ function harness(pages: SiteRevision[][]) {
     };
 }
 
+/**
+ * 시험용 리비전. `READY` 는 **켜진 것으로** 만든다 — 백엔드는 빌드 완료와 활성 전환을 같은 tx 에서
+ * 하므로 그것이 정상 형상이고, 안 켜진 READY 는 [supersededRev] 로 따로 만든다.
+ */
 const rev = (revisionNo: number, status: string, failReason?: string): SiteRevision => ({
     revisionNo,
     status,
-    isActive: false,
+    isActive: status === "READY",
     createdAt: "2026-08-10T00:00:00Z",
     ...(failReason === undefined ? {} : { failReason }),
 });
+
+/** 빌드는 끝났는데 **안 켜진** 판 — 기다리는 사이 다른 판이 활성이 된 경우. */
+const supersededRev = (revisionNo: number): SiteRevision => ({...rev(revisionNo, "READY"), isActive: false});
 
 test("이미 READY 면 한 번 보고 끝난다 — 재우지 않는다", async () => {
     const h = harness([[rev(4, "READY")]]);
@@ -151,4 +158,27 @@ test("취소하면 즉시 멈춘다", async () => {
     });
 
     strictEqual(outcome.kind, "cancelled");
+});
+
+// ── 빌드 완료 ≠ 게시 ────────────────────────────────────────────────────────
+
+test("READY 지만 활성이 아니면 superseded 다", async () => {
+    // 백엔드 빌드 콜백에는 단조 가드가 있다 — 기다리는 사이 다른 판이 켜졌으면 완료를 READY 로
+    // 기록만 하고 활성 포인터는 안 옮긴다. 그때 「배포했습니다」는 거짓이다.
+    const h = harness([[supersededRev(7)]]);
+    const outcome = await waitForBuild({revisionNo: 7, listRevisions: h.listRevisions, sleep: h.sleep, now: h.now});
+    strictEqual(outcome.kind, "superseded");
+});
+
+test("READY 이고 활성이면 ready 다 — 과잉 차단 아님", async () => {
+    const h = harness([[rev(7, "READY")]]);
+    const outcome = await waitForBuild({revisionNo: 7, listRevisions: h.listRevisions, sleep: h.sleep, now: h.now});
+    strictEqual(outcome.kind, "ready");
+});
+
+test("BUILDING 이 안 켜진 READY 로 바뀌어도 superseded 로 끝난다", async () => {
+    // 폴링 중간에 다른 판이 켜지는 것이 실제 형상이다 — 첫 조회만 보고 판정하면 놓친다.
+    const h = harness([[rev(7, "BUILDING")], [supersededRev(7)]]);
+    const outcome = await waitForBuild({revisionNo: 7, listRevisions: h.listRevisions, sleep: h.sleep, now: h.now});
+    strictEqual(outcome.kind, "superseded");
 });

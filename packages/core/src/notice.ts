@@ -143,12 +143,21 @@ export const count = (value: unknown): string => {
 };
 
 /**
- * 숫자 뒤에 붙일 조사의 짝. **부르는 쪽이 짝을 고르고, 받침 판정은 여기서 한다.**
+ * 숫자 뒤에 붙일 조사. **이름만 받고, 글자는 이 파일이 낸다.**
  *
- * 자리마다 두 리터럴을 손으로 넘기게 두면 ㄹ 예외를 아는 자리와 모르는 자리가 갈린다 —
- * 실제로 초판이 그렇게 틀렸다(「버전 1으로」). 닫힌 집합으로 두면 그 실수를 못 한다.
+ * ⚠ **부르는 쪽에서 리터럴 두 개를 받지 않는다.** 그러면 그 두 글자가 소독을 안 지나고 문장에
+ *   그대로 이어 붙는다 — 유니온이 생 `string` 을 막지만 캐스트 한 줄이면 뚫리고, 알림 소독
+ *   검사기는 소독기의 **인자를 보지 않으므로** 초록인 채로 나간다(변이로 실측: 알림에 클릭
+ *   링크가 살았다). 키만 받고 표에서 꺼내면 그 갈래가 구조적으로 사라진다.
  */
 export type Josa = "이/가" | "을/를" | "은/는" | "으로/로";
+
+const JOSA_PAIRS: Record<Josa, readonly [string, string]> = {
+    "이/가": ["이", "가"],
+    "을/를": ["을", "를"],
+    "은/는": ["은", "는"],
+    "으로/로": ["으로", "로"],
+};
 
 /**
  * **숫자 + 조사.** `버전 ${count(n)} 가` 는 1·3·6·7·8·10 에서 전부 틀린다 — 조사는 숫자를 **읽는
@@ -164,20 +173,22 @@ export type Josa = "이/가" | "을/를" | "은/는" | "으로/로";
  *
  * 끝자리 0 은 언제나 받침이다 — 마지막으로 읽는 소리가 십·백·천·만(0 자체는 영)이기 때문이다.
  *
- * ⚠ **[count] 를 감싼다** — 소독 보장을 그대로 물려받는다. 돌려주는 것은 `count` 의 출력과 이 파일의
- *   리터럴뿐이라, 서버 문자열이 실릴 자리가 구조적으로 없다.
+ * ⚠ **던지지 않는다.** 표에 없는 이름이 오면 조사 없이 숫자만 돌려준다. 소독기 한 벌 중 하나만
+ *   예외를 내면 알림 경로에 새 실패 모드가 생긴다 — `plainNotice`·`count` 는 어떤 입력에도
+ *   안 던진다.
+ *
+ * ⚠ **[count] 를 감싼다** — 소독 보장을 물려받는다. 돌려주는 것은 `count` 의 출력과 [JOSA_PAIRS]
+ *   의 글자뿐이고 **둘 다 이 파일의 것**이라, 서버 문자열이 실릴 자리가 없다.
  */
 export const countJosa = (value: unknown, josa: Josa): string => {
-  // ⚠ 이 지역 변수를 `shown` 이라 부르지 마라. `shown` 은 `tenantScope.ts` 의 소독기 별칭 이름이고,
-  //    검사기는 **이름으로** 그 정의를 찾는다 — 여기 같은 이름의 지역 변수가 있으면 오검이 난다.
-  const drawn = count(value);
-  const last = drawn.slice(-1);
-  // 없음 = 2·4·5·9(이·사·오·구) · ㄹ = 1·7·8(일·칠·팔) · 그 밖 = 0·3·6(영/십·삼·육)
-  const kind = /[2459]/.test(last) ? "none" : /[178]/.test(last) ? "rieul" : /[036]/.test(last) ? "other" : "none";
-  const [withFinal, withoutFinal] = josa.split("/") as [string, string];
-  // ㄹ 은 「으로/로」에서만 받침이 없는 것처럼 굴고, 나머지 조사에서는 받침이다.
-  const picked = kind === "none" || (kind === "rieul" && josa === "으로/로") ? withoutFinal : withFinal;
-  return `${drawn}${picked}`;
+    const drawn = count(value);
+    const pair = JOSA_PAIRS[josa];
+    if (!pair) return drawn;
+    const last = drawn.slice(-1);
+    // 없음 = 2·4·5·9(이·사·오·구) · ㄹ = 1·7·8(일·칠·팔) · 그 밖 = 0·3·6(영/십·삼·육)
+    const kind = /[2459]/.test(last) ? "none" : /[178]/.test(last) ? "rieul" : /[036]/.test(last) ? "other" : "none";
+    const withoutFinal = kind === "none" || (kind === "rieul" && josa === "으로/로");
+    return `${drawn}${withoutFinal ? pair[1] : pair[0]}`;
 };
 
 /**

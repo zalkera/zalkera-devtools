@@ -62,8 +62,10 @@ const MARKER = "ours";
 const ALIAS_MUST_CALL = new Map([["shown", "plainNotice"], ["countJosa", "count"]]);
 /** 소독기 중 **정의가 이 파일에 있어야** 하는 것. 이름만 흉내 낸 가짜를 막는다. */
 const SANITIZER_HOME = new Map([
+    ["plainNotice", "packages/core/src/notice.ts"],
     ["count", "packages/core/src/notice.ts"],
     ["countJosa", "packages/core/src/notice.ts"],
+    ["shown", "packages/core/src/tenantScope.ts"],
 ]);
 /** 표기 `ours` 의 정의가 사는 자리. [assertMarkerIsIdentity] 가 그것을 확인한다. */
 const MARKER_HOME = "packages/core/src/notice.ts";
@@ -372,23 +374,62 @@ function scan(rel, { allTemplates }) {
     });
 }
 
+/** 파일 **최상위**의 그 이름 선언들. `const`·`let`·`function`·`export` 를 가리지 않는다. */
+function topLevelDeclarationsOf(source, name) {
+    const found = [];
+    for (const stmt of source.statements) {
+        if (ts.isFunctionDeclaration(stmt) && stmt.name?.text === name) found.push(stmt);
+        if (!ts.isVariableStatement(stmt)) continue;
+        for (const decl of stmt.declarationList.declarations) {
+            if (ts.isIdentifier(decl.name) && decl.name.text === name) found.push(decl);
+        }
+    }
+    return found;
+}
+
+/** 이 선언 안에서 `이름(...)` 을 **구문으로** 부르는가. 주석·문자열은 애초에 노드가 아니다. */
+function callsByName(node, name) {
+    let found = false;
+    walk(node, (n) => {
+        if (ts.isCallExpression(n) && ts.isIdentifier(n.expression) && n.expression.text === name) found = true;
+    });
+    return found;
+}
+
 /**
- * 소독기 별칭이 **정말 그 일을 하는지** 확인한다. 이름만 보고 통과시키면 정의 한 줄로 전부
- * 뚫린다(변이로 실측해 뚫었다). 파일에 그 이름이 없으면 확인을 건너뛴다 — 다른 파일이 쓸 수 있다.
+ * 소독기 별칭이 **정말 그 일을 하는지** 확인한다. 이름만 보고 통과시키면 정의 한 줄로 전부 뚫린다.
+ *
+ * ⚠ **선언 형태를 가리지 않는다.** `ts.isVariableDeclaration` 만 보면 같은 함수를
+ *   `export function shown(...)` 으로 적는 순간 검사 밖이다. 변이로 실측해 뚫었다 — 그 한 줄로
+ *   `tenantScope.ts` 전체의 테넌트 소독이 죽는데 검사기 14종이 전부 초록이었고, 알림에 클릭
+ *   링크가 살아서 떴다.
+ *
+ * ⚠ **문면이 아니라 구문으로 본다.** 선언의 소스 텍스트에 정규식을 걸면 `// count( ) 를 부르는
+ *   척한다` 주석 한 줄로 통과한다(실측). 이 레포가 `lib/ast.mjs` 를 만든 이유가 그것이다.
+ *
+ * ⚠ **최상위 선언만 본다.** 이름이 같은 지역 변수까지 잡으면 오검이 나고, 그러면 사람이 검사기를
+ *   피해 변수 이름을 비틀게 된다 — 그 회피가 곧 다음 판의 면제다.
+ *
+ * ⚠ **하나라도 아니면 거부한다.** 마지막 선언이 앞의 판정을 덮어쓰면 가짜를 앞에 진짜를 뒤에 두어
+ *   통과시킬 수 있다(실측). [collectDeclarations] 는 같은 사안을 이미 보수적으로 짰다.
+ *
+ * ⚠ **집에 있어야 할 정의가 없으면 반려한다.** [SANITIZER_HOME] 이 「정의가 이 파일에 있어야
+ *   한다」고 적어 두고도 집행하는 곳이 없었다 — 이름을 다른 파일로 옮기면 검사가 조용히 건너뛰었다.
  */
 function assertDefinitionsAreReal(rel) {
     const source = parse(join(root, rel));
     for (const [alias, must] of ALIAS_MUST_CALL) {
-        let ok = null;
-        walk(source, (node) => {
-            if (!ts.isVariableDeclaration(node) || node.name.getText() !== alias) return;
-            ok = new RegExp(`\\b${must}\\s*\\(`).test(node.getText());
-        });
-        if (ok === false) {
-            console.error(`❌ 알림 소독 검사 — ${rel} 의 \`${alias}\` 정의가 \`${must}\` 를 부르지 않습니다.`);
-            console.error("   → 이름만 소독기인 별칭은 검사기를 통째로 무력화합니다.");
+        const declarations = topLevelDeclarationsOf(source, alias);
+        if (declarations.length === 0) {
+            if (SANITIZER_HOME.get(alias) !== rel) continue;
+            console.error(`❌ 알림 소독 검사 — \`${alias}\` 의 정의가 집(${rel})에 없습니다.`);
+            console.error("   → 집을 옮겼으면 `SANITIZER_HOME` 도 함께 옮기십시오. 집이 어긋나면 검사가 조용히 건너뜁니다.");
             process.exit(1);
         }
+        if (declarations.every((decl) => callsByName(decl, must))) continue;
+        console.error(`❌ 알림 소독 검사 — ${rel} 의 \`${alias}\` 정의가 \`${must}\` 를 부르지 않습니다.`);
+        console.error("   → 이름만 소독기인 별칭은 검사기를 통째로 무력화합니다.");
+        process.exit(1);
     }
 }
 
@@ -621,6 +662,15 @@ for (const rel of NOTICE_SOURCES) {
 //    뚫었다: `count` 를 안 부르는 가짜 `countJosa` 가 초록이었다. `shown` 이 마침 tenantScope 에
 //    살아서 이 구멍이 안 보였던 것이고, 등록만 하고 집이 다른 소독기가 생기는 순간 열린다.
 //    [HOMES] 는 소독기·표기의 집과 문구 정본을 모두 담으므로 그것으로 돈다.
+// ⚠ **집 없는 소독기를 등록할 수 없게 한다.** [HOMES] 는 `SANITIZER_HOME` 값으로 지어지므로,
+//    집을 안 적은 이름은 정의 검사의 **관할 밖**에 남는다 — 아무 일도 안 하는 가짜를 그 자리에
+//    두면 검사기가 초록인 채로 소독이 죽는다(실측으로 뚫렸다).
+for (const name of SANITIZERS) {
+    if (SANITIZER_HOME.has(name)) continue;
+    console.error(`❌ 알림 소독 검사 — 소독기 \`${name}\` 에 SANITIZER_HOME 이 없습니다(통과가 아닙니다).`);
+    console.error("   → 정의가 사는 파일을 적으십시오. 집이 없으면 그 소독기는 정의 검사를 안 받습니다.");
+    process.exit(2);
+}
 for (const rel of HOMES) {
     if (!existsSync(join(root, rel))) {
         console.error(`❌ 알림 소독 검사 — ${rel} 이 없습니다(통과가 아닙니다).`);

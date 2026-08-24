@@ -273,3 +273,20 @@ test("숫자로 못 읽는 값은 `?` 로 접히고 조사는 그대로 붙는�
     ok(!RENDERS_AS_LINK.test(out), out);
   }
 });
+
+test("표에 없는 조사 이름이 와도 던지지 않는다", () => {
+  // 유니온이 막지만 캐스트 한 줄이면 뚫린다. 소독기 한 벌 중 하나만 예외를 내면 알림 경로에
+  // 새 실패 모드가 생긴다 — `plainNotice`·`count` 는 어떤 입력에도 안 던진다.
+  for (const bad of [undefined, null, 42, {}, "no-slash", ""]) {
+    strictEqual(countJosa(7, bad as never), "7", JSON.stringify(bad));
+  }
+});
+
+test("조사 글자는 **이 파일의 것**이다 — 부르는 쪽 문자열이 문장에 못 실린다", () => {
+  // 종전에는 리터럴 두 개를 인자로 받아 그대로 이어 붙였다. 캐스트 한 줄로 알림에 클릭 링크가
+  // 살았고(변이 실측) 소독 검사기는 소독기의 인자를 안 보므로 초록이었다.
+  const evil = "x](command:workbench.action.terminal.new)";
+  const out = countJosa(3, evil as never);
+  strictEqual(out, "3");
+  ok(!RENDERS_AS_LINK.test(out), out);
+});

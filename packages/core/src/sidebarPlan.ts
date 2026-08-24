@@ -168,9 +168,7 @@ export function sidebarPlan(state: SidebarState): PlanGroup[] {
                 items: [
                     act("배포 전 검사", "zalkera.precheck", "checklist", "조언입니다 — 발행을 막지 않습니다"),
                     // 「배포」는 **켜지는 것까지**로 읽히고, 실제로 그렇다 — 백엔드가 올린 판을
-                    // 자동으로 켠다(STATIC 은 즉시, Next 소스는 빌드가 끝나는 순간). 설명은 그
-                    // 사실을 말한다. ⚠ 종전 설명은 「판만 만듭니다」였는데 거짓이었고, 그 거짓 위에
-                    // 발행 후 「지금 전환」 단추가 서 있었다 — 누르면 반드시 실패하는 단추였다.
+                    // 자동으로 켠다(STATIC 은 즉시, Next 소스는 빌드가 끝나는 순간).
                     act("새 버전 배포", "zalkera.publish", "cloud-upload", "올리면 방문자가 보는 사이트가 이 소스로 바뀝니다"),
                     // 넘기는 길. 손으로 압축하면 자격증명이 딸려 가므로 이 자리가 필요하다.
                     act("zip 으로 내보내기", "zalkera.export", "package", "미리보기 열쇠와 널리 쓰이는 자격증명 파일, 빌드 산출물을 빼고 담습니다"),
@@ -236,7 +234,7 @@ export function sidebarPlan(state: SidebarState): PlanGroup[] {
             tooltip: "어느 버전을 켤지 정합니다",
             items: [
                 act("버전 이력", "zalkera.history", "list-flat", "읽기 전용 — 아무것도 바뀌지 않습니다"),
-                act("버전 전환", "zalkera.version.switch", "arrow-swap", "이전 버전으로 되돌립니다 — 방문자가 보는 화면이 바로 바뀝니다"),
+                act("버전 전환", "zalkera.version.switch", "arrow-swap", "방문자가 보는 화면이 바로 바뀝니다"),
             ],
         });
     }

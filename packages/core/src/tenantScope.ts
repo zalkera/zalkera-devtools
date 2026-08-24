@@ -129,30 +129,22 @@ export const say = {
     /**
      * 올리기 확인 — **이 문이 곧 배포다.**
      *
-     * ⚠ 종전 문면은 「올리기만 합니다 — 방문자가 보는 사이트는 그대로입니다」였고, **거짓이었다.**
-     *   백엔드는 업로드로 만든 판을 자동으로 켠다: STATIC 은 확정 즉시, NEXT_SOURCE 는 빌드가
-     *   끝나는 순간이다. 확장만 없는 2단 게이트를 가정하고 있었다.
-     *
-     *   그 거짓이 제일 비쌌던 이유는 오류 문면이 아니라 **여기**다 — 배포 게이트에서 "안 바뀐다"고
-     *   약속받은 사람은 확인창을 읽지 않고 넘긴다. 그리고 그 소스는 바로 손님에게 간다.
+     * 백엔드는 업로드로 만든 판을 자동으로 켠다 — STATIC 은 확정 즉시, NEXT_SOURCE 는 빌드가
+     * 끝나는 순간이다. 그러니 이 모달이 **마지막 확인 지점**이고, 여기서 "안 바뀐다"고 말하면
+     * 사람은 읽지 않고 넘긴 뒤 미검수 소스를 손님에게 보낸다.
      */
     publishConfirm(tenant: CapturedTenant): { message: string; detail: string; action: string } {
         return {
             message: `「${shown(tenant)}」 사이트를 지금 이 폴더의 소스로 바꿉니다.`,
             detail:
-                "올리면 방문자가 보는 사이트가 이 소스로 바뀝니다 — 되돌리려면 「버전 전환」에서 이전 버전을 고릅니다.\n" +
-                "반영에는 잠시 걸립니다.",
+                "올리면 방문자가 보는 사이트가 이 소스로 바뀝니다.\n" +
+                "이전에 올리신 판은 「버전 전환」에 남습니다.",
             action: "올리고 게시",
         };
     },
 
     /**
      * 게시 완료 — **사실을 말한다.**
-     *
-     * ⚠ 종전에는 「버전 N 가 준비됐습니다. 사이트는 아직 바뀌지 않았습니다」 + 「지금 전환」이었다.
-     *   앞 문장은 거짓이었고, 뒤 단추는 **누르면 반드시 실패했다** — 방금 올린 판은 이미 활성이라
-     *   전환 후보 목록에서 빠지기 때문이다(첫 판이면 「바꿀 다른 버전이 없습니다」, 그 뒤로는
-     *   「버전 N 로 바꿀 수 없습니다」). 사람이 뭘 잘못 눌러서가 아니라 구조적으로 그랬다.
      *
      * ⚠ **반영 시간을 숫자로 적지 않는다.** 서빙 반영은 오케스트레이터의 스냅샷 주기에 달려 있고
      *   그 값은 확장이 소유하지 않는다. 여기 숫자를 박으면 저쪽 설정이 바뀌는 날 조용히 거짓이 된다
@@ -202,7 +194,8 @@ export const say = {
         return `「${shown(tenant)}」 버전 ${countJosa(revisionNo, "을/를")} 서버가 만들지 못했습니다. 사이트는 그대로입니다.`;
     },
     buildTimedOut(tenant: CapturedTenant, revisionNo: number): string {
-        return `「${shown(tenant)}」 버전 ${countJosa(revisionNo, "이/가")} 아직 빌드 중입니다. 끝나면 그대로 게시됩니다.`;
+        return `「${shown(tenant)}」 버전 ${countJosa(revisionNo, "이/가")} 아직 빌드 중입니다. 끝나면 게시됩니다 — ` +
+            `그 사이 다른 판을 올리시면 그쪽이 켜집니다.`;
     },
     /**
      * 기다리기를 그만뒀을 때. ⚠ **취소는 빌드를 멈추는 것이 아니다** — 서버는 계속 짓는다.
@@ -213,7 +206,15 @@ export const say = {
      */
     buildWaitCancelled(tenant: CapturedTenant, revisionNo: number): string {
         return `「${shown(tenant)}」 버전 ${countJosa(revisionNo, "은/는")} 서버에서 계속 빌드됩니다. 기다리기만 그만뒀습니다 — ` +
-            `끝나면 그대로 게시됩니다.`;
+            `끝나면 게시됩니다 — 그 사이 다른 판을 올리시면 그쪽이 켜집니다.`;
+    },
+    /**
+     * 빌드는 끝났는데 그 판이 안 켜졌다 — 기다리는 사이 다른 판이 활성이 됐다.
+     * **「배포했습니다」로 접지 않는다**: 사람이 방금 올린 소스가 지금 손님에게 나가는 것이 아니다.
+     */
+    supersededByOther(tenant: CapturedTenant, revisionNo: number): string {
+        return `「${shown(tenant)}」 버전 ${countJosa(revisionNo, "은/는")} 다 만들어졌지만 켜지지 않았습니다 — ` +
+            `기다리는 사이 다른 판이 켜졌습니다. 「버전 전환」에서 고르실 수 있습니다.`;
     },
     buildGone(tenant: CapturedTenant, revisionNo: number): string {
         return `「${shown(tenant)}」 에서 버전 ${countJosa(revisionNo, "을/를")} 찾지 못했습니다.`;

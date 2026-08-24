@@ -13,9 +13,8 @@ import { DevtoolsError } from "./errors.ts";
  *   **켜지 않는다** — 켤 필요가 없기 때문이다. 게시는 서버가 한다(빌드 콜백이 활성 포인터를 옮긴다).
  *   여기서 하는 일은 **그것이 언제 일어나는지 지켜보는 것**뿐이다.
  *
- *   ⚠ 종전 주석은 여기서 안 켜는 이유를 「올리기와 켜기를 한 번에 이으면 확인 없이 손님에게 간다」로
- *     적었다. **그 게이트는 존재한 적이 없다** — 백엔드는 처음부터 자동으로 켰고, 확장만 그렇지 않다고
- *     믿었다. 그 믿음 위에 발행 후 「지금 전환」 단추가 서 있었고, 그 단추는 누르면 반드시 실패했다.
+ *   ⚠ 「확인 없이 손님에게 가지 않게 여기서 안 켠다」는 근거는 쓸 수 없다. **그 게이트는 없다** —
+ *     백엔드가 켠다.
  *
  * ■ 빌드가 끝나면 곧 반영인가
  *   아니다. 활성 포인터가 서는 것과 방문자가 새 화면을 보는 것 사이에 서빙 반영 시간이 있다.
@@ -28,6 +27,12 @@ import { DevtoolsError } from "./errors.ts";
  */
 export type BuildOutcome =
     | { kind: "ready"; revision: SiteRevision }
+    /**
+     * 빌드는 끝났는데 **그 판이 안 켜졌다.** 기다리는 사이 다른 판이 활성이 된 경우다 —
+     * 백엔드가 활성 역전을 막느라 완료를 기록만 하고 포인터를 안 옮긴다. 「게시됐다」로 접으면
+     * 거짓이 나간다.
+     */
+    | { kind: "superseded"; revision: SiteRevision }
     | { kind: "failed"; revision: SiteRevision; reason: string | null }
     /** 상한까지 안 끝났다. **실패가 아니다** — 계속 빌드 중일 수 있다. */
     | { kind: "timeout" }
@@ -86,7 +91,12 @@ export async function waitForBuild(options: WaitOptions): Promise<BuildOutcome> 
 
         const mine = revisions.find((r) => r.revisionNo === options.revisionNo);
         if (!mine) return { kind: "gone" };
-        if (mine.status === "READY") return { kind: "ready", revision: mine };
+        if (mine.status === "READY") {
+            // ⚠ **READY 는 「서빙 가능」이지 「서빙 중」이 아니다.** 빌드 콜백에 단조 가드가 있어,
+            //    기다리는 수 분 사이에 다른 판이 켜졌으면 완료를 READY 로 **기록만 하고** 활성
+            //    포인터는 그대로 둔다. 판정에 필요한 값은 같은 응답에 이미 실려 있다 — 왕복 0회.
+            return mine.isActive ? { kind: "ready", revision: mine } : { kind: "superseded", revision: mine };
+        }
         if (mine.status === "FAILED") return { kind: "failed", revision: mine, reason: mine.failReason ?? null };
 
         // BUILDING. 경과를 알려 준다 — 몇 분짜리 기다림에서 숫자가 움직이는 것이 곧 "살아 있다"는 신호다.

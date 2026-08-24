@@ -1454,18 +1454,12 @@ async function updateZipCommand(): Promise<void> {
 }
 
 /**
- * D4「버전 전환」 — 어느 버전을 켤지 고른다. 백엔드 신작이 없다(activate 가 이미 있다).
- *
- * ■ 「되돌리기」와 합친 이유 (오너 확정 2026-08-10)
- *   종전 이름은 「버전 되돌리기」였는데, 목록은 처음부터 **활성이 아닌 버전 전부**였다 — 방금 올린
- *   새 버전도 거기 있었다. 앞으로 가는 것과 뒤로 가는 것이 **같은 연산**(`activateRevision`)인데
- *   이름만 뒤를 가리켜, 방금 올린 것을 켜려는 사람이 이 자리를 찾지 못했다.
- *
- *   같은 API 를 두 이름으로 두면 언젠가 한쪽만 고쳐진다. 그래서 하나로 둔다.
+ * D4「버전 전환」 — **어느 판을 켤지 고른다.** 뒤로 가는 것은 그중 한 경우일 뿐이라 이름이
+ * 방향을 가리키지 않는다(오너 확정). 롤백한 뒤 다시 앞 판으로 오는 길도 여기 하나다.
  *
  * ■ 확인을 modal 로 받는다
  *   전환은 **방문자가 보는 화면이 즉시 바뀌는** 동작이다. 잘못 누르면 손님이 다른 화면을 본다.
- *   「새 버전 배포」가 조용한 대신 여기가 시끄러워야 한다 — 두 단계로 나눈 이유가 그것이다.
+ *   「새 버전 배포」도 modal 로 묻는다 — 둘 다 배포 사건이라 문의 무게가 같아야 한다.
  */
 async function switchVersion(): Promise<void> {
   const { api, tenant } = await ensureApiFor();
@@ -1485,7 +1479,7 @@ async function switchVersion(): Promise<void> {
     void vscode.window.showInformationMessage(
       building > 0
         ? `지금 바꿀 수 있는 버전이 없습니다(빌드 중 ${count(building)}개). 끝나면 다시 보십시오.`
-        : "되돌릴 이전 버전이 없습니다 — 지금 켜진 판이 처음이자 마지막입니다.",
+        : "지금 켤 수 있는 다른 판이 없습니다.",
     );
     return;
   }
@@ -1542,7 +1536,7 @@ async function switchVersion(): Promise<void> {
     if (!(await askDiscardConsent(tenant, (error as Error).message))) return;
     await activate(true);
   }
-  log(`사이트를 버전 ${target.revisionNo} 로 되돌렸습니다.`);
+  log(`사이트를 버전 ${countJosa(target.revisionNo, "으로/로")} 바꿨습니다.`);
   void vscode.window.showInformationMessage(
     say.switched(tenant, target.revisionNo),
   );
@@ -1953,11 +1947,11 @@ async function stopPreview(): Promise<void> {
 // ── 새 버전 배포 ────────────────────────────────────────────────────────
 
 /**
- * **「발행」이라 부르지 않는다**(오너 지적 2026-08-10). 이 명령이 하는 일은 `confirmArchive` 까지,
- * 곧 **버전을 하나 만드는 것**뿐이다. 사이트를 그 버전으로 바꾸는 것은 `activateRevision` 이고
- * 이 명령은 그것을 부르지 않는다. "발행"은 하지 않은 일을 했다고 말한다.
+ * 「새 버전 배포」 — **이 명령이 곧 배포다.** 확장은 `confirmArchive` 까지만 부르지만, 백엔드가
+ * 그 판을 켠다: STATIC 은 확정 즉시, NEXT_SOURCE 는 빌드가 끝나는 순간이다.
  *
- * 이름이 거짓이면 사람은 사이트가 바뀐 줄 알고 확인하지 않는다 — 그 오해가 제일 비싸다.
+ * 그래서 확인 모달이 **마지막 확인 지점**이고, 여기서 안 바뀐다고 말하면 사람은 그것을 읽지 않고
+ * 넘긴 뒤 미검수 소스를 손님에게 보낸다.
  */
 
 /**
@@ -2011,7 +2005,7 @@ async function publishCommand(): Promise<void> {
   //    같은 소스를 다른 기계에서 올렸는데 화면이 다르면 첫 질문이 "무엇으로 판별됐나"인데,
   //    종전에는 그 답이 어디에도 안 남아 되물을 수밖에 없었다.
   log(
-    `버전 ${count(result.revisionNo)} 로 올렸습니다 — 파일 ${count(result.fileCount)}개 · ${Math.round(result.byteSize / 1024)}KB · 유형 ${result.siteType} · 상태 ${result.status}`,
+    `버전 ${countJosa(result.revisionNo, "으로/로")} 올렸습니다 — 파일 ${count(result.fileCount)}개 · ${Math.round(result.byteSize / 1024)}KB · 유형 ${result.siteType} · 상태 ${result.status}`,
   );
   // 서버가 보낸 한계·상태 안내는 **그대로 보여 준다**(memo66 §4 거짓 성공 차단).
   //
@@ -2063,73 +2057,98 @@ async function publishCommand(): Promise<void> {
 /**
  * 게시됐다고 **알리고 끝낸다.** 물어볼 것이 없다 — 사이트는 이미 바뀌었다.
  *
- * ⚠ 종전에는 여기가 「지금 전환」을 권했고, 그 단추는 **누르면 반드시 실패했다**. 방금 올린 판이
- *   이미 활성이라 전환 후보에서 빠지기 때문이다(`switchVersion` 의 필터). 첫 판이면 「바꿀 다른
- *   버전이 없습니다」, 그 뒤로는 「버전 N 로 바꿀 수 없습니다」가 떴다 — 둘 다 사용자가 무엇을
- *   잘못해서 난 것이 아니었다.
- *
- * 대신 **가서 확인할 길**을 준다. 확인 없이 나가는 것을 우리가 막을 수는 없게 됐지만(백엔드가
- * 자동으로 켠다), 나갔다는 사실과 볼 자리를 숨기지는 않는다.
+ * 확인 없이 나가는 것을 확장이 막을 수는 없다(백엔드가 켠다). 그래서 **가서 볼 길**을 준다 —
+ * 나갔다는 사실도, 볼 자리도 숨기지 않는다.
  */
 async function announcePublished(
   api: ZalkeraApi,
   revisionNo: number,
   tenant: CapturedTenant,
 ): Promise<void> {
-  const url = await siteUrlOf(api, tenant);
+  const site = await siteUrlOf(api, tenant);
+  // ⚠ **단추에 어디로 가는지 적는다.** 주소는 서버가 준 값이고 우리는 그것을 보증하지 못한다 —
+  //    「사이트 열기」라고만 쓰면 **우리 이름으로 뜬 단추**가 사람을 아무 데나 데려갈 수 있고,
+  //    데스크톱에서 http(s) 는 확인 대화 없이 열린다. 호스트를 보이면 사람이 판단할 수 있다.
+  const open = site ? `「${plainNotice(site.host, 64)}」 열기` : null;
   // ⚠ **문구를 지역 변수로 빼지 않는다.** 알림 소독 검사기는 본문이 `say.*` 호출 **그 자리**에
   //    있는지를 보고, 한 번 변수를 거치면 허용 목록 밖으로 떨어진다. 주소가 없으면 단추도 없으므로
   //    호출을 둘로 가르는 대신 **단추 목록을 편다** — 부르는 자리는 하나로 남는다.
-  const actions = url ? [OPEN_SITE] : [];
   const chosen = await vscode.window.showInformationMessage(
     say.published(tenant, revisionNo),
-    ...actions,
+    ...(open ? [open] : []),
   );
-  if (!url || chosen !== OPEN_SITE) return;
+  if (!site || chosen !== open) return;
 
   // 브라우저를 못 여는 자리가 실제로 있다(원격 호스트·오프너 부재). 그때도 **게시는 끝났다** —
-  // 실패로 말하지 않고 주소만 알려 준다(미리보기 시작이 같은 규율을 쓴다).
-  const opened = await vscode.env
-    .openExternal(vscode.Uri.parse(url))
-    .then((ok) => ok, () => false);
-  if (!opened) log(`브라우저를 열지 못했습니다 — 주소를 직접 여세요: ${url}`);
+  // 실패로 말하지 않고 주소를 준다. 단추를 눌렀는데 아무 일도 안 일어나면 안 되므로 로그만이
+  // 아니라 **알림으로도** 말한다(미리보기 시작이 쓰는 규율과 같게).
+  const opened = await vscode.env.openExternal(vscode.Uri.parse(site.url)).then(
+    (ok) => ok,
+    () => false,
+  );
+  if (opened) return;
+  log(`브라우저를 열지 못했습니다 — 주소를 직접 여세요: ${site.url}`);
+  void vscode.window.showInformationMessage(
+    `브라우저를 자동으로 열지 못했습니다. 주소를 직접 열어 주세요 — ${plainNotice(site.url)}`,
+  );
 }
 
-/** 게시 알림의 단추. 문면과 판정이 같은 글자를 보게 상수로 둔다. */
-const OPEN_SITE = "사이트 열기";
+/**
+ * 열어도 되는 호스트의 모양. **이것이 유일한 관문이다** — 뒤의 `httpUrl` 은 스킴만 보는데 여기서
+ * `:` 를 이미 막으므로 새로 막는 것이 없다. 느슨하게 고치면 뒤에 받아 줄 것이 없다.
+ *
+ * 막는 것: 경로(`/`)·질의(`?`)·조각(`#`)·자격증명(`@`)·포트(`:`)·역슬래시·공백·비-ASCII·
+ * 앞뒤 점·앞뒤 하이픈. 길이는 DNS 상한 253 으로 죈다.
+ *
+ * 막지 **않는** 것: 루프백·사설망·메타데이터 IP, TLD 없는 이름. https GET 한 번이고 사람이
+ * 눌러야 열리므로 여기서 더 좁히지 않는다 — 좁히면 사내망에 띄운 정상 사이트를 못 연다.
+ */
+const SITE_HOST = /^[a-z0-9][a-z0-9.-]{0,251}[a-z0-9]$/i;
 
 /**
- * 게시된 사이트의 주소. **서버가 준 값만 쓴다**(`/api/me` 의 `tenants[].primaryDomain`) —
+ * 게시된 사이트의 주소와 호스트. **서버가 준 값만 쓴다**(`/api/me` 의 `tenants[].primaryDomain`) —
  * 베이스 도메인을 확장이 조립하면 그 지식의 사본이 하나 더 생기고, 커스텀 도메인을 쓰는 사이트에서는
  * 그 사본이 **틀린 주소**를 연다.
  *
- * 못 구하면 `null` 이다 — 본사 계정은 소속 목록이 비어 있고, 서버도 서빙 호스트가 없는 사이트에는
- * 빈 문자열을 보낸다. 그때는 단추를 안 낸다. **없는 주소를 여는 것보다 안 내는 편이 낫다.**
+ * 못 구하면 `null` 이고 그때는 단추를 안 낸다. **없는 주소를 여는 것보다 안 내는 편이 낫다.**
  *
- * ⚠ 호스트 모양을 검사한다. 이 값은 서버가 주고 우리는 그것으로 **브라우저를 연다** — 경로·자격증명·
- *   공백이 섞인 값이 그대로 `https://` 뒤에 붙으면 엉뚱한 곳이 열린다. 조회 실패는 삼킨다: 여기서
- *   던지면 **이미 끝난 게시**가 실패로 보고된다.
+ * ⚠ **전체를 감싸 삼킨다.** 거부만 삼키면 응답의 **모양**이 어긋날 때 그대로 던진다(`tenants` 가
+ *   배열이 아니면 `.find` 가 없다). 그 예외는 명령 깔때기까지 올라가 **이미 끝난 게시를 실패로
+ *   보고한다** — 이 파일이 고치려는 거짓 형상 그대로다. 다만 **말없이** 삼키지는 않는다.
  */
 async function siteUrlOf(
   api: ZalkeraApi,
   tenant: CapturedTenant,
-): Promise<string | null> {
-  const tenants = await api.listMyTenants().then(
-    (list) => list,
-    () => [],
-  );
-  const host = tenants
-    .find((t) => t.code === (tenant as string))
-    ?.primaryDomain?.trim();
-  if (!host || !/^[a-z0-9][a-z0-9.-]*[a-z0-9]$/i.test(host)) return null;
-  return httpUrl(`https://${host}`)?.toString() ?? null;
+): Promise<{ url: string; host: string } | null> {
+  try {
+    const tenants = await api.listMyTenants();
+    if (!Array.isArray(tenants)) return null;
+    // ⚠ **양쪽을 다듬어 견준다.** 백엔드는 `X-Tenant` 헤더를 `trim` 해서 받으므로 설정에 공백이
+    //    섞여도 업로드는 성공한다 — 여기서만 안 맞으면 **단추가 조용히 사라진다.**
+    // ⚠ 본사 계정은 소속 목록이 비어 있고 사이트 코드를 직접 입력한다. 그 코드는 이 목록에 없어
+    //    늘 빗나가고, 그래서 단추가 안 뜬다 — 우리가 주소를 모르는 것이 사실이라 그대로 둔다.
+    const wanted = String(tenant).trim();
+    const found = tenants.find(
+      (t) => typeof t?.code === "string" && t.code.trim() === wanted,
+    );
+    const host =
+      typeof found?.primaryDomain === "string" ? found.primaryDomain.trim() : "";
+    if (!host || !SITE_HOST.test(host)) return null;
+    const url = httpUrl(`https://${host}`);
+    return url ? { url: url.toString(), host } : null;
+  } catch (error) {
+    log(
+      `사이트 주소를 확인하지 못했습니다 — ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return null;
+  }
 }
 
 /**
- * 빌드가 끝날 때까지 지켜본다. **켜지는 않는다** — 켜는 것은 사람이 한 번 더 눌러야 한다.
+ * 빌드가 끝날 때까지 지켜본다. **여기서 켜지 않는다** — 켤 필요가 없다. 게시는 빌드 콜백이 한다.
  *
- * 취소는 **기다리기를 그만두는 것**이지 빌드를 멈추는 것이 아니다. 서버는 계속 짓는다 —
- * 그 사실을 말해 주지 않으면 사용자는 자기가 취소해서 안 된 줄 안다.
+ * 취소는 **기다리기를 그만두는 것**이지 빌드를 멈추는 것이 아니다. 서버는 계속 짓고, 끝나면
+ * 게시한다 — 그 사실을 말해 주지 않으면 사용자는 자기가 취소해서 안 나간 줄 안다.
  */
 async function awaitBuild(
   api: ZalkeraApi,
@@ -2176,6 +2195,15 @@ async function awaitBuild(
       );
       void vscode.window.showInformationMessage(
         say.buildWaitCancelled(tenant, revisionNo),
+      );
+      return false;
+    case "superseded":
+      // 빌드는 성공했다. **게시만 안 됐다** — 「배포했습니다」로 접으면 거짓이 나간다.
+      log(
+        `버전 ${countJosa(revisionNo, "은/는")} 다 만들어졌지만 그 사이 다른 판이 켜져 게시되지 않았습니다.`,
+      );
+      void vscode.window.showWarningMessage(
+        say.supersededByOther(tenant, revisionNo),
       );
       return false;
     case "gone":
