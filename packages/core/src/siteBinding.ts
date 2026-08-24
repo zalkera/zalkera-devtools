@@ -86,11 +86,16 @@ export interface ChoiceInput {
  *   바뀐다. 그래서 소속이 있으면 그것과 견주고, 없을 때만 유효 사이트와 견준다.
  */
 export function decideSiteChoice(input: ChoiceInput): SiteChoice {
-    if (!input.siteFolderOpen) {
+    // ⚠ **소속이 판정을 지배한다 — [decideTenantScope] 와 같은 순서여야 한다.** 폴더 유무를 먼저
+    //    보면 「소속은 있는데 소스가 아닌 폴더」(package.json 을 지웠거나 아직 안 받은 자리)에서
+    //    둘이 갈린다: 이쪽은 `switched` 라 「사이트: y」라고 말하는데 저쪽은 `none` 이라 **아무것도
+    //    안 적힌다.** 그 어긋남에 이름을 붙여 둔 것이 저 함수의 KDoc 이고, 여기서 순서를 뒤집으면
+    //    그 실패를 그대로 재현한다(실측으로 3칸이 갈렸다).
+    if (input.binding !== null) {
+        if (input.binding !== input.picked) return {kind: "elsewhere"};
         return input.current === input.picked ? {kind: "unchanged"} : {kind: "switched"};
     }
-    if (input.binding === null) return {kind: "adopted"};
-    if (input.binding !== input.picked) return {kind: "elsewhere"};
+    if (input.siteFolderOpen) return {kind: "adopted"};
     return input.current === input.picked ? {kind: "unchanged"} : {kind: "switched"};
 }
 
@@ -118,10 +123,15 @@ export interface ElsewhereInput {
     /**
      * 고른 사이트에 **받을 판이 있는가**.
      *
+     * ⚠ **「없다」를 두 사유로 가른다.** `no-revision` 은 아직 아무도 안 올린 사이트이고,
+     *   `no-ready` 는 올렸는데 빌드 중이거나 실패한 것이다. 뭉개면 **빌드가 도는 사이트의
+     *   사용자에게 「소스가 없으니 zip 으로 시작하라」는 오진**이 나가고, 잠시 기다리면 될 사람을
+     *   엉뚱한 길로 보낸다(`noRevisionError` 가 이미 그 둘을 가른다).
+     *
      * `unknown` 은 조회 실패다 — 「없다」가 아니다. 그 둘을 뭉개면 서버가 잠시 흔들린 것으로
      * 정상 경로가 사라진다.
      */
-    fetchable: "yes" | "none" | "unknown";
+    fetchable: "yes" | "no-revision" | "no-ready" | "unknown";
 }
 
 /**
@@ -136,17 +146,20 @@ export interface ElsewhereInput {
  */
 export function elsewhereOptions(input: ElsewhereInput): {
     options: ElsewhereOption[];
-    note: "no-source" | null;
+    note: "no-revision" | "no-ready" | null;
 } {
+    const blocked = input.fetchable === "no-revision" || input.fetchable === "no-ready" ? input.fetchable : null;
     const options: ElsewhereOption[] = [];
     if (input.confirmedDir !== null) options.push({kind: "open", dir: input.confirmedDir});
-    if (input.fetchable !== "none") options.push({kind: "fetch"});
-    if (input.fetchable === "none") {
+    if (blocked === null) options.push({kind: "fetch"});
+    // 판이 아예 없는 사이트로 옮기는 사람의 흔한 형상은 zip 입고(신규 테넌트 온보딩)다.
+    // **빌드 대기(`no-ready`)에서는 안 올린다** — 그 사람은 잠시 뒤 받으면 되지 새로 시작할 일이 아니다.
+    if (input.fetchable === "no-revision") {
         options.push({kind: "import-zip"}, {kind: "pick-folder"});
     } else {
         options.push({kind: "pick-folder"}, {kind: "import-zip"});
     }
-    return {options, note: input.fetchable === "none" ? "no-source" : null};
+    return {options, note: blocked};
 }
 
 /** 사람이 직접 고른 폴더를 어떻게 할 것인가. */

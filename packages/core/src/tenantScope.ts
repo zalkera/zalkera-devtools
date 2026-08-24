@@ -66,16 +66,6 @@ export const say = {
     renewalStoppedAfterRelink(binding: string): string {
         return `이 폴더가 「${shown(binding)}」 사이트로 바뀌어 미리보기를 멈췄습니다 — 다시 시작해 주세요.`;
     },
-    /**
-     * 소속이 다른 폴더에서 사이트를 골랐을 때. **「바꿨습니다」로 말하지 않는다** — 이 창의
-     * 사이트는 바뀌지 않았고, 화면과 실제가 갈리는 문장을 만들면 안 된다.
-     */
-    pickedElsewhere(picked: string, binding: string): string {
-        return (
-            `「${shown(picked)}」 를 고르셨습니다. ` +
-            `이 폴더는 「${shown(binding)}」 의 소스라서, 그 작업은 다른 폴더에서 합니다.`
-        );
-    },
     /** 재연결 동의 — 무엇이 달라지는지 **결과로** 말한다. */
     relinkConfirm(binding: string, picked: string): string {
         return (
@@ -91,26 +81,46 @@ export const say = {
     },
     /** 소속이 다른 폴더에서 사이트를 골랐을 때, 선택지 화면의 제목. */
     elsewhereTitle(picked: string, binding: string): string {
-        return `「${shown(picked)}」 작업은 다른 폴더에서 합니다 — 이 폴더는 「${shown(binding)}」 의 소스입니다`;
+        // 「소스입니다」로 단정하지 않는다 — 소속은 있는데 소스가 아닌 폴더(package.json 을 지웠거나
+        // 아직 안 받은 자리)도 이 화면에 온다. 표식이 말하는 것은 **연결**이지 소스 여부가 아니다.
+        return `「${shown(picked)}」 작업은 다른 폴더에서 합니다 — 이 폴더는 「${shown(binding)}」 에 연결돼 있습니다`;
     },
     /**
      * 그 사이트에 받을 판이 없다. **왜 받기가 목록에 없는지**를 말하는 자리다 — 항목을 조용히
      * 빼면 사람은 그것이 고장인지 정상인지 모른다.
      */
     noSourceYet(picked: string): string {
-        return `「${shown(picked)}」 에는 아직 받을 소스가 없습니다 — zip 으로 시작하실 수 있습니다.`;
+        return `「${shown(picked)}」 에는 아직 올린 소스가 없습니다 — zip 으로 시작하실 수 있습니다.`;
+    },
+    /**
+     * 올린 판은 있는데 **아직 받을 수 있는 것이 없다**(빌드 중이거나 실패). 「소스가 없다」로
+     * 접으면 잠시 기다리면 될 사람을 zip 입고로 보낸다 — `noRevisionError` 가 가르는 그 두 갈래다.
+     */
+    noReadySourceYet(picked: string): string {
+        return `「${shown(picked)}」 의 판이 아직 만들어지는 중이거나 실패했습니다 — 「버전 이력」에서 확인하실 수 있습니다.`;
     },
     /** 사람이 직접 고른 폴더가 남의 사이트 소스였다. **열지 않았다**는 사실이 요점이다. */
     pickedFolderBoundElsewhere(bound: string, picked: string): string {
         return `고르신 폴더는 「${shown(bound)}」 의 소스입니다 — 「${shown(picked)}」 폴더가 아니라서 열지 않았습니다.`;
     },
     /** 소속 없는 폴더에 소속을 **처음** 줄 때의 동의. 재연결과 달리 덮어쓰는 것이 없다. */
-    pickedFolderLinkConfirm(picked: string): { message: string; detail: string; action: string } {
+    pickedFolderLinkConfirm(picked: string): {
+        message: string;
+        detail: string;
+        /** 소스로 안 보이는 폴더에 덧붙인다 — **막지는 않고 사실만 말한다.** */
+        notSourceNote: string;
+        action: string;
+    } {
         return {
             message: `고르신 폴더를 「${shown(picked)}」 에 연결할까요?`,
             detail: "연결하면 이 폴더의 소스가 그 사이트로 올라가게 됩니다.",
+            notSourceNote: "이 폴더에서 package.json 을 찾지 못했습니다 — 사이트 소스 폴더가 맞는지 확인해 주세요.",
             action: "연결하고 열기",
         };
+    },
+    /** 동의는 받았는데 소속을 못 적었다. **열지 않았다**는 사실이 요점이다. */
+    pickedFolderNotLinked(picked: string): string {
+        return `고르신 폴더를 「${shown(picked)}」 에 연결하지 못해 열지 않았습니다 — 출력 패널에서 이유를 확인해 주세요.`;
     },
     /** 이 폴더의 사이트로 돌아왔을 때. */
     backToFolderSite(tenant: string): string {
@@ -130,6 +140,13 @@ export const say = {
      * ⚠ `detail` 은 **모달에서만 렌더된다**(`@types/vscode`). 비-모달 알림에 넣으면 화면에 안 뜨고,
      *   그러면 사람이 어디에 폴더가 생기는지 못 본 채 「옆에 새 폴더로 받기」를 누른다.
      */
+    /**
+     * 받을 자리가 **지금 열어 둔 그 폴더**일 때. [fetchTargetHere] 와 갈라 두는 이유는 그쪽 문장이
+     * 「지금 폴더는 그대로 둡니다」라고 약속하기 때문이다 — 대상이 그 폴더 자신이면 자기모순이다.
+     */
+    fetchTargetIntoOpen(tenant: CapturedTenant, revisionNo: number, path: string): string {
+        return `지금 열어 두신 ${ours(path)} 에 「${shown(tenant)}」 버전 ${countJosa(revisionNo, "을/를")} 풉니다.`;
+    },
     fetchTargetHere(tenant: CapturedTenant, revisionNo: number, path: string): string {
         // ⚠ **안심 문구가 경로 앞이다.** 비-모달 알림은 한 줄로 잘리는데, 경로는 길이가
         //    사람 폴더 깊이에 따라 정해진다(윈도우에서 65자가 흔하다). 경로 뒤에 두면
@@ -143,13 +160,23 @@ export const say = {
     fetchProgress(tenant: CapturedTenant, revisionNo: number): string {
         return `「${shown(tenant)}」 버전 ${countJosa(revisionNo, "을/를")} 받는 중`;
     },
-    /** 받기 완료. `hadOpenSite` 면 **지금 폴더가 안 바뀌었다**는 사실을 같이 말한다. */
-    fetched(tenant: CapturedTenant, revisionNo: number, hadOpenSite: boolean): string {
+    /**
+     * 받기 완료. **어디에 받았는지가 문장을 가른다.**
+     *
+     * ⚠ 갈래가 셋인 이유: `sibling` 은 「지금 폴더는 안 바뀌었다」가 참이지만, `into-open` 에서는
+     *   **받은 곳이 지금 폴더 자신**이라 그 문장이 거짓이 된다. 둘을 한 문장으로 접으면 사람이
+     *   가장 확인하고 싶은 사실(내 폴더가 바뀌었나)을 정확히 반대로 말하게 된다.
+     */
+    fetched(tenant: CapturedTenant, revisionNo: number, into: "into-open" | "sibling" | "only"): string {
         // 소독 검사기는 **표시 문장 안의 보간**을 하나씩 본다. 중간 변수로 묶으면 그 변수가
         // 「허용 목록 밖」이 된다 — 묶지 않고 자리마다 소독기를 그대로 둔다.
-        return hadOpenSite
-            ? `「${shown(tenant)}」 버전 ${countJosa(revisionNo, "을/를")} 새 폴더로 받았습니다. 지금 폴더는 바뀌지 않았습니다.`
-            : `「${shown(tenant)}」 버전 ${countJosa(revisionNo, "을/를")} 받았습니다.`;
+        if (into === "into-open") {
+            return `「${shown(tenant)}」 버전 ${countJosa(revisionNo, "을/를")} 지금 폴더에 풀었습니다. 이 폴더가 그 사이트의 소스가 됐습니다.`;
+        }
+        if (into === "sibling") {
+            return `「${shown(tenant)}」 버전 ${countJosa(revisionNo, "을/를")} 새 폴더로 받았습니다. 지금 폴더는 바뀌지 않았습니다.`;
+        }
+        return `「${shown(tenant)}」 버전 ${countJosa(revisionNo, "을/를")} 받았습니다.`;
     },
     /** 켜진 판이 없어 최근 것을 고른 경우. 말없이 고르면 화면과 실제가 갈린다. */
     pickedLatestReady(tenant: CapturedTenant, revisionNo: number): string {

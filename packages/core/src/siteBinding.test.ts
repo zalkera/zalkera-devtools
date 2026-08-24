@@ -158,9 +158,9 @@ test("소속이 다르면 elsewhere — 로컬본을 알든 모르든 갈래는 
 // ── 실패를 약속하지 않는가 ─────────────────────────────────────────────────
 
 test("받을 판이 없으면 **받기를 안 낸다** — 누르면 반드시 실패하는 항목이다", () => {
-  const { options, note } = elsewhereOptions({ confirmedDir: null, fetchable: "none" });
+  const { options, note } = elsewhereOptions({ confirmedDir: null, fetchable: "no-revision" });
   assert.ok(!options.some((o) => o.kind === "fetch"), JSON.stringify(options));
-  assert.equal(note, "no-source");
+  assert.equal(note, "no-revision");
   // 판 없는 사이트로 옮기는 흔한 형상은 zip 입고다 — 그때만 앞에 선다.
   assert.equal(options[0]?.kind, "import-zip");
 });
@@ -183,7 +183,7 @@ test("확증된 로컬본이 있으면 **열기가 첫 항목** — 순서가 �
 
 test("어느 조합에서도 선택지가 비지 않는다 — 막다른 길을 만들지 않는다", () => {
   for (const confirmedDir of [null, "/w/alpha"]) {
-    for (const fetchable of ["yes", "none", "unknown"] as const) {
+    for (const fetchable of ["yes", "no-revision", "no-ready", "unknown"] as const) {
       const { options } = elsewhereOptions({ confirmedDir, fetchable });
       assert.ok(options.length > 0, `${confirmedDir}/${fetchable}`);
       // 직접 고르기와 zip 은 서버 상태와 무관하게 늘 선다.
@@ -241,4 +241,51 @@ test("빈 폴더가 아니면 제안하지 않는다 — 남의 파일 위에 �
     decideFetchTargetPlan({ openDir: null, openDirReceivable: false, siteFolderOpen: false }),
     { kind: "pick-only" },
   );
+});
+
+// ── 두 판정이 같은 것을 보는가 ─────────────────────────────────────────────
+
+test("decideSiteChoice 와 decideTenantScope 가 **전 칸에서** 어긋나지 않는다", () => {
+  // 「화면은 y 라고 말하는데 아무것도 안 적힌다」가 이 축의 오래된 실패다. 두 함수가 소속을
+  // 보는 순서를 달리하면 그 형상이 조용히 되살아난다 — 전수로 잠근다.
+  for (const siteFolderOpen of [false, true]) {
+    for (const binding of [null, "alpha", "beta"]) {
+      for (const current of ["alpha", "beta", ""]) {
+        const choice = decideSiteChoice({ picked: "alpha", binding, siteFolderOpen, current });
+        const scope = decideTenantScope({ siteFolderOpen, binding, chosen: "alpha" });
+        const where = `open=${siteFolderOpen} binding=${binding} current=${current}`;
+        if (choice.kind === "elsewhere") {
+          // 아무것도 안 적는 갈래끼리 맞아야 한다.
+          assert.equal(scope, "none", where);
+        } else {
+          // 무언가 적히는 갈래에서 「아무것도 안 적힌다」가 나오면 화면이 거짓말을 한다.
+          assert.notEqual(scope, "none", where);
+        }
+      }
+    }
+  }
+});
+
+test("소속은 있는데 소스가 아닌 폴더 — 「바꿨습니다」로 말하지 않는다", () => {
+  // package.json 을 지웠거나 아직 안 받은 자리. 종전 순서에서는 switched 인데 아무것도 안 적혔다.
+  assert.deepEqual(
+    decideSiteChoice({ picked: "beta", binding: "alpha", siteFolderOpen: false, current: "alpha" }),
+    { kind: "elsewhere" },
+  );
+  assert.equal(decideTenantScope({ siteFolderOpen: false, binding: "alpha", chosen: "beta" }), "none");
+});
+
+// ── 「받을 것이 없다」의 두 사유 ────────────────────────────────────────────
+
+test("빌드 중인 사이트를 「소스가 없다」로 말하지 않는다", () => {
+  // 잠시 기다리면 될 사람을 zip 입고로 보내는 오진이었다.
+  const building = elsewhereOptions({ confirmedDir: null, fetchable: "no-ready" });
+  assert.equal(building.note, "no-ready");
+  assert.ok(!building.options.some((o) => o.kind === "fetch"), JSON.stringify(building.options));
+  // 새로 시작하라고 앞세우지 않는다 — 그 사람은 새로 시작할 일이 아니다.
+  assert.equal(building.options[0]?.kind, "pick-folder");
+
+  const empty = elsewhereOptions({ confirmedDir: null, fetchable: "no-revision" });
+  assert.equal(empty.note, "no-revision");
+  assert.equal(empty.options[0]?.kind, "import-zip");
 });

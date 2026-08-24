@@ -209,3 +209,26 @@ test("서버 문장이 길어도 모달을 밀어내지 않는다", () => {
   const ask = say.discardPendingConfirm(captureTenant("bix"), "가".repeat(5000));
   ok(ask.detail.length < 400, `detail 이 ${ask.detail.length}자다`);
 });
+
+// ── 받은 곳이 「지금 폴더」일 때 ────────────────────────────────────────────
+
+test("지금 폴더에 풀었으면 **바뀌었다**고 말한다", () => {
+  // 종전에는 갈래가 둘뿐이라 「새 폴더로 받았습니다. 지금 폴더는 바뀌지 않았습니다」가 나갔다 —
+  // 사람이 이 알림에서 가장 확인하고 싶은 사실을 정확히 반대로 말하던 자리다.
+  const line = say.fetched(captureTenant("bix"), 5, "into-open");
+  match(line, /지금 폴더에 풀었습니다/);
+  ok(!/바뀌지 않았습니다/.test(line), line);
+  ok(!/새 폴더/.test(line), line);
+});
+
+test("옆 폴더로 받았으면 **안 바뀌었다**고 말한다 — 그 문장은 여전히 참이다", () => {
+  match(say.fetched(captureTenant("bix"), 5, "sibling"), /지금 폴더는 바뀌지 않았습니다/);
+});
+
+test("받을 자리를 묻는 문면이 자기모순이 아니다", () => {
+  // `fetchTargetHere` 는 「지금 폴더는 그대로 둡니다」로 시작한다 — 대상이 그 폴더 자신인
+  // 갈래에서 재사용하면 동의를 구하는 문장이 스스로를 부정한다.
+  const intoOpen = say.fetchTargetIntoOpen(captureTenant("bix"), 5, "/w/empty");
+  ok(!/그대로 둡니다/.test(intoOpen), intoOpen);
+  match(intoOpen, /지금 열어 두신/);
+});

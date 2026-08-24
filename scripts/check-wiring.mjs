@@ -65,7 +65,49 @@ const WIRES = [
     [
         "packages/vscode/src/extension.ts",
         "await markFolderLinked(dir, String(pinned));",
-        "직접 고른 폴더에 링크만 남고 표식이 없어, 어느 쪽을 믿을지 알 수 없는 폴더가 생긴다",
+        "직접 고른 폴더의 소속이 링크에만 실려, zip·git 으로 안 따라가고 손 편집·구판 확장에 덮인다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "await markFolderLinked(dir, choice.description);",
+        "재연결이 표식을 안 남겨 링크와 표식이 갈리고, 「어긋남은 사고다」가 성립하지 않는다",
+    ],
+    [
+        // ⚠ **효과를 센다.** 호출부 문자열만 고정하면 헬퍼 본체를 무동작으로 바꿔도 초록이다 —
+        //    두 경로의 표식 쓰기가 한꺼번에 죽는데 아무도 안 잡는다(변이로 실측해 뚫렸다).
+        "packages/vscode/src/extension.ts",
+        "linkedAt: new Date().toISOString(),",
+        "표식 헬퍼가 이름만 남고 아무것도 안 써도 검사가 초록이 된다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "const linked = await linkFolderToTenant(dir, String(pinned));",
+        "직접 고르기가 링크를 안 써 새 창의 유효 사이트가 전역 잔값이 된다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "if (plan.kind === \"refuse\") {",
+        "남의 사이트 소스 폴더를 그 사이트 폴더로 열어 주고, 그 폴더의 링크를 덮는다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "elsewhereOptions({ confirmedDir, fetchable: \"unknown\" })",
+        "선택지를 손으로 짜면 판 없는 사이트에 「누르면 실패하는 받기」가 되살아난다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "const plan = decideFetchTargetPlan({",
+        "받을 자리 판정이 확장 안 조건문으로 흩어져 열어 둔 빈 폴더 활용이 조용히 꺼진다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "rememberOpenFolder();",
+        "로그아웃 뒤 로컬본이 디스크에 있는데도 「받기」를 권하는 상태로 되돌아간다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "await vscode.commands.executeCommand(\"zalkera.site.link\");",
+        "잘못 입양된 폴더를 되돌리는 길이 화면에서 사라진다",
     ],
     [
         "packages/vscode/src/extension.ts",

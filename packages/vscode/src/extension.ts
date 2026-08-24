@@ -867,7 +867,7 @@ async function openSite(pinned?: CapturedTenant): Promise<void> {
     `버전 ${count(result.revisionNo)} · 파일 ${count(result.fileCount)}개를 받았습니다.`,
   );
   log(`받은 곳: ${root}`);
-  if (openDir) log(`이전 폴더는 그대로 있습니다: ${openDir}`);
+  if (openDir && openDir !== root) log(`이전 폴더는 그대로 있습니다: ${openDir}`);
 
   await writeSourceMark(root, tenant, result);
   await linkFolderToSite(root, tenant);
@@ -877,16 +877,24 @@ async function openSite(pinned?: CapturedTenant): Promise<void> {
   //    머물러 미리보기·발행으로 가는 길이 화면에서 끊긴다.
   await refreshSidebar();
 
-  const hadOpenSite = openDir !== undefined;
+  // ⚠ **받은 곳이 지금 열린 폴더 자신일 수 있다.** 그때 「새 폴더로 받았습니다 · 지금 폴더는
+  //    바뀌지 않았습니다」는 두 문장 다 거짓이고, 사람이 이 알림에서 가장 확인하고 싶은 사실
+  //    (내 폴더가 바뀌었나)을 정확히 반대로 말한다. 열 것도 없다 — 이미 열려 있다.
+  const intoOpen = openDir !== undefined && root === openDir;
+  const into = intoOpen ? "into-open" : openDir !== undefined ? "sibling" : "only";
   const message =
-    say.fetched(tenant, result.revisionNo, hadOpenSite) +
-    (hadOpenSite && session !== null
+    say.fetched(tenant, result.revisionNo, into) +
+    (into === "sibling" && session !== null
       ? " 폴더를 열면 지금 미리보기는 멈춥니다 — 새 폴더에서 다시 시작해 주세요."
       : "");
-  const open = await vscode.window.showInformationMessage(
+  if (intoOpen) {
     // `say` 가 만든 문장이다 — 서버 값은 그 안에서 이미 소독을 지났다(`tenantScope.ts` 의 `shown`).
+    void vscode.window.showInformationMessage(ours(message));
+    return;
+  }
+  const open = await vscode.window.showInformationMessage(
     ours(message),
-    hadOpenSite ? "새 폴더 열기" : "이 폴더 열기",
+    into === "sibling" ? "새 폴더 열기" : "이 폴더 열기",
   );
   if (open) {
     await vscode.commands.executeCommand(
@@ -912,15 +920,21 @@ async function chooseFetchTarget(
   // ⚠ **빈 폴더를 열어 두고 온 사람에게 「빈 폴더를 고르세요」라고 다시 묻지 않는다.** 그 사람은
   //    이미 자리를 골랐다 — 못 읽으면 탐색기로 올라가 새 폴더를 만들게 하는 왕복이 생기고, 그것이
   //    비개발자가 멈추는 자리다. 판정은 core 가 하고 빈 폴더 여부만 여기서 잰다.
+  // ⚠ **`siteFolderOpen` 을 먼저 잰다.** 참이면 `decideFetchTargetPlan` 이 첫 줄에서 `sibling` 을
+  //    돌려주고 빈 폴더 판정을 버린다 — 그 자리에서 `readdir` 을 미리 돌면 매번 버려질 I/O 다.
+  const siteFolderOpen = siteDir() !== null;
   const plan = decideFetchTargetPlan({
     openDir: openDir ?? null,
-    openDirReceivable: openDir !== undefined && (await isReceivable(openDir)),
-    siteFolderOpen: siteDir() !== null,
+    openDirReceivable:
+      !siteFolderOpen && openDir !== undefined && (await isReceivable(openDir)),
+    siteFolderOpen,
   });
   if (plan.kind === "here") {
     const HERE = "이 폴더에 받기";
     const answer = await vscode.window.showInformationMessage(
-      ours(say.fetchTargetHere(tenant, revisionNo, plan.dir)),
+      // ⚠ `fetchTargetHere` 를 쓰지 않는다 — 그 문장은 「지금 폴더는 그대로 둡니다」로 시작하는데
+      //    여기서는 그 폴더가 곧 대상이다. 동의를 구하는 문장이 자기모순이면 동의가 아니다.
+      ours(say.fetchTargetIntoOpen(tenant, revisionNo, plan.dir)),
       HERE,
       "다른 폴더 고르기…",
     );
@@ -2672,6 +2686,7 @@ async function chooseSite(): Promise<void> {
       }
       return;
     }
+    // `elsewhere` 는 소속이 있을 때만 나온다 — 빈 문자열로 물러설 자리가 아니다.
     await offerElsewhere(code, binding ?? "");
   } catch (error) {
     if (isCancelled(error)) return;
@@ -2690,73 +2705,103 @@ async function chooseSite(): Promise<void> {
  *   취소이고, 그때 아무것도 안 적히는 것은 위 `none` 판정이 이미 담보한다.
  */
 async function offerElsewhere(picked: string, binding: string): Promise<void> {
-  log(`이 폴더는 ${binding || "다른"} 사이트의 소스라 ${picked} 작업은 다른 폴더에서 합니다.`);
+  log(`이 폴더는 ${binding} 사이트에 연결돼 있어 ${picked} 작업은 다른 폴더에서 합니다.`);
   // 고른 사이트를 **여기서 잡는다.** 이 창의 유효 사이트는 아직 이 폴더의 것이라, 캡처 없이
   // 부르면 받기가 엉뚱한 사이트의 소스를 내려받는다.
   const pinned = captureTenant(picked);
+  const confirmedDir = confirmedFolderFor(picked);
 
   const quick = vscode.window.createQuickPick<
     vscode.QuickPickItem & { option: ElsewhereOption }
   >();
-  quick.title = say.elsewhereTitle(picked, binding);
-  quick.ignoreFocusOut = true;
+  let settled = false;
   try {
-    quick.busy = true;
-    quick.placeholder = "무엇을 할지 고르세요";
-    quick.show();
-
-    const fetchable = await probeFetchable(pinned);
-    const { options, note } = elsewhereOptions({
-      confirmedDir: confirmedFolderFor(picked),
-      fetchable,
-    });
-    quick.busy = false;
-    if (note === "no-source") quick.placeholder = say.noSourceYet(picked);
-    quick.items = options.map((option) => ({ ...describeOption(option), option }));
-
-    const chosen = await new Promise<ElsewhereOption | undefined>((resolve) => {
+    // ⚠ **리스너를 `show()` 앞에 단다.** VS Code 의 `Event<void>` 는 재생하지 않는다 — 화면이
+    //    뜬 뒤에 달면 그 사이의 `onDidHide` 를 아무도 못 듣고, 프라미스가 영영 안 풀려
+    //    `finally` 의 `dispose()` 까지 안 돈다(명령 하나가 끝나지 않고 위젯이 쌓인다).
+    //    `onDidHide` 는 Esc 만이 아니라 **다른 입력 UI 가 열리는 것만으로도** 발화한다.
+    const decided = new Promise<ElsewhereOption | undefined>((resolve) => {
       quick.onDidAccept(() => resolve(quick.selectedItems[0]?.option));
       quick.onDidHide(() => resolve(undefined));
     });
+    quick.title = say.elsewhereTitle(picked, binding);
+    quick.ignoreFocusOut = true;
+    quick.placeholder = "무엇을 할지 고르세요";
+    // ⚠ **기다리지 않고 그린다.** 조회를 앞세우면 흔한 칸에서도 빈 목록을 보게 되는데, 그렇게
+    //    벌 수 있는 것은 「판 없는 사이트에서 받기 한 줄을 뺄 기회」뿐이다(시한을 넘기면 어차피
+    //    그 줄이 남는다). 먼저 그리고, 조회가 그 줄을 빼야 한다고 말할 때만 다시 그린다.
+    quick.items = optionItems(elsewhereOptions({ confirmedDir, fetchable: "unknown" }).options);
+    quick.show();
+
+    void probeFetchable(pinned).then((fetchable) => {
+      // 사람이 이미 고르거나 닫았으면 손대지 않는다 — 버려진 위젯을 만지면 던진다.
+      if (settled || fetchable === "unknown" || fetchable === "yes") return;
+      const { options, note } = elsewhereOptions({ confirmedDir, fetchable });
+      quick.placeholder =
+        note === "no-ready" ? say.noReadySourceYet(picked) : say.noSourceYet(picked);
+      quick.items = optionItems(options);
+    });
+
+    const chosen = await decided;
+    settled = true;
     quick.hide();
     if (!chosen) return;
+    // ⚠ **위젯을 먼저 놓는다.** 받기·폴더 열기는 수 분 돌 수 있고, 그동안 숨은 위젯을 붙들고
+    //    있을 이유가 없다.
+    quick.dispose();
     await runElsewhere(chosen, pinned, picked);
   } finally {
+    settled = true;
     quick.dispose();
   }
 }
 
+/** 순수 판정이 낸 항목을 화면 항목으로. 라벨은 리터럴, 서버·로컬 값은 `detail` 로만 간다. */
+function optionItems(
+  options: ElsewhereOption[],
+): (vscode.QuickPickItem & { option: ElsewhereOption })[] {
+  return options.map((option) => ({ ...describeOption(option), option }));
+}
+
 /**
- * 그 사이트에 **받을 판이 있는가.**
+ * 그 사이트에서 **받을 수 있는가.**
  *
  * ⚠ **모르는 것으로는 막지 않는다.** 조회가 실패하면 `unknown` 이고 받기 항목은 남는다 — 서버가
  *   잠시 흔들린 것을 「소스가 없다」로 접으면 정상 경로가 사라진다.
  *
- * ⚠ **제어 평면 상한(30초)을 그대로 쓰지 않는다.** 이것은 목록을 다듬는 **곁들이 조회**이지
- *   사람이 시킨 동작이 아니다. 서버가 붙들면 고르는 화면이 그만큼 멈춰 있게 되므로 여기서만
- *   짧게 끊고 `unknown` 으로 간다 — 그래도 잃는 것은 「받기 항목을 뺄 기회」뿐이다.
+ * ⚠ **「없다」를 두 사유로 가른다**(`noRevisionError` 와 같은 갈래). 빌드가 도는 사이트의 사용자에게
+ *   「소스가 없으니 zip 으로 시작하라」고 하면 잠시 기다리면 될 사람을 엉뚱한 길로 보낸다.
+ *
+ * 화면을 막지 않으므로 상한은 **늦게 온 답을 버리는 선**일 뿐이다. 제어 평면 상한(30초)을 그대로
+ * 쓰면 그만큼 타이머가 살아 있게 되므로 짧게 끊고, 이긴 쪽이 정해지면 타이머를 지운다.
  */
 const FETCHABLE_PROBE_MS = 4_000;
 
 async function probeFetchable(
   pinned: CapturedTenant,
-): Promise<"yes" | "none" | "unknown"> {
+): Promise<"yes" | "no-revision" | "no-ready" | "unknown"> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     const { api } = await ensureApiFor(pinned);
     const revisions = await Promise.race([
       api.listRevisions(),
-      new Promise<null>((resolve) => setTimeout(() => resolve(null), FETCHABLE_PROBE_MS)),
+      new Promise<null>((resolve) => {
+        timer = setTimeout(() => resolve(null), FETCHABLE_PROBE_MS);
+      }),
     ]);
     if (revisions === null) {
       log("사이트의 판 목록을 제때 받지 못해 받기 항목을 그대로 둡니다.");
       return "unknown";
     }
-    return pickRevision(revisions) === null ? "none" : "yes";
+    if (revisions.length === 0) return "no-revision";
+    return pickRevision(revisions) === null ? "no-ready" : "yes";
   } catch (error) {
     log(
       `사이트의 판 목록을 확인하지 못했습니다 — ${error instanceof Error ? error.message : String(error)}`,
     );
     return "unknown";
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
   }
 }
 
@@ -2848,10 +2893,18 @@ async function openPickedLocalFolder(
     return;
   }
   if (plan.kind === "link-consent") {
+    // ⚠ **소스인지 말해 준다 — 막지는 않는다.** 동의 문면이 「이 폴더의 소스가 그 사이트로
+    //    올라가게 됩니다」라고 소스임을 전제하는데, 확인 없이 그러면 바탕화면을 고른 사람에게도
+    //    같은 말을 하고 그 폴더를 레지스트리에 「그 사이트 폴더」로 확증 등재한다.
+    //    표식 부재로 막지 않는 것과 **없는 사실을 지어내지 않는 것**은 다른 이야기다.
     const ask = say.pickedFolderLinkConfirm(picked);
+    const looksLikeSource = existsSync(join(dir, "package.json"));
     const answer = await vscode.window.showWarningMessage(
       ask.message,
-      { modal: true, detail: ask.detail },
+      {
+        modal: true,
+        detail: looksLikeSource ? ask.detail : `${ask.detail}\n${ask.notSourceNote}`,
+      },
       ask.action,
     );
     // ⚠ **취소하면 열지도 않는다.** 연결 없이 열면 새 창의 유효 사이트가 전역 잔값이 되어,
@@ -2862,6 +2915,15 @@ async function openPickedLocalFolder(
   // 링크는 두 갈래 모두 쓴다 — `open` 은 표식에 맞추는 복원이고, 연결은 표식과 짝이다.
   const linked = await linkFolderToTenant(dir, String(pinned));
   if (!linked.ok) log(`폴더 설정을 적지 못했습니다(${linked.reason}).`);
+
+  // ⚠ **동의를 받고도 못 썼으면 열지 않는다.** 위 취소 가드의 근거(「연결 없이 열면 소속 없는
+  //    폴더 + 잘못된 유효 사이트를 우리가 만들어 준다」)는 「동의했는데 실패했다」에도 그대로
+  //    적용된다. 주석에 쓴 이유를 취소에만 걸어 두면 그 근거가 반쪽이 된다.
+  //    JSONC 주석이 섞인 `settings.json`·못 쓰는 `.zalkera` 에서 실제로 밟힌다.
+  if (folderBinding(readSourceMarkAt(dir), workspaceLinkAt(dir)) === null) {
+    void vscode.window.showWarningMessage(say.pickedFolderNotLinked(picked));
+    return;
+  }
   rememberFolder(String(pinned), dir);
   await openSiteFolder(dir);
 }

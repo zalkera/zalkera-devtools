@@ -118,7 +118,7 @@ export {
   mcpServerName,
   type McpServerName,
 } from "./serverUrl.ts";
-export { safeFileName, writeOwnFile } from "./safeWrite.ts";
+export { safeFileName, writeOwnFile, ensureOwnDir } from "./safeWrite.ts";
 export {
   chooseNpm,
   describeNpm,
