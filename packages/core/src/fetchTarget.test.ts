@@ -5,7 +5,7 @@
  */
 import assert from "node:assert/strict";
 import test from "node:test";
-import { nextAvailableName, noRevisionError, pickRevision, suggestFolderName } from "./fetchTarget.ts";
+import { decideFetchedInto, nextAvailableName, noRevisionError, pickRevision, suggestFolderName } from "./fetchTarget.ts";
 
 const rev = (revisionNo: number, status: string, isActive = false) => ({ revisionNo, status, isActive });
 
@@ -67,4 +67,51 @@ test("올렸는데 아직 못 켜는 경우는 그렇게 말한다", () => {
 
 test("두 문장은 서로 달라야 한다 — 같으면 가른 뜻이 없다", () => {
     assert.notEqual(noRevisionError([]).hint, noRevisionError([rev(1, "BUILDING")]).hint);
+});
+
+// ── 받은 뒤 무엇을 말하고 무엇을 내나 ──────────────────────────────────────
+//
+// 이 자리는 확장 안 조건문으로 뒀다가 **두 번** 틀렸다. 문면 갈래는 `tenantScope.test.ts` 가
+// 물지만 「어느 갈래를 고르는가」는 아무도 안 물었다 — 그래서 판정을 여기로 내렸다.
+
+test("지금 폴더에 풀었으면 그렇게 말하고, 열 것이 없다", () => {
+  assert.deepEqual(decideFetchedInto({ openDir: "/w/a", target: "/w/a", root: "/w/a" }), {
+    into: "into-open",
+    needsOpen: false,
+  });
+});
+
+test("감싼 꾸러미면 **문면은 지금 폴더, 단추는 남는다**", () => {
+  // `findProjectRoot` 가 한 단계 내려간 칸. 여기서 단추를 없애면 하위 폴더로 갈 길이 사라지고,
+  // 「새 폴더로 받았습니다」로 접으면 지금 폴더가 안 바뀌었다는 거짓이 된다.
+  assert.deepEqual(
+    decideFetchedInto({ openDir: "/w/a", target: "/w/a", root: "/w/a/inner" }),
+    { into: "into-open-nested", needsOpen: true },
+  );
+});
+
+test("옆 폴더로 받았으면 sibling 이고 열 것이 있다", () => {
+  assert.deepEqual(decideFetchedInto({ openDir: "/w/a", target: "/w/b", root: "/w/b" }), {
+    into: "sibling",
+    needsOpen: true,
+  });
+});
+
+test("열린 폴더가 없으면 only", () => {
+  assert.deepEqual(decideFetchedInto({ openDir: null, target: "/w/b", root: "/w/b" }), {
+    into: "only",
+    needsOpen: true,
+  });
+});
+
+test("네 갈래가 **서로 다른 입력에서만** 나온다 — 뭉치면 한 칸이 거짓이 된다", () => {
+  const seen = new Set(
+    [
+      { openDir: "/w/a", target: "/w/a", root: "/w/a" },
+      { openDir: "/w/a", target: "/w/a", root: "/w/a/inner" },
+      { openDir: "/w/a", target: "/w/b", root: "/w/b" },
+      { openDir: null, target: "/w/b", root: "/w/b" },
+    ].map((i) => decideFetchedInto(i).into),
+  );
+  assert.equal(seen.size, 4, [...seen].join(","));
 });

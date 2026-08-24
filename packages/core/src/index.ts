@@ -162,7 +162,14 @@ export {
   type Diagnostic,
 } from "./diagnostics.ts";
 export { BUSY, createReentrancyGuard } from "./reentrancy.ts";
-export { pickRevision, noRevisionError, suggestFolderName, nextAvailableName } from "./fetchTarget.ts";
+export {
+  pickRevision,
+  noRevisionError,
+  suggestFolderName,
+  nextAvailableName,
+  decideFetchedInto,
+  type FetchedIntoPlan,
+} from "./fetchTarget.ts";
 export { decideErrorNotice, isCancelled, type ErrorNotice } from "./errorNotice.ts";
 export { decideBlocked, commandsWithNeeds, type Blocked, type Readiness } from "./whyBlocked.ts";
 export { ACCOUNT_SCOPED, type AccountScoped } from "./accountState.ts";

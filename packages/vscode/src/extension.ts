@@ -70,6 +70,7 @@ import {
   type TenantScope,
   decideSiteChoice,
   decideFetchTargetPlan,
+  decideFetchedInto,
   decidePickedFolder,
   elsewhereOptions,
   isReceivable,
@@ -877,24 +878,12 @@ async function openSite(pinned?: CapturedTenant): Promise<void> {
   //    머물러 미리보기·발행으로 가는 길이 화면에서 끊긴다.
   await refreshSidebar();
 
-  // ⚠ **두 축을 가른다.** 「어디에 풀렸나」(문면)와 「열 것이 있나」(단추)는 다른 물음이다.
-  //
-  //    ⑴ 받은 곳이 지금 열린 폴더 자신일 수 있다 — 그때 「새 폴더로 받았습니다 · 지금 폴더는
-  //       바뀌지 않았습니다」는 두 문장 다 거짓이고, 사람이 이 알림에서 가장 확인하고 싶은
-  //       사실(내 폴더가 바뀌었나)을 정확히 반대로 말한다. 판정은 **사람이 동의한 대상**인
-  //       `target` 으로 한다.
-  //    ⑵ 받은 꾸러미가 한 겹 감싸고 있으면 `findProjectRoot` 가 한 단계 내려가, 지금 폴더에
-  //       풀었어도 **소스는 하위 폴더**다. 그때 단추를 없애면 그리로 갈 길이 사라진다.
-  //       두 축을 한 판정으로 뭉치면 어느 쪽이든 한 칸이 거짓이 된다.
-  const intoOpen = openDir !== undefined && target === openDir;
-  const needsOpen = root !== openDir;
-  const into = !intoOpen
-    ? openDir !== undefined
-      ? "sibling"
-      : "only"
-    : needsOpen
-      ? "into-open-nested"
-      : "into-open";
+  // 판정은 core 가 한다 — 이 자리는 확장 안 조건문으로 뒀다가 **두 번** 틀렸다(`decideFetchedInto`).
+  const { into, needsOpen } = decideFetchedInto({
+    openDir: openDir ?? null,
+    target,
+    root,
+  });
   const message =
     say.fetched(tenant, result.revisionNo, into) +
     (into === "sibling" && session !== null
