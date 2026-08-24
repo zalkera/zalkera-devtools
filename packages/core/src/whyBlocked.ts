@@ -132,9 +132,11 @@ export function decideBlocked(command: string, ready: Readiness): Blocked | null
             return {
                 message:
                     `이 폴더는 「${plainNotice(ready.folderTenant ?? "", 64)}」 사이트의 소스입니다 — ` +
-                    `「${plainNotice(ready.tenant, 64)}」 작업은 그 사이트의 폴더에서 해 주세요.`,
+                    `「${plainNotice(ready.tenant, 64)}」 작업은 다른 폴더에서 해 주세요.`,
                 action: {label: "이 폴더의 사이트로 돌아가기", command: "zalkera.site.useFolder"},
-                alternative: {label: "그 사이트 소스 다운로드", command: "zalkera.site.open"},
+                // ⚠ 라벨에 「그 사이트」를 붙이지 않는다 — 바로 앞 문장이 이름으로 말했고,
+                //    그것을 「그」로 되받으면 정관사를 옮긴 번역투가 된다.
+                alternative: {label: "소스 다운로드", command: "zalkera.site.open"},
             };
         }
         if (need === "site" && ready.site === null) {

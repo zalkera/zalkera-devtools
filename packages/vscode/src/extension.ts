@@ -2858,17 +2858,23 @@ async function probeFetchable(
   }
 }
 
-/** 항목의 라벨은 **리터럴**이다 — 서버 값은 `detail` 로만 간다. */
+/**
+ * 항목의 라벨은 **리터럴**이다 — 서버 값은 `detail` 로만 간다.
+ *
+ * ⚠ **「그 사이트」를 붙이지 않는다.** 제목이 이미 어느 사이트인지 이름으로 말하고, 항목마다
+ *   그것을 「그」로 되받으면 정관사를 옮긴 번역투가 된다. 이름은 사이드바의 같은 동작
+ *   (「소스 다운로드」)과 맞춘다 — 같은 일에 두 이름을 두지 않는다.
+ */
 function describeOption(option: ElsewhereOption): vscode.QuickPickItem {
   switch (option.kind) {
     case "open":
       return {
-        label: "$(folder-opened) 그 사이트 폴더 열기",
+        label: "$(folder-opened) 폴더 열기",
         detail: plainNotice(option.dir, 120),
       };
     case "fetch":
       return {
-        label: "$(cloud-download) 그 사이트 소스 다운로드",
+        label: "$(cloud-download) 소스 다운로드",
         detail: "새 빈 폴더에 받습니다 — 지금 폴더는 그대로 둡니다",
       };
     case "pick-folder":
@@ -2896,7 +2902,7 @@ async function runElsewhere(
       const dir = confirmedFolderFor(picked);
       if (dir === null) {
         void vscode.window.showInformationMessage(
-          ours("그 사이트의 로컬본을 찾지 못했습니다 — 「내려받기」로 소스를 받아 주세요."),
+          ours("받아 두신 폴더를 찾지 못했습니다 — 「소스 다운로드」로 새로 받아 주세요."),
         );
         return;
       }
