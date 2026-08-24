@@ -108,6 +108,15 @@ const WIRES = [
         "조회 결과가 화면에 반영되지 않아 받기 항목이 그대로 남는다",
     ],
     [
+        // ⚠ **이 자리는 두 번 틀렸다**(받은 곳이 지금 폴더 자신인 칸 · 꾸러미가 한 겹 감싼 칸).
+        //    세 번째로 고치면서 판정을 core 로 내렸는데, 호출을 지우고 종전 삼항을 되살려도
+        //    시험·검사기가 전건 초록이었다(변이 실측). 형제 판정은 이미 등재돼 있는데 이 자리만
+        //    빠져 있었다.
+        "packages/vscode/src/extension.ts",
+        "const { into, needsOpen } = decideFetchedInto({",
+        "받기 완료 문면 판정이 확장 안 조건문으로 돌아가, 지금 폴더에 받고도 「바뀌지 않았습니다」가 되살아난다",
+    ],
+    [
         "packages/vscode/src/extension.ts",
         "const plan = decideFetchTargetPlan({",
         "받을 자리 판정이 확장 안 조건문으로 흩어져 열어 둔 빈 폴더 활용이 조용히 꺼진다",
