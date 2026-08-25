@@ -2586,6 +2586,11 @@ async function announcePublished(
   tenant: CapturedTenant,
 ): Promise<void> {
   const site = await siteUrlOf(api, tenant);
+  // 게시 사실도 출력에 남긴다 — 알림은 몇 초 뒤 사라지고, `STATIC` 은 빌드를 안 타서 위
+  // 「빌드 완료」 줄조차 없다. 주소를 아는 경우에는 같이 적는다(가서 볼 자리).
+  // ⚠ **주소를 줄 끝에 두고 뒤에 문장부호를 붙이지 않는다.** 출력 패널이 URL 을 링크로 잡을 때
+  //    붙은 마침표까지 주소로 먹는 자리가 있다.
+  log(`버전 ${revisionNo} 게시됐습니다.${site ? ` ${site.url}` : ""}`);
   // ⚠ **단추에 어디로 가는지 적는다.** 주소는 서버가 준 값이고 우리는 그것을 보증하지 못한다 —
   //    「사이트 열기」라고만 쓰면 **우리 이름으로 뜬 단추**가 사람을 아무 데나 데려갈 수 있고,
   //    데스크톱에서 http(s) 는 확인 대화 없이 열린다. 호스트를 보이면 사람이 판단할 수 있다.
@@ -2675,6 +2680,9 @@ async function awaitBuild(
   revisionNo: number,
   tenant: CapturedTenant,
 ): Promise<boolean> {
+  // 경과는 **여기서** 잰다. `waitForBuild` 는 판정만 돌려주고 시간을 안 싣는데, 그것을 실으려면
+  // 코어 계약이 넓어진다 — 화면에 쓸 숫자 하나 때문에 그럴 일이 아니다.
+  const startedAt = Date.now();
   const outcome = await vscode.window.withProgress(
     {
       location: vscode.ProgressLocation.Notification,
@@ -2692,6 +2700,13 @@ async function awaitBuild(
 
   switch (outcome.kind) {
     case "ready":
+      // ⚠ **성공도 출력에 남긴다.** 실패·타임아웃·취소·추월은 전부 로그를 남기는데 성공만
+      //    조용해서, 출력 채널에는 「빌드하는 중… (52초)」가 마지막 줄로 남고 끝났다는 말이
+      //    없었다. 알림은 사라지고 출력은 남는다 — 나중에 「그래서 언제 끝났나」를 답하는 것은
+      //    이쪽이다.
+      log(
+        `버전 ${revisionNo} 빌드 완료 (${Math.round((Date.now() - startedAt) / 1000)}초).`,
+      );
       return true;
     case "failed": {
       log(
