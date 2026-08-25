@@ -1478,7 +1478,9 @@ async function importZipCommand(pinned?: CapturedTenant): Promise<void> {
   const target = await chooseImportTarget(pinned);
   if (!target) return;
 
-  // 붙일지 말지는 **풀기 전 상태**로 정한다 — 푼 뒤에 재면 zip 이 실어 온 표식이 판정을 뒤집는다.
+  // 붙일지 말지는 **풀기 전 상태**로 정한다. 지금은 `EXCLUDED_PATHS` 가 표식을 계획 단계에서
+  // 떨구므로 zip 이 실어 온 표식이 디스크에 닿지 않지만, 그 목록이 무너져도 소속 판정은
+  // 안 뒤집히게 둔다 — 판정의 재료를 **우리가 아는 시점**에서 뜨는 것이 요점이다.
   const boundBefore = folderBinding(
     readSourceMarkAt(target),
     workspaceLinkAt(target),
