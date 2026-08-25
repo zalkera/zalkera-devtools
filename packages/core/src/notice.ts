@@ -120,8 +120,13 @@ export function plainNotice(text: unknown, limit = 300): string {
   if (typeof text !== "string") return "";
   const cap = Math.min(limit, MAX_CAP);
   const head = text.length > cap * 4 ? text.slice(0, cap * 4) : text;
+  // ⚠ **강한 재정렬·격리도 지운다.** 종전에는 약한 방향표(U+200E/200F)만 지우고
+  //    **U+202A~202E(강한 재정렬)·U+2066~2069(격리)** 를 남겼다 — 같은 Cf 부류인데 갈랐다.
+  //    이 함수가 스스로 「제어문자를 없앤다」고 적어 둔 계약과 어긋났고, **남이 이름 짓는 로컬
+  //    경로**가 표시 표면에 오르면서(작업 폴더 묶음·발행 확인 모달) 그 구멍이 실질화됐다:
+  //    폴더 이름 하나로 확인 문면의 지시대상을 **시각적으로 뒤집을 수** 있다(보안 심의).
   const stripped = head.replace(
-    /[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028\u2029]+/g,
+    /[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2066-\u2069\u2028\u2029]+/g,
     " ",
   );
   const tidy = defang(stripped).replace(/\s+/g, " ").trim();

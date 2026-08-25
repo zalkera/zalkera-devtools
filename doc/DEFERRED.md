@@ -19,8 +19,14 @@
 - **`RENDERS_AS_LINK` 오라클이 두 벌이고 정의가 다르다** — `notice.test.ts`(닫는 괄호 미검사·
   스킴 무제한) vs `tenantScope.test.ts`(스킴 3개 열거). 후자는 전자가 「목록은 늘어난다」며
   **명시적으로 배격한 형상**이다.
-- `check-notice.mjs` 가 알림 호출의 `arguments[0]` 만 본다 — `MessageOptions.detail` 과 QuickPick
-  항목 라벨이 관할 밖(그 파일이 스스로 적어 둔 구멍).
+- `check-notice.mjs` 의 **QuickPick 항목 라벨**이 관할 밖이다(그 파일이 스스로 적어 둔 구멍).
+  `showQuickPick(xs.map(x => ({label: x.name})))` 형태로 서버 값이 라벨에 실리는 자리가 여럿 있다.
+  ⚠ 모달 `detail` 관할은 **닫혔다** — 알림 호출 인자 객체의 `detail` 하나만 보는 좁힘으로.
+- **`$(아이콘)` 이 렌더되는 자리에 남이 이름 짓는 값이 실린다** — 「작업 폴더 변경」 QuickPick 의
+  `detail: plainNotice(plan.dir, 120)`. `QuickPickItem` 의 label·description·detail 은 `$(…)` 해석을
+  **계약으로 보증**하고 `plainNotice` 는 `$(` 를 안 지운다. 아이콘 밀반입뿐이라 실행 위험은 없다.
+  ⚠ 아래 「상태바 `$()`」와 **값도 싱크도 다르다** — 그 항목이 이것을 못 덮는다. 뿌리는 같다:
+  `plainNotice` 가 codicon 표기를 다루지 않는다는 것.
 - 트리 `description` 은 **대입**이라 보간 검사가 못 본다(`folderShown`). 지금은 사람이 주석으로
   못박아 뒀다.
 

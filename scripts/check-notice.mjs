@@ -108,7 +108,10 @@ const CANON_MODULES = new Set(["@zalkera/devtools-core"]);
  *   그래서 이름과 **출처를 함께** 본다: 그 속성이 붙은 객체가 `say.*(...)`·`decide*(...)` 의
  *   결과라야 한다([isCanonicalObject]).
  */
-const CANON_FIELDS = new Set(["message", "detail", "action"]);
+// ⚠ **`say` 가 내는 필드는 여기 다 있어야 한다.** 빠진 이름 하나가 「정본이 지은 문장」을
+//    「소독 안 한 값」으로 오인하게 만든다 — `notSourceNote` 가 실제로 그랬다(모달 detail 관할을
+//    넓히자 드러났다). 늘릴 때는 `tenantScope.ts` 의 반환 형이 근거다.
+const CANON_FIELDS = new Set(["message", "detail", "action", "notSourceNote", "line"]);
 /** 정본 판정 함수의 이름 모양. **이름만으로는 부족하다** — [CANON_MODULES] 에서 온 것이어야 한다. */
 const CANON_DECIDER = /^decide[A-Z]/;
 
@@ -321,12 +324,21 @@ function inspect(node, rel, label) {
         inspect(node.right, rel, label);
         return;
     }
+    // ⚠ **이어붙이기도 파고든다.** 문장을 `+` 로 잇는 것은 이 레포의 흔한 형태이고(중간 변수를
+    //    템플릿에 보간하면 이 검사기가 막으므로 **오히려 권장된 형태**다), 그것을 통째로 한 값으로
+    //    보면 조각마다 소독을 지났는지 못 본다. 양쪽을 따로 본다.
+    if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.PlusToken) {
+        inspect(node.left, rel, label);
+        inspect(node.right, rel, label);
+        return;
+    }
+    // 리터럴은 우리가 쓴 글자다 — 표기를 요구하지 않는다(템플릿의 리터럴 조각과 같은 잣대).
+    if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) return;
     if (ts.isTemplateExpression(node)) {
-        for (const span of node.templateSpans) {
-            spansSeen += 1;
-            if (isAllowed(span.expression)) continue;
-            findings.push(`${rel}:${line + 1} — ${label} 의 \`${describe(span.expression)}\` 가 허용 목록 밖입니다`);
-        }
+        // ⚠ **보간 안도 파고든다.** 종전에는 `isAllowed` 를 바로 물어, `${a ? 소독(x) : "리터럴"}`
+        //    처럼 **갈래가 든 보간**이 통째로 「허용 밖」이 됐다 — 조각마다 소독을 지났는데도.
+        //    같은 재귀를 쓰면 삼항·`??`·이어붙이기가 다 열린다.
+        for (const span of node.templateSpans) inspect(span.expression, rel, label);
         return;
     }
     spansSeen += 1;
@@ -373,6 +385,22 @@ function scan(rel, { allTemplates }) {
         if (ts.isCallExpression(node) && notifyName(node.expression) !== null) {
             const body = node.arguments[0];
             if (body) inspect(body, rel, "알림 본문");
+            // ⚠ **모달의 `detail` 도 사람이 읽는 본문이다.** 위 주석이 「뒤 인자까지 잡으면
+            //    `{modal: true, detail: …}` 이 빨개진다」고 적었는데, 그 반성이 겨눈 것은
+            //    **속성 이름만 보고 잡는 것**이었다. 여기서는 **알림 호출의 인자로 넘어간 객체
+            //    리터럴의 `detail`** 하나만 본다 — 무관한 `detail` 은 이 좁힘에 안 걸린다.
+            //
+            //    닫는 이유: 이 판이 그 자리에서 **위조를 실측 재현했다.** 개행 든 폴더 이름으로
+            //    확인 문면 뒷줄을 복제해 「잔여 표시니 무시하라」로 가둘 수 있었다. 고쳐 놓고
+            //    검사기가 못 보면 되돌아온다 — 실제로 형제 모달 하나가 무가드로 남아 있었다.
+            for (const arg of node.arguments.slice(1)) {
+                if (!ts.isObjectLiteralExpression(arg)) continue;
+                for (const prop of arg.properties) {
+                    if (!ts.isPropertyAssignment(prop)) continue;
+                    if (prop.name.getText(source) !== "detail") continue;
+                    inspect(prop.initializer, rel, "모달 detail");
+                }
+            }
         }
 
         // ⑷ **고르는 화면도 사람이 읽는 자리다.** `title`·`placeholder`·`prompt` 대입은 [NOTIFY]
