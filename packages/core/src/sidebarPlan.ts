@@ -141,7 +141,10 @@ export function sidebarPlan(state: SidebarState): PlanGroup[] {
     // ⚠ **「없음」을 총체적으로 받는다.** 타입은 `string | null` 이지만 이 판정은 JS 에서도
     //    불린다(라벨 검사기가 상태를 손으로 짜서 넘긴다) — `undefined` 한 칸에 터지면 그 검사기가
     //    옛 코드를 검사하는 것보다 나쁘게, 아예 안 돈다. 실제로 그렇게 터졌다.
-    const folderShown = folderPath ? displayPath(folderPath, home) : null;
+    // ⚠ **소독을 먼저, 축약을 나중에.** 툴팁만 소독하고 이 자리를 빼먹었었다 — 그런데 이쪽이
+    //    **상시 보이는** 자리다(툴팁은 올려야 보인다). 검사기는 템플릿 보간만 보므로 이 **대입**을
+    //    못 잡는다(성능 축이 보안으로 넘긴 지적) — 그래서 사람이 여기 적어 둔다.
+    const folderShown = folderPath ? displayPath(plainNotice(folderPath, 512), home) : null;
     // 「소스 폴더인데 그 폴더가 어느 사이트 것인지 모른다」 — 발행 모달·상태바와 **같은 술어**다.
     const undeclared = site !== null && folderTenant === null && tenant !== "";
     // 어긋난 폴더는 **화면에서도** 어긋나 보여야 한다. 게이트가 누를 때 막는 것만으로는,
@@ -249,7 +252,10 @@ export function sidebarPlan(state: SidebarState): PlanGroup[] {
         description: folderShown ?? "열린 폴더 없음",
         label: "작업 폴더",
         icon: "folder-opened",
-        // 전체 경로는 여기 — 툴팁은 안 잘린다. 기존 약속 문장은 그대로 뒤에 둔다.
+        // 경로 전체는 여기 — VS Code 는 툴팁을 안 자른다. **다만 우리가 512자에서 자른다**
+        // (`plainNotice` 의 상한). 그보다 긴 작업 폴더에서는 묶음 머리(꼬리 보존)와 툴팁(머리
+        // 보존) 어느 쪽도 전체가 아니다 — 흔치 않으나 「안 잘린다」로 적으면 거짓이다.
+        // 기존 약속 문장은 그대로 뒤에 둔다.
         tooltip:
             // ⚠ **경로는 소독을 지난다.** 폴더 이름은 남이 정할 수 있고, 이 값이 서던 날
             //    `notice.ts` 의 「트리 툴팁도 전부 리터럴 문자열」이 거짓이 됐다(보안 심의).
