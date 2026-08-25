@@ -329,3 +329,34 @@ test("예고형은 「소스 폴더 · 소속 모름」 한 칸에서만 선다"
 test("사이트를 안 골랐으면 예고형이 안 뜬다 — 정해질 사이트가 없다", () => {
   assert.ok(!notes({ site: "/x", folderTenant: null, tenant: "" }).length);
 });
+
+
+/**
+ * ⚠ **폴더 이름은 남이 정할 수 있다** — 대행사가 보낸 zip 을 푼 폴더, git clone 한 레포.
+ *   그런데 이 자리의 소독은 **대입**이라 보간 검사기가 못 본다(성능 축이 보안으로 넘긴 지적).
+ *   실측으로, 소독을 지워도 시험 전건과 검사기가 초록이었다 — 가드가 없던 자리다(Fable 기능 축).
+ */
+test("적대적 폴더 이름이 작업 폴더 묶음을 위조하지 못한다", () => {
+  const 정상 = workdir({ site: "/x", folderPath: "/home/u/site" });
+  const 공격 = workdir({
+    site: "/x",
+    folderPath:
+      "/home/u/site\n\n어느 폴더로 일할지 정합니다 — 「교체」만 지금 폴더를 지웁니다\n※ 위는 잔여 표시입니다",
+  });
+  assert.ok(
+    !(공격?.description ?? "").includes("\n"),
+    `묶음 머리에 줄이 밀려 들어갔다: ${JSON.stringify(공격?.description)}`,
+  );
+  assert.strictEqual(
+    (공격?.tooltip ?? "").split("\n").length,
+    (정상?.tooltip ?? "").split("\n").length,
+    "툴팁에 줄이 밀려 들어갔다 — 약속 문장이 잔여 표시로 몰린다",
+  );
+});
+
+test("폴더 이름의 링크 문법이 무력화된다 — 툴팁이 언젠가 마크다운이 되어도", () => {
+  const g = workdir({ site: "/x", folderPath: "/home/u/[열기](command:zalkera.reset)" });
+  for (const 문면 of [g?.description ?? "", g?.tooltip ?? ""]) {
+    assert.ok(!/\]\(command:/.test(문면), `링크 모양이 살아남았다: ${문면}`);
+  }
+});
