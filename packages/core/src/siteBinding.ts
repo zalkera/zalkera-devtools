@@ -22,6 +22,56 @@ export function folderBinding(mark: SourceMark | null, linkedTenant: string | nu
     return null;
 }
 
+/**
+ * 워크스페이스 링크를 읽은 **결과**. 「없다」와 「못 읽었다」를 가른다.
+ *
+ * ⚠ **둘을 접으면 가드가 열린다**(보안 심의 🟠). 링크 판독기는 생 `JSON.parse` 라 주석·후행
+ *   쉼표가 있는 `settings.json`(JSONC — VS Code 가 정상으로 취급하는 형식)에서 던진다. 그것을
+ *   `null` 로 접으면 **소속이 있는 폴더가 「소속 없음」으로 보이고**, 소속을 덮지 않기로 한
+ *   자리가 덮는다. 같은 폴더를 창으로 열면 VS Code 의 판독기는 JSONC 를 읽으므로 화면은
+ *   「그 사이트 소속」이라 말한다 — 두 판독이 갈리는 것이 이 형상의 본체다.
+ *
+ *   쓰기 쪽은 이미 이 규율을 지킨다(`mergeTenantSetting` 의 「못 읽으면 안 쓴다」). 읽고 **판정**
+ *   하는 쪽에도 같은 자를 댄다.
+ */
+export type WorkspaceLink =
+    /** `settings.json` 이 없거나, 있는데 그 키가 없다. */
+    | {kind: "absent"}
+    /** 파일은 있는데 못 읽었다 — 「없다」가 아니라 **모른다**. */
+    | {kind: "unreadable"}
+    | {kind: "tenant"; tenant: string};
+
+/** [WorkspaceLink] 를 종전 계약(`string | null`)으로 좁힌다. **판독은 한 벌이다.** */
+export function linkedTenantOf(link: WorkspaceLink): string | null {
+    return link.kind === "tenant" ? link.tenant : null;
+}
+
+/** zip 을 푼 폴더에 소속을 적을 것인가. */
+export type ImportBinding =
+    /** 적는다 — 비어 있거나 이미 그 사이트다. */
+    | {kind: "bind"}
+    /** 다른 사이트에 붙어 있다. **안 적는다** — 소속을 바꾸는 동사는 「사이트에 연결」 하나다. */
+    | {kind: "keep"; bound: string}
+    /** 소속을 못 읽었다. **안 적는다** — 모르는 것을 우리 값으로 덮지 않는다. */
+    | {kind: "unknown"};
+
+/**
+ * ⚠ **`unknown` 을 `bind` 로 접지 마라.** 그 접힘이 이 판정을 만든 이유다 — 자세한 것은
+ *   [WorkspaceLink] 의 주석에 있다. 못 읽은 폴더에는 아무것도 안 적고 사람에게 넘긴다.
+ */
+export function decideImportBinding(
+    mark: SourceMark | null,
+    link: WorkspaceLink,
+    tenant: string,
+): ImportBinding {
+    if (mark !== null) return mark.tenant === tenant ? {kind: "bind"} : {kind: "keep", bound: mark.tenant};
+    if (link.kind === "unreadable") return {kind: "unknown"};
+    if (link.kind === "tenant" && link.tenant !== "") {
+        return link.tenant === tenant ? {kind: "bind"} : {kind: "keep", bound: link.tenant};
+    }
+    return {kind: "bind"};
+}
+
 /** 고른 사이트를 어느 범위에 적을지. `none` 이면 **아무것도 적지 않는다.** */
 export type TenantScope = "workspace" | "global" | "none";
 

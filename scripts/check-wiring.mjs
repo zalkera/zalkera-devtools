@@ -208,6 +208,13 @@ const WIRES = [
         "사이트를 골라 시작했는데 푼 폴더가 어느 사이트 것인지 아무 데도 안 적힌다 — 사람이 「사이트에 연결」로 같은 선택을 한 번 더 하고, 그 사이 창의 유효 사이트는 옛 사이트로 남는다",
     ],
     [
+        // ⚠ **판독기가 둘이면 한쪽만 고쳐진다.** 이 줄이 사라지면 「없다」와 「못 읽었다」를 가르는
+        //    3상 판독이 종전의 2상으로 돌아가고, 그 접힘이 재바인딩 금지 가드를 연다(보안 심의 🟠).
+        "packages/vscode/src/extension.ts",
+        "return linkedTenantOf(workspaceLinkState(dir));",
+        "링크 판독이 「못 읽었다」를 「소속 없음」으로 접어, JSONC `settings.json` 을 쓰는 폴더의 소속을 zip 풀기가 무동의로 갈아탄다",
+    ],
+    [
         "packages/vscode/src/extension.ts",
         "await chooseImportTarget(pinned);",
         "풀 자리 제안이 사이트를 모르게 되어, 「빈 폴더를 새로 만들어 고르세요」가 되살아난다 — 비개발자가 멈추는 그 자리다",
@@ -215,7 +222,7 @@ const WIRES = [
     [
         // ⚠ **효과를 센다.** 부르는 줄만 고정하면 헬퍼 본체를 무동작으로 바꿔도 초록이다.
         "packages/vscode/src/extension.ts",
-        "await bindImportedFolder(target, pinned, boundBefore)",
+        "await bindImportedFolder(target, pinned, bindPlan)",
         "푼 폴더가 사이트에 안 붙어, 열어도 유효 사이트가 안 서고 미리보기·올리기가 막힌다",
     ],
     [
@@ -223,7 +230,7 @@ const WIRES = [
         //    빈 폴더 강제가 `.vscode` 를 통과시키므로(`emptyDir.ts` 의 IGNORED), 링크만 가진
         //    남의 폴더가 실제로 여기까지 온다.
         "packages/vscode/src/extension.ts",
-        'if (boundBefore !== null && boundBefore !== String(tenant))',
+        "const bindPlan =",
         "남의 사이트에 붙어 있던 폴더의 소속을 zip 풀기가 조용히 갈아탄다 — 가장 위험한 동사가 가장 흔한 흐름의 한 클릭 거리에 놓인다",
     ],
     [
@@ -494,7 +501,7 @@ const BANS = [
         //    실수로 누른 「소스 다운로드」 하나에 「zip 으로 시작」·「zip 으로 교체」가 창이
         //    죽을 때까지 막혔다(실사용 신고). 탈출구는 창 다시 열기뿐이었다.
         "packages/vscode/src/*.ts",
-        /register\("zalkera\.[^"]*",[^\n]*(?:whileExtracting|[Rr]eceiveGuard)/,
+        /register\("zalkera\.[^"]*",[\s\S]{0,120}?(?:whileExtracting|[Rr]eceiveGuard)/,
         "`whileExtracting` 을 **아카이브를 푸는 구간**에서만 잡는 형태 — 묻는 자리를 덮으면 답 없는 물음 하나가 형제 명령을 영영 막는다",
     ],
 ];

@@ -2,11 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   decideFetchTargetPlan,
+  decideImportBinding,
   decidePickedFolder,
   decideSiteChoice,
   decideTenantScope,
   elsewhereOptions,
   folderBinding,
+  linkedTenantOf,
   needsRelinkConsent,
 } from "./siteBinding.ts";
 import type { SourceMark } from "./localMark.ts";
@@ -288,4 +290,50 @@ test("빌드 중인 사이트를 「소스가 없다」로 말하지 않는다",
   const empty = elsewhereOptions({ confirmedDir: null, fetchable: "no-revision" });
   assert.equal(empty.note, "no-revision");
   assert.equal(empty.options[0]?.kind, "import-zip");
+});
+
+// ── zip 을 푼 폴더에 소속을 적을 것인가 ──────────────────────────────────────
+
+/**
+ * ⚠ **「못 읽었다」가 「없다」로 접히면 이 가드는 장식이다**(보안 심의 🟠). 링크 판독기는 생
+ *   `JSON.parse` 라 JSONC(주석·후행 쉼표 — VS Code 가 정상으로 다루는 형식)에서 던지는데,
+ *   그것을 「소속 없음」으로 세면 **남의 사이트에 붙어 있던 폴더**를 무동의로 갈아탄다.
+ */
+test("소속을 못 읽으면 안 적는다 — 「없다」와 갈라야 한다", () => {
+    const notRead = decideImportBinding(null, {kind: "unreadable"}, "fin-02");
+    assert.strictEqual(notRead.kind, "unknown", "못 읽은 것을 통과로 세면 안 된다");
+
+    const absent = decideImportBinding(null, {kind: "absent"}, "fin-02");
+    assert.strictEqual(absent.kind, "bind", "정말 비어 있으면 적는다 — 안 그러면 정상 흐름이 막힌다");
+});
+
+test("남의 사이트에 붙어 있으면 안 적는다 — 표식이든 링크든", () => {
+    const byMark = decideImportBinding(
+        {format: 2, origin: "linked", tenant: "fin-01", linkedAt: "2026-01-01T00:00:00.000Z"},
+        {kind: "absent"},
+        "fin-02",
+    );
+    assert.deepStrictEqual(byMark, {kind: "keep", bound: "fin-01"});
+
+    const byLink = decideImportBinding(null, {kind: "tenant", tenant: "fin-01"}, "fin-02");
+    assert.deepStrictEqual(byLink, {kind: "keep", bound: "fin-01"});
+});
+
+test("이미 그 사이트면 적는다 — 같은 값 다시 쓰는 것은 소속 변경이 아니다", () => {
+    assert.strictEqual(decideImportBinding(null, {kind: "tenant", tenant: "fin-02"}, "fin-02").kind, "bind");
+});
+
+test("표식이 링크를 이긴다 — 붙이기 판정에서도 서열이 같다", () => {
+    const plan = decideImportBinding(
+        {format: 2, origin: "linked", tenant: "fin-02", linkedAt: "2026-01-01T00:00:00.000Z"},
+        {kind: "tenant", tenant: "fin-01"},
+        "fin-02",
+    );
+    assert.strictEqual(plan.kind, "bind", "표식이 그 사이트라고 말하면 링크의 옛 값이 막지 않는다");
+});
+
+test("linkedTenantOf 는 판독 결과를 종전 계약으로 좁힌다 — 판독기는 한 벌이다", () => {
+    assert.strictEqual(linkedTenantOf({kind: "tenant", tenant: "fin-01"}), "fin-01");
+    assert.strictEqual(linkedTenantOf({kind: "absent"}), null);
+    assert.strictEqual(linkedTenantOf({kind: "unreadable"}), null);
 });

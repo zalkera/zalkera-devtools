@@ -66,6 +66,10 @@ import {
   snapshotEntries,
   readZipFile,
   folderBinding,
+  linkedTenantOf,
+  decideImportBinding,
+  type WorkspaceLink,
+  type ImportBinding,
   decideTenantScope,
   type TenantScope,
   decideSiteChoice,
@@ -263,17 +267,35 @@ function confirmedFolderFor(tenant: string): string | null {
  * 그 폴더가 **자기 `.vscode/settings.json` 에** 적어 둔 사이트. 지금 창의 설정이 아니다 —
  * 다른 폴더를 확증하는 자리라 파일을 직접 읽는다.
  */
-function workspaceLinkAt(dir: string): string | null {
-  const text = readSmallOwnFile(join(dir, ".vscode", "settings.json"));
-  if (text === null) return null;
+/**
+ * **판독은 여기 한 벌이다.** 「없다」와 「못 읽었다」를 갈라 돌려주고, 종전 계약이 필요한 자리는
+ * `linkedTenantOf` 로 좁혀 쓴다 — 판독기가 둘이면 한쪽만 고쳐진다.
+ *
+ * ⚠ **JSONC 를 못 읽는다.** VS Code 는 주석·후행 쉼표가 있는 `settings.json` 을 정상으로 다루는데
+ *   생 `JSON.parse` 는 던진다. 그래서 그 칸이 `unreadable` 이다 — 「없다」로 접으면 소속 있는
+ *   폴더가 소속 없어 보인다(보안 심의 🟠). 왜 그 접힘이 위험한지는 core 쪽 KDoc 에 있다.
+ */
+function workspaceLinkState(dir: string): WorkspaceLink {
+  const path = join(dir, ".vscode", "settings.json");
+  const text = readSmallOwnFile(path);
+  // 파일 자체가 없으면 「없다」, 파일은 있는데 못 읽었으면 「모른다」.
+  if (text === null) {
+    return existsSync(path) ? {kind: "unreadable"} : {kind: "absent"};
+  }
   try {
     const raw: unknown = JSON.parse(text);
-    if (typeof raw !== "object" || raw === null) return null;
+    if (typeof raw !== "object" || raw === null) return {kind: "unreadable"};
     const value = (raw as Record<string, unknown>)["zalkera.tenant"];
-    return typeof value === "string" && value.length > 0 ? value : null;
+    return typeof value === "string" && value.length > 0
+      ? {kind: "tenant", tenant: value}
+      : {kind: "absent"};
   } catch {
-    return null;
+    return {kind: "unreadable"};
   }
+}
+
+function workspaceLinkAt(dir: string): string | null {
+  return linkedTenantOf(workspaceLinkState(dir));
 }
 
 /**
@@ -1427,11 +1449,18 @@ function suggestSiteSibling(
 async function bindImportedFolder(
   target: string,
   tenant: CapturedTenant,
-  boundBefore: string | null,
+  plan: ImportBinding,
 ): Promise<boolean> {
-  if (boundBefore !== null && boundBefore !== String(tenant)) {
+  if (plan.kind === "keep") {
     log(
-      `고르신 폴더는 이미 ${plainNotice(boundBefore, 64)} 에 연결돼 있어 소속을 바꾸지 않았습니다 — 「사이트에 연결」로 정해 주세요.`,
+      `고르신 폴더는 이미 ${plainNotice(plan.bound, 64)} 에 연결돼 있어 소속을 바꾸지 않았습니다 — 「사이트에 연결」로 정해 주세요.`,
+    );
+    return false;
+  }
+  if (plan.kind === "unknown") {
+    // 「못 읽었다」는 「없다」가 아니다 — 모르는 폴더를 우리 값으로 덮지 않는다.
+    log(
+      "고르신 폴더의 `.vscode/settings.json` 을 읽지 못해 소속을 적지 않았습니다 — 「사이트에 연결」로 정해 주세요.",
     );
     return false;
   }
@@ -1481,10 +1510,17 @@ async function importZipCommand(pinned?: CapturedTenant): Promise<void> {
   // 붙일지 말지는 **풀기 전 상태**로 정한다. 지금은 `EXCLUDED_PATHS` 가 표식을 계획 단계에서
   // 떨구므로 zip 이 실어 온 표식이 디스크에 닿지 않지만, 그 목록이 무너져도 소속 판정은
   // 안 뒤집히게 둔다 — 판정의 재료를 **우리가 아는 시점**에서 뜨는 것이 요점이다.
-  const boundBefore = folderBinding(
-    readSourceMarkAt(target),
-    workspaceLinkAt(target),
-  );
+  //
+  // ⚠ **판정은 core 가 한다**(`decideImportBinding`). 확장 안 조건문으로 두면 「못 읽었다」를
+  //    「없다」로 접어도 시험이 못 문다 — 실제로 그 접힘이 이 가드를 열어 뒀다(보안 심의 🟠).
+  const bindPlan =
+    pinned === undefined
+      ? null
+      : decideImportBinding(
+          readSourceMarkAt(target),
+          workspaceLinkState(target),
+          String(pinned),
+        );
 
   // ⚠ **가드는 여기서부터다** — 형제 받기와 같은 규율이다. zip 고르기·풀 자리 묻기를 덮으면
   //    답 없는 물음 하나가 창이 죽을 때까지 나머지를 막는다(`whileExtracting`).
@@ -1503,7 +1539,7 @@ async function importZipCommand(pinned?: CapturedTenant): Promise<void> {
   }
   // ⓒ 붙이기 — 사이트를 아는 흐름에서만. 사이드바 갱신 **앞**이다: 붙인 결과가 화면에 보여야 한다.
   const bound =
-    pinned !== undefined && (await bindImportedFolder(target, pinned, boundBefore));
+    pinned !== undefined && bindPlan !== null && (await bindImportedFolder(target, pinned, bindPlan));
   await refreshSidebar();
 
   // ⚠ **푼 곳이 지금 열린 폴더 자신일 수 있다.** 그때 「폴더 열기」는 이미 열려 있는 것을 다시

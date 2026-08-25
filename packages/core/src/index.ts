@@ -197,6 +197,8 @@ export {
 export type { SourceMark } from "./localMark.ts";
 export {
     folderBinding,
+    linkedTenantOf,
+    decideImportBinding,
     decideTenantScope,
     decideSiteChoice,
     elsewhereOptions,
@@ -208,6 +210,8 @@ export {
     type ElsewhereOption,
     type PickedFolderPlan,
     type FetchTargetPlan,
+    type WorkspaceLink,
+    type ImportBinding,
 } from "./siteBinding.ts";
 export { sidebarPlan } from "./sidebarPlan.ts";
 export { idleStatusPlan, type StatusPlan } from "./statusPlan.ts";
