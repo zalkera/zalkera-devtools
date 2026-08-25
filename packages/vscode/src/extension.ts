@@ -1129,16 +1129,6 @@ async function linkFolderToSite(
 }
 
 /**
- * 그 사이트 폴더를 연다.
- *
- * ⚠ **지금 창을 함부로 뺏지 않는다.** 미리보기가 돌거나 저장 안 된 편집기가 있으면 **새 창**을
- *   기본으로 준다 — 「잠깐 다른 사이트만 볼까」가 파괴적이면 안 된다. 그 둘이 없으면 이 창에서
- *   열어 창이 늘어나지 않게 한다.
- *
- * 미리보기는 창마다 따로 서고 발급된 열쇠도 창 밖 목록에 함께 적히므로(`recordedKeys`),
- * 새 창을 여는 것 자체는 지금 미리보기를 깨지 않는다.
- */
-/**
  * 「작업 폴더 변경」 — **창만 옮긴다.**
  *
  * ⚠ **아무것도 적지 않는다.** 링크도 표식도 전역 사이트도 쓰지 않는다 — 소속을 **바꾸는** 동사는
@@ -1171,7 +1161,10 @@ async function changeFolder(): Promise<void> {
       // ⚠ **누른 시점에 다시 확증한다** — 목록을 만든 뒤 폴더가 사라지거나 다른 사이트를 담게
       //    됐을 수 있고, 그때 여는 것이 이 규율이 막는 사고다(`runElsewhere` 와 같은 잣대).
       const still = confirmedFolderFor(tenantCode());
-      if (still === null) {
+      // ⚠ **보인 것과 여는 것이 같아야 한다.** `null` 만 보면, 목록을 띄운 사이 다른 창이
+      //    레지스트리를 바꿨을 때 `detail` 에 적힌 것과 **다른 폴더**가 열린다 — 이 축의 주제가
+      //    바로 「보이는 것과 실제가 갈리지 않게」다.
+      if (still === null || still !== plan.dir) {
         void vscode.window.showInformationMessage(
           ours("그 폴더를 더는 찾지 못했습니다 — 직접 골라 주세요."),
         );
@@ -1194,6 +1187,16 @@ async function changeFolder(): Promise<void> {
   await openSiteFolder(dir);
 }
 
+/**
+ * 그 사이트 폴더를 연다.
+ *
+ * ⚠ **지금 창을 함부로 뺏지 않는다.** 미리보기가 돌거나 저장 안 된 편집기가 있으면 **새 창**을
+ *   기본으로 준다 — 「잠깐 다른 사이트만 볼까」가 파괴적이면 안 된다. 그 둘이 없으면 이 창에서
+ *   열어 창이 늘어나지 않게 한다.
+ *
+ * 미리보기는 창마다 따로 서고 발급된 열쇠도 창 밖 목록에 함께 적히므로(`recordedKeys`),
+ * 새 창을 여는 것 자체는 지금 미리보기를 깨지 않는다.
+ */
 async function openSiteFolder(dir: string): Promise<void> {
   const dirty = vscode.workspace.textDocuments.some((d) => d.isDirty);
   if (session === null && !dirty) {
@@ -3494,6 +3497,8 @@ async function refreshSidebar(): Promise<void> {
     //    말하면 「이 폴더」의 지시대상이 또 갈린다 — 이 값을 세우는 이유가 바로 그 갈림을 없애는
     //    것이다.
     folderPath: dir ?? null,
+    // 기계마다 다른 값이라 판정이 스스로 읽지 않는다 — 여기서 넘긴다(`sidebarPlan` 의 KDoc).
+    home: homedir(),
   });
 }
 

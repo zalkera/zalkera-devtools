@@ -37,6 +37,14 @@ export interface SidebarState {
      *   그리는 자리는 **묶음 머리**여야 한다(접어도 보인다).
      */
     folderPath: string | null;
+    /**
+     * 홈 폴더. 주면 그 아래 경로를 `~` 로 접는다 — **머리를 접는 것보다 짧고 안 잃는다**
+     * (`/home/x/projects/…` 50자 → `~/projects/…` 38자, 접기 자체가 불필요해진다).
+     *
+     * ⚠ **판정이 스스로 읽지 않는다.** 이 값은 기계마다 다르므로 판정 안에서 읽으면 시험이
+     *   기계에 따라 갈린다. 확장이 `node:os` 의 `homedir()` 로 넘긴다.
+     */
+    home?: string | null;
 }
 
 /**
@@ -127,12 +135,12 @@ export function sidebarPlan(state: SidebarState): PlanGroup[] {
         ];
     }
 
-    const {tenant, site, previewUrl, keyExpiresAt, folderTenant, folderPath} = state;
-    // 화면에 적을 경로. 홈은 확장이 알므로 여기서는 접지 않는다 — 판정에 `vscode` 를 끌어오지 않는다.
+    const {tenant, site, previewUrl, keyExpiresAt, folderTenant, folderPath, home} = state;
+    // 화면에 적을 경로. 홈은 **확장이 넘긴다** — 기계마다 다른 값을 판정이 스스로 읽으면 시험이 갈린다.
     // ⚠ **「없음」을 총체적으로 받는다.** 타입은 `string | null` 이지만 이 판정은 JS 에서도
     //    불린다(라벨 검사기가 상태를 손으로 짜서 넘긴다) — `undefined` 한 칸에 터지면 그 검사기가
     //    옛 코드를 검사하는 것보다 나쁘게, 아예 안 돈다. 실제로 그렇게 터졌다.
-    const folderShown = folderPath ? displayPath(folderPath) : null;
+    const folderShown = folderPath ? displayPath(folderPath, home) : null;
     // 「소스 폴더인데 그 폴더가 어느 사이트 것인지 모른다」 — 발행 모달·상태바와 **같은 술어**다.
     const undeclared = site !== null && folderTenant === null && tenant !== "";
     // 어긋난 폴더는 **화면에서도** 어긋나 보여야 한다. 게이트가 누를 때 막는 것만으로는,

@@ -318,7 +318,11 @@ test("예고형은 「소스 폴더 · 소속 모름」 한 칸에서만 선다"
     { name: "소스아님·소속있음", patch: { site: null, folderTenant: "credium" }, 뜬다: false },
   ];
   for (const { name, patch, 뜬다 } of 칸) {
-    assert.strictEqual(notes(patch).includes(NOTE), 뜬다, `칸이 틀렸다: ${name}`);
+    // ⚠ **`includes` 로 재지 않는다.** 그러면 `NOTE` 말고 **다른 `info`** 가 늘어도 안 걸린다 —
+    //    좁힌 `commands()` 가 더는 그것을 안 세므로 둘 사이로 빠져나가는 형태가 생긴다.
+    //    심의가 변이로 실증했다: 다른 묶음에 `site !== null && tenant !== ""` 로 걸린 줄 하나를
+    //    넣으니 24건이 전부 초록이었다. 전수 비교라야 좁힘이 면제가 아니라 정밀화가 된다.
+    assert.deepEqual(notes(patch), 뜬다 ? [NOTE] : [], `칸이 틀렸다: ${name}`);
   }
 });
 
