@@ -1484,7 +1484,16 @@ async function importZipCommand(pinned?: CapturedTenant): Promise<void> {
 
   // ⚠ **읽기·판정은 한 문을 지난다**(`readZipWithPlan`) — 시작과 갱신이 각자 판정을 들면
   //    한쪽만 고쳐진다. 여기서 미리 읽는 것은 출처 대조를 **풀기 전에** 하기 위해서다.
-  const {zip, plan} = await readZipWithPlan(zipPath);
+  //
+  // ⚠ **읽는 동안 화면이 조용하면 안 된다**(성능 심의 🟡). 이 읽기는 종전에 진행 알림 «안»에
+  //    있었는데 앞으로 나오면서 표시를 잃었다 — 큰 zip 을 느린 매체에서 읽으면 zip 을 고른 뒤
+  //    다음 물음까지 몇 초가 비고, 그 침묵은 멈춘 것으로 읽힌다.
+  //    **상태 표시줄에 낸다**(`Window`) — 전형 zip 은 1초 안에 끝나므로 알림으로 내면 깜박임만
+  //    남는다. 알림 자리는 실제로 오래 도는 해제가 쓴다.
+  const {zip, plan} = await vscode.window.withProgress(
+    {location: vscode.ProgressLocation.Window, title: "zip 을 읽는 중"},
+    () => readZipWithPlan(zipPath),
+  );
 
   // ⚠ **출처가 다르면 말하고, 막지는 않는다.** 표시는 서명 없는 선언이지 증명이 아니고, 대행사가
   //    다른 이름으로 내보낸 팩을 쓰는 것이 정상 흐름이다(`judgeUpdate` 와 같은 규율). 다만 이
