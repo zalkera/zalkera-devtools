@@ -1954,10 +1954,11 @@ async function switchVersion(): Promise<void> {
   //
   // ⚠ **로그도 같은 분기를 탄다.** 알림과 로그가 갈리면 로그가 거짓 증언이 된다.
   // 한 번만 짓고 두 자리가 나눠 쓴다 — 두 번 부르면 나중에 한쪽만 고쳐진다.
-  // `say` 가 지은 문장이라 서버 값이 아니다(테넌트는 그 안에서 이미 소독을 지났다) — 표기만 붙인다.
+  // 표기를 안 붙인다: 소독 검사가 이 식별자를 **선언표로 역추적**해 `say` 유래임을 본다.
+  // 표기로 덮으면 그 변수를 나중에 오염시켜도 안 걸린다(검사기가 눈을 감는다).
   const said = say.switchOutcome(tenant, target.revisionNo, outcome);
   log(said);
-  void vscode.window.showInformationMessage(ours(said));
+  void vscode.window.showInformationMessage(said);
 }
 
 /**

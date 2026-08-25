@@ -221,3 +221,25 @@ test("정상 경로는 글자 그대로 남는다 — 소독이 축약이 되면
     const long = "/home/jonghwa/projects/zalkera/customers/fin-01-v7-really-long";
     ok(say.publishConfirm(captureTenant("bix"), long, "bix").detail.startsWith(long));
 });
+
+
+/**
+ * ⚠ **이 판의 요점이 「문면 재료가 둘이다」인데 발행 쪽만 그 요점이 안 잠겨 있었다** —
+ *   `serverCode` 대신 `null` 을 넘겨도 전건 초록이었다(심의 변이 M5). 코드를 안 넘기면 부르는
+ *   쪽이 두 갈래를 못 갈라 **다른 행위에 대한 동의**를 받는다.
+ */
+test("발행 동의 콜백은 서버 문장과 **코드**를 함께 받는다", async () => {
+  const { api, fetchImpl } = server();
+  const codes: (string | null)[] = [];
+  await publish({
+    projectDir: await project(),
+    api,
+    tenant: "t",
+    fetchImpl,
+    onConsent: async (_message, serverCode) => {
+      codes.push(serverCode);
+      return true;
+    },
+  });
+  deepStrictEqual(codes, ["PENDING_AI_CHANGES_CONFIRM_REQUIRED"], "코드가 콜백에 안 왔다");
+});

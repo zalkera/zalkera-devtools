@@ -449,7 +449,9 @@ const WIRES = [
     ],
     [
         "packages/vscode/src/extension.ts",
-        "onConsent: (serverMessage, serverCode) =>",
+        // ⚠ **호출까지 문다.** 화살표 머리만 잡으면 본문을 `Promise.resolve(true)` 로 갈아도
+        //    안 걸린다 — 안 묻고 자동 동의하는 변이가 그렇게 살아남았다(심의 실측).
+        "askDiscardConsent(tenant, serverMessage, serverCode),",
         "새 버전 배포가 zip 을 다 올린 뒤 409 를 받고 「계속하려면 확인해 주세요」만 반복한다 — 확인할 자리가 없는 막다른 길이 된다",
     ],
     [
@@ -465,7 +467,10 @@ const WIRES = [
     ],
     [
         "packages/vscode/src/extension.ts",
-        "await askDiscardConsent(\n        tenant,",
+        // ⚠ **`!` 와 `return` 까지 문다.** 앵커를 현행화하며 짧게 잡았더니 「아니오를 눌렀는데
+        //    진행한다」 변이가 살아남았다 — 종전 판에서는 잡히던 것이다(심의 실측). 이 배선이
+        //    스스로 선언한 피해가 정확히 그 변이다.
+        "!(await askDiscardConsent(\n        tenant,\n        (error as Error).message,\n        error instanceof DevtoolsError ? error.serverCode ?? null : null,\n      ))\n    )\n      return;",
         "전환에서 거절해도 그대로 진행한다 — 사람이 「아니오」를 눌렀는데 AI 변경이 사라진다",
     ],
     [

@@ -342,3 +342,14 @@ test("게시 대기 건수만 버려진 경우도 버림으로 센다", () => {
   const 말 = say.switchOutcome(captureTenant("bix"), 7, {pointerMoved: false, discardedPendingChanges: 2});
   ok(말.includes("버렸습니다"), 말);
 });
+
+
+test("버린 것이 0건이면 「버렸습니다」라고 하지 않는다", () => {
+  // 백엔드의 무동작 성공(편집도 대기도 없을 때)이 이 모양으로 온다 — `>= 0` 으로 새면 거짓 보고다.
+  const 말 = say.switchOutcome(captureTenant("bix"), 7, {
+    pointerMoved: false,
+    discardedDraft: false,
+    discardedPendingChanges: 0,
+  });
+  ok(말.includes("바꾼 것이 없습니다"), 말);
+});

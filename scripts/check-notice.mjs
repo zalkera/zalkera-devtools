@@ -232,6 +232,11 @@ function isAllowed(e) {
     if (ts.isPropertyAccessExpression(e) && CANON_FIELDS.has(e.name.getText())) {
         return isCanonicalObject(e.expression);
     }
+    // ⚠ **맨 식별자는 선언표로 역추적한다.** 정본이 지은 문장을 지역 변수에 담아 두 자리가
+    //    나눠 쓰는 것은 흔한 형태인데(로그 + 알림), 그때 표기(`ours`)를 붙여 통과시키면
+    //    **소독 검사가 데이터흐름에서 눈을 한 칸 감는다** — 그 변수를 나중에 오염시켜도 안 걸린다
+    //    (심의 실측). `isCanonicalObject` 가 이미 재대입·다중선언까지 보므로 그것을 그대로 쓴다.
+    if (ts.isIdentifier(e)) return isCanonicalObject(e);
     if (!ts.isCallExpression(e)) return false;
     // `say.*(...)` — ⚠ **그 `say` 가 정본 모듈에서 온 것이라야 한다.** 이름만 보면 어느 파일에서든
     //    지역 `say` 를 만들어 통과시킬 수 있다. `isCanonicalObject` 는 그것을 보는데 이 갈래만

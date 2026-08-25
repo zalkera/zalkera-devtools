@@ -1,3 +1,4 @@
+import type {ActivateResult} from "./api.ts";
 import {ours, plainNotice, countJosa} from "./notice.ts";
 /**
  * **"어느 사이트냐"를 판정하고 말하는 자리.** 순수 함수만 있고 `vscode` 를 모른다.
@@ -348,7 +349,8 @@ export const say = {
     switchOutcome(
         tenant: CapturedTenant,
         revisionNo: number,
-        result?: { pointerMoved?: boolean; discardedDraft?: boolean; discardedPendingChanges?: number },
+        // 사본으로 두면 한쪽만 고쳐진다 — `switchedLine` 을 뺀 것과 같은 이유다.
+        result?: ActivateResult,
     ): string {
         // ⚠ **응답을 총체적으로 받는다.** 서버 값이라 형을 믿지 않고, 이 함수는 문면 전수 시험이
         //    인자 없이도 부른다 — 한 칸에 터지면 그 시험이 통째로 죽는다(같은 형상으로 이미 한 번
