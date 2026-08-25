@@ -192,9 +192,39 @@ const WIRES = [
         "내보내기의 출처가 폴더 소속에서 안 오면 남의 사이트 이름을 찍거나 아무것도 안 찍는다",
     ],
     [
+        // ⚠ **소비처가 둘이다**(갈아 끼우기·사이트를 아는 시작). 하나만 세면 다른 하나를 벗겨도
+        //    초록이다. 시작 쪽이 필요한 이유: 그 흐름은 푼 폴더를 그 사이트에 **붙이므로**,
+        //    어긋난 출처를 조용히 넘기면 남의 소스를 담은 폴더가 이 사이트 것이라고 주장한다.
         "packages/vscode/src/extension.ts",
         "const prov = await readProvenance(zip, plan);",
-        "출처 판정이 사라지면 다른 사이트의 zip 을 무경고로 갈아 끼운다 — 다중 사이트의 최대 사고다",
+        "출처 판정이 사라지면 다른 사이트의 zip 을 무경고로 갈아 끼우거나 무경고로 이 사이트에 붙인다 — 다중 사이트의 최대 사고다",
+        2,
+    ],
+    [
+        // ⚠ **맨몸 `executeCommand` 로 돌아가면 고른 사이트가 그 자리에서 버려진다.** 형제 `fetch`
+        //    갈래는 `openSite(pinned)` 로 들고 가는데 zip 갈래만 안 들고 가던 것이 이 결함이었다.
+        "packages/vscode/src/extension.ts",
+        "await importZipCommand(pinned);",
+        "사이트를 골라 시작했는데 푼 폴더가 어느 사이트 것인지 아무 데도 안 적힌다 — 사람이 「사이트에 연결」로 같은 선택을 한 번 더 하고, 그 사이 창의 유효 사이트는 옛 사이트로 남는다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "await chooseImportTarget(pinned);",
+        "풀 자리 제안이 사이트를 모르게 되어, 「빈 폴더를 새로 만들어 고르세요」가 되살아난다 — 비개발자가 멈추는 그 자리다",
+    ],
+    [
+        // ⚠ **효과를 센다.** 부르는 줄만 고정하면 헬퍼 본체를 무동작으로 바꿔도 초록이다.
+        "packages/vscode/src/extension.ts",
+        "await bindImportedFolder(target, pinned, boundBefore)",
+        "푼 폴더가 사이트에 안 붙어, 열어도 유효 사이트가 안 서고 미리보기·올리기가 막힌다",
+    ],
+    [
+        // ⚠ 이 줄이 **소속을 바꾸는 동사를 「사이트에 연결」 하나로 남긴다**는 규율의 집행부다.
+        //    빈 폴더 강제가 `.vscode` 를 통과시키므로(`emptyDir.ts` 의 IGNORED), 링크만 가진
+        //    남의 폴더가 실제로 여기까지 온다.
+        "packages/vscode/src/extension.ts",
+        'if (boundBefore !== null && boundBefore !== String(tenant))',
+        "남의 사이트에 붙어 있던 폴더의 소속을 zip 풀기가 조용히 갈아탄다 — 가장 위험한 동사가 가장 흔한 흐름의 한 클릭 거리에 놓인다",
     ],
     [
         "packages/vscode/src/extension.ts",

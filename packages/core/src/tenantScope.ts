@@ -157,6 +157,29 @@ export const say = {
     alreadyFetchedAt(tenant: CapturedTenant, revisionNo: number, path: string): string {
         return `「${shown(tenant)}」 버전 ${countJosa(revisionNo, "은/는")} 이미 ${ours(path)} 에 받아 두셨습니다.`;
     },
+    /**
+     * **고른 사이트로 시작하는** zip 을 풀 자리. 옆에 만들 폴더를 본문에 적는다.
+     *
+     * ⚠ **맨몸 「zip 으로 시작」에는 이 문장을 쓰지 마라.** 그 문은 로그인만 요구하고 그 zip 이
+     *   어느 사이트 것인지 알 방법이 없어, 사이트 이름을 적으면 **그 zip 이 그 사이트 것이라고
+     *   우리가 말해 주는 셈**이 된다. 이 문장이 서는 자리는 사람이 **방금 사이트를 고른** 흐름
+     *   하나뿐이고, 거기서는 이름이 사람의 선택을 되읽는 것이다.
+     */
+    importTargetSibling(tenant: CapturedTenant, path: string): string {
+        // 안심 문구가 경로 앞이다 — `fetchTargetHere` 와 같은 이유(비-모달은 한 줄로 잘린다).
+        return `지금 폴더는 그대로 둡니다. 「${shown(tenant)}」 로 쓰실 소스를 ${ours(path)} 에 풉니다.`;
+    },
+    /** zip 을 푼 폴더를 **그 사이트에 붙였다**는 사실. 다음에 할 일은 여는 것뿐이다. */
+    importedFor(tenant: CapturedTenant): string {
+        return `「${shown(tenant)}」 사이트 소스를 풀고 그 사이트에 연결해 두었습니다 — 폴더를 열면 바로 이어집니다.`;
+    },
+    /**
+     * zip 의 **출처 표시**가 고른 사이트와 다르다. **막지 않는다** — 표시는 서명 없는 선언이고,
+     * 대행사가 다른 이름으로 내보낸 팩을 쓰는 것이 정상 흐름이다(`judgeUpdate` 와 같은 규율).
+     */
+    importProvenanceMismatch(tenant: CapturedTenant, zipTenant: string): string {
+        return `이 zip 은 「${shown(zipTenant)}」 에서 내보낸 것으로 표시되어 있습니다 — 「${shown(tenant)}」 로 쓰시려는 것이 맞는지 확인해 주세요.`;
+    },
     fetchProgress(tenant: CapturedTenant, revisionNo: number): string {
         return `「${shown(tenant)}」 버전 ${countJosa(revisionNo, "을/를")} 받는 중`;
     },
