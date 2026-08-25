@@ -66,6 +66,7 @@ import {
   snapshotEntries,
   readZipFile,
   folderBinding,
+  changeFolderPlan,
   linkedTenantOf,
   decideImportBinding,
   type WorkspaceLink,
@@ -444,6 +445,7 @@ export function activate(context: vscode.ExtensionContext): void {
     register("zalkera.site.importZip", importZipCommand),
     register("zalkera.site.updateZip", updateZipCommand),
     register("zalkera.export", exportZipCommand),
+    register("zalkera.folder.change", changeFolder),
     register("zalkera.site.link", linkFolder),
     register("zalkera.site.useFolder", useFolderSite),
     register("zalkera.preview.start", startPreviewCommand),
@@ -1136,6 +1138,62 @@ async function linkFolderToSite(
  * 미리보기는 창마다 따로 서고 발급된 열쇠도 창 밖 목록에 함께 적히므로(`recordedKeys`),
  * 새 창을 여는 것 자체는 지금 미리보기를 깨지 않는다.
  */
+/**
+ * 「작업 폴더 변경」 — **창만 옮긴다.**
+ *
+ * ⚠ **아무것도 적지 않는다.** 링크도 표식도 전역 사이트도 쓰지 않는다 — 소속을 **바꾸는** 동사는
+ *   「사이트에 연결」 하나로 남긴다(`decidePickedFolder` 가 세운 규율). 고르신 폴더가 남의 사이트
+ *   것이어도 막지 않는다: 도착한 창의 어긋남 표면(상태바 경고·「이 폴더의 사이트로 돌아가기」)이
+ *   받고, 마지막 방어선은 발행 확인이다. 사전 게이트를 달면 「모르는 것으로는 막지 않는다」와
+ *   어긋난다.
+ *
+ * ⚠ **`openSiteFolder` 를 지난다.** 직접 여는 것과 다른 점은 미리보기가 돌거나 저장 안 된 편집이
+ *   있을 때 **새 창**을 기본으로 준다는 것이다 — 파일 → 폴더 열기에는 없는 보호이고, 이 문이
+ *   존재할 값어치의 절반이 거기 있다.
+ */
+async function changeFolder(): Promise<void> {
+  const plan = changeFolderPlan({
+    openDir: workspaceDir() ?? null,
+    // 확증(실재 + 소속 일치)을 지난 것만 제안한다 — 기억만 믿고 열어 주는 것이 이 설계가 막는 사고다.
+    confirmedDir: confirmedFolderFor(tenantCode()),
+  });
+  if (plan.kind === "offer") {
+    const OPEN = "폴더 열기";
+    const picked = await vscode.window.showQuickPick(
+      [
+        {label: OPEN, detail: plainNotice(plan.dir, 120)},
+        {label: "다른 폴더 고르기…", detail: "이 창을 그 폴더로 옮깁니다 — 소속은 바뀌지 않습니다"},
+      ],
+      {title: "작업 폴더 변경"},
+    );
+    if (picked === undefined) return;
+    if (picked.label === OPEN) {
+      // ⚠ **누른 시점에 다시 확증한다** — 목록을 만든 뒤 폴더가 사라지거나 다른 사이트를 담게
+      //    됐을 수 있고, 그때 여는 것이 이 규율이 막는 사고다(`runElsewhere` 와 같은 잣대).
+      const still = confirmedFolderFor(tenantCode());
+      if (still === null) {
+        void vscode.window.showInformationMessage(
+          ours("그 폴더를 더는 찾지 못했습니다 — 직접 골라 주세요."),
+        );
+        return;
+      }
+      await openSiteFolder(still);
+      return;
+    }
+  }
+  const chosen = await vscode.window.showOpenDialog({
+    canSelectFolders: true,
+    canSelectFiles: false,
+    canSelectMany: false,
+    openLabel: "이 폴더로 옮기기",
+    defaultUri: workspaceDir() ? vscode.Uri.file(dirname(workspaceDir() as string)) : undefined,
+    title: "작업 폴더 변경",
+  });
+  const dir = chosen?.[0]?.fsPath;
+  if (dir === undefined) return;
+  await openSiteFolder(dir);
+}
+
 async function openSiteFolder(dir: string): Promise<void> {
   const dirty = vscode.workspace.textDocuments.some((d) => d.isDirty);
   if (session === null && !dirty) {
@@ -2337,7 +2395,10 @@ async function publishCommand(): Promise<void> {
 
   // 문구는 core 가 만든다 — **`tenant` 를 인자로 요구하므로 라이브로 읽을 방법이 없다**(§tenantScope).
   // 오늘 이 자리에서 난 결함이 정확히 "알림이 라이브로 다시 읽는 것"이었다.
-  const ask = say.publishConfirm(tenant);
+  // ⚠ **경로와 소속을 함께 넘긴다.** 경로는 `message` 의 「이 폴더」가 가리키는 것이고(모달이
+  //    뜨면 사이드바는 안 보인다), 소속은 **모양을 가르는 재료**다 — 소속 없는 폴더의 발행은
+  //    다른 모달을 봐야 한다(`say.publishConfirm` 의 KDoc).
+  const ask = say.publishConfirm(tenant, dir, currentFolderBinding());
   const confirm = await vscode.window.showWarningMessage(
     ask.message,
     { modal: true, detail: ask.detail },
@@ -3429,6 +3490,10 @@ async function refreshSidebar(): Promise<void> {
     // ⚠ **게이트와 같은 값을 본다**(`announceIfBlocked`). 둘이 다른 기준을 쓰면 사이드바는
     //    건강해 보이는데 누르면 막히는, 이 레포가 이미 한 번 겪은 형상이 된다.
     folderTenant: currentFolderBinding(),
+    // ⚠ **게이트가 보는 그 값 하나에서 나와야 한다**(`workspaceDir()`). 화면이 다른 경로를
+    //    말하면 「이 폴더」의 지시대상이 또 갈린다 — 이 값을 세우는 이유가 바로 그 갈림을 없애는
+    //    것이다.
+    folderPath: dir ?? null,
   });
 }
 

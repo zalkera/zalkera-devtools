@@ -204,15 +204,18 @@ export {
     elsewhereOptions,
     decidePickedFolder,
     decideFetchTargetPlan,
+    changeFolderPlan,
     needsRelinkConsent,
     type TenantScope,
     type SiteChoice,
     type ElsewhereOption,
     type PickedFolderPlan,
     type FetchTargetPlan,
+    type ChangeFolderPlan,
     type WorkspaceLink,
     type ImportBinding,
 } from "./siteBinding.ts";
 export { sidebarPlan } from "./sidebarPlan.ts";
+export { displayPath } from "./displayPath.ts";
 export { idleStatusPlan, type StatusPlan } from "./statusPlan.ts";
 export type { PlanGroup, PlanItem, SidebarState } from "./sidebarPlan.ts";

@@ -46,10 +46,13 @@ let checked = 0;
 
 /** 상태마다 보이는 것이 다르다 — 한 상태만 보면 나머지 분기의 라벨이 무검사로 남는다. */
 const STATES = [
-    { signedIn: false, tenant: "", site: null, previewUrl: null, keyExpiresAt: null },
-    { signedIn: true, tenant: "t", site: null, previewUrl: null, keyExpiresAt: null },
-    { signedIn: true, tenant: "t", site: "/x", previewUrl: null, keyExpiresAt: null },
-    { signedIn: true, tenant: "t", site: "/x", previewUrl: "http://localhost:3000", keyExpiresAt: "2026-01-01" },
+    { signedIn: false, tenant: "", site: null, previewUrl: null, keyExpiresAt: null, folderTenant: null, folderPath: null },
+    { signedIn: true, tenant: "t", site: null, previewUrl: null, keyExpiresAt: null, folderTenant: null, folderPath: null },
+    { signedIn: true, tenant: "t", site: "/x", previewUrl: null, keyExpiresAt: null, folderTenant: "t", folderPath: "/x" },
+    // ⚠ **소속 모르는 소스 폴더**(예고형 한 줄이 서는 칸). 이 칸이 빠져 있으면 그 분기의 라벨이
+    //    검사 밖에 남는다 — 상태 목록의 존재 이유가 그것이다.
+    { signedIn: true, tenant: "t", site: "/x", previewUrl: null, keyExpiresAt: null, folderTenant: null, folderPath: "/x" },
+    { signedIn: true, tenant: "t", site: "/x", previewUrl: "http://localhost:3000", keyExpiresAt: "2026-01-01", folderTenant: "t", folderPath: "/x" },
 ];
 /** 라벨이 상태를 담아도 되는 명령. 사이트 이름과 미리보기 주소 둘뿐이다. */
 const DYNAMIC_ALLOWED = new Set(["zalkera.site.choose", "zalkera.preview.start"]);

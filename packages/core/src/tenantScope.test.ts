@@ -18,7 +18,7 @@ import { captureTenant, resolveHelpUrl, say } from "./tenantScope.ts";
 // 여기 있는 시험은 그 거짓이 돌아오지 못하게 잠근다.
 
 test("올리기 확인창은 **사이트가 바뀐다**고 말한다", () => {
-    const ask = say.publishConfirm(captureTenant("bix"));
+    const ask = say.publishConfirm(captureTenant("bix"), "/x", "bix");
     match(ask.message, /「bix」/);
     match(ask.detail, /방문자가 보는 사이트가 이 소스로 바뀝니다/);
 });
@@ -26,7 +26,7 @@ test("올리기 확인창은 **사이트가 바뀐다**고 말한다", () => {
 test("올리기 확인창은 **안 바뀐다고 말하지 않는다**", () => {
     // 종전 문면이 정확히 그 약속이었고 시험이 그것을 잠그고 있었다. 방향을 뒤집어 다시 건다 —
     // 이 문장이 어떤 형태로든 돌아오면 배포 게이트가 다시 거짓말을 하는 것이다.
-    const ask = say.publishConfirm(captureTenant("bix"));
+    const ask = say.publishConfirm(captureTenant("bix"), "/x", "bix");
     for (const text of [ask.message, ask.detail]) {
         ok(!/사이트는 그대로/.test(text), `안 바뀐다는 약속이 돌아왔다: ${text}`);
         ok(!/올리기만 합니다/.test(text), `안 바뀐다는 약속이 돌아왔다: ${text}`);
@@ -126,7 +126,7 @@ const EVIL = "gc](command:workbench.action.terminal.new)";
 
 test("say.* 는 서버 테넌트 코드를 소독한다", () => {
     for (const message of [
-        say.publishConfirm(captureTenant(EVIL)).message,
+        say.publishConfirm(captureTenant(EVIL), "/x", "bix").message,
         say.published(captureTenant(EVIL), 3),
         say.switchConfirm(captureTenant(EVIL), 3).message,
         say.switched(captureTenant(EVIL), 3),

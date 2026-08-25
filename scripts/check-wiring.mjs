@@ -201,6 +201,34 @@ const WIRES = [
         2,
     ],
     [
+        // ⚠ **「이 폴더」의 지시대상을 공급하는 줄.** 배송 문면 열두 자리가 「이 폴더」라고 말하는데
+        //    화면에 그 폴더가 없었다. 게이트가 보는 값(`workspaceDir()`) 하나에서 나와야 한다 —
+        //    다른 값을 그리면 지시대상이 또 갈린다.
+        "packages/vscode/src/extension.ts",
+        "folderPath: dir ?? null,",
+        "사이드바가 「이 폴더」의 지시대상을 잃는다 — 「사이트에 연결」·발행 확인이 가리키는 대상이 화면에서 사라진다",
+    ],
+    [
+        // ⚠ **효과를 센다.** 판정을 부르고도 결과를 안 쓰면 확증 안 된 레지스트리 경로를
+        //    「그 사이트 폴더」로 열어 주는 손짜기 목록이 되살아난다.
+        "packages/vscode/src/extension.ts",
+        "const plan = changeFolderPlan({",
+        "「작업 폴더 변경」이 확증을 안 지나, 기억만 믿고 남의 폴더를 그 사이트 폴더로 열어 준다",
+    ],
+    [
+        // ⚠ **횟수다.** 「작업 폴더 변경」 두 갈래가 각각 이 문을 지나야 한다 — 직접
+        //    `vscode.openFolder` 를 부르면 미리보기가 도는 창을 무경고로 뺏는다.
+        "packages/vscode/src/extension.ts",
+        "await openSiteFolder(",
+        "폴더를 여는 길이 미리보기·미저장 편집 보호를 건너뛴다 — 파일 → 폴더 열기에 없는 그 보호가 이 문의 값어치 절반이다",
+        5,
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "say.publishConfirm(tenant, dir, currentFolderBinding())",
+        "발행 확인이 소속을 안 봐 늘 일상 갈래가 되고(반사가 삼킨다) 「이 폴더」의 지시대상도 잃는다",
+    ],
+    [
         // ⚠ **맨몸 `executeCommand` 로 돌아가면 고른 사이트가 그 자리에서 버려진다.** 형제 `fetch`
         //    갈래는 `openSite(pinned)` 로 들고 가는데 zip 갈래만 안 들고 가던 것이 이 결함이었다.
         "packages/vscode/src/extension.ts",

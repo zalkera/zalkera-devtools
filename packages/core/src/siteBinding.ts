@@ -231,6 +231,30 @@ export function decidePickedFolder(binding: string | null, chosen: string): Pick
     return binding === chosen ? {kind: "open"} : {kind: "refuse", bound: binding};
 }
 
+/** 「작업 폴더 변경」이 무엇을 보여 줄 것인가. */
+export type ChangeFolderPlan =
+    /** 확증된 로컬본이 있고 지금 폴더가 아니다 — 그것부터 내고, 직접 고르는 길을 함께 둔다. */
+    | {kind: "offer"; dir: string}
+    /** 낼 것이 없다 — 고르는 화면을 건너뛰고 곧장 폴더 대화상자로 간다(한 단계 덜). */
+    | {kind: "pick"};
+
+/**
+ * ⚠ **이 문은 아무것도 적지 않는다.** 창만 옮긴다 — 소속을 **바꾸는** 동사는 「사이트에 연결」
+ *   하나로 남는다([decidePickedFolder] 가 세운 규율). 고른 폴더가 남의 사이트 것이어도 막지
+ *   않는다: 도착한 창의 어긋남 표면(상태바 경고·「이 폴더의 사이트로 돌아가기」)이 받고,
+ *   최종 방어선은 발행 확인이다. 여기에 사전 게이트를 달면 「모르는 것으로는 막지 않는다」와
+ *   어긋나고, 달 필요도 없다.
+ *
+ * @param confirmedDir 확증까지 통과한 그 사이트의 로컬본(`confirmedFolderFor`). 없으면 `null`.
+ */
+export function changeFolderPlan(input: {openDir: string | null; confirmedDir: string | null}): ChangeFolderPlan {
+    // 지금 열려 있는 그 폴더를 다시 제안하지 않는다 — 눌러도 아무 일이 없는 죽은 항목이 된다.
+    if (input.confirmedDir !== null && input.confirmedDir !== input.openDir) {
+        return {kind: "offer", dir: input.confirmedDir};
+    }
+    return {kind: "pick"};
+}
+
 /** 받기·zip 풀기가 **어디로** 갈지의 첫 제안. */
 export type FetchTargetPlan =
     /** 지금 열어 둔 빈 폴더 — 사람이 이미 고른 자리다. */

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  changeFolderPlan,
   decideFetchTargetPlan,
   decideImportBinding,
   decidePickedFolder,
@@ -336,4 +337,18 @@ test("linkedTenantOf 는 판독 결과를 종전 계약으로 좁힌다 — 판�
     assert.strictEqual(linkedTenantOf({kind: "tenant", tenant: "fin-01"}), "fin-01");
     assert.strictEqual(linkedTenantOf({kind: "absent"}), null);
     assert.strictEqual(linkedTenantOf({kind: "unreadable"}), null);
+});
+
+// ── 작업 폴더 변경 ──────────────────────────────────────────────────────────
+
+test("확증된 로컬본이 있으면 그것부터 낸다", () => {
+    assert.deepStrictEqual(changeFolderPlan({openDir: "/a", confirmedDir: "/b"}), {kind: "offer", dir: "/b"});
+});
+
+test("확증이 없으면 고르는 화면을 건너뛴다 — 한 단계 덜", () => {
+    assert.strictEqual(changeFolderPlan({openDir: "/a", confirmedDir: null}).kind, "pick");
+});
+
+test("이미 그 폴더를 열어 뒀으면 제안하지 않는다 — 눌러도 아무 일이 없는 항목이다", () => {
+    assert.strictEqual(changeFolderPlan({openDir: "/b", confirmedDir: "/b"}).kind, "pick");
 });

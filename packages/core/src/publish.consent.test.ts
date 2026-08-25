@@ -9,7 +9,7 @@
  *
  * 재현: `npm test -w @zalkera/devtools-core`
  */
-import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, notStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
 import { ZalkeraApi } from "./api.ts";
 import { DevtoolsError } from "./errors.ts";
@@ -17,6 +17,7 @@ import { publish } from "./publish.ts";
 import { tempDir } from "./testing/tempDir.ts";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { captureTenant, say } from "./tenantScope.ts";
 
 /** 올릴 것이 있는 최소 프로젝트. */
 async function project(): Promise<string> {
@@ -163,4 +164,35 @@ test("동의로 못 넘어가는 거절에는 묻지 않는다", async () => {
   );
   strictEqual(asked, 0, "동의로 못 넘어가는 거절에 물었다");
   strictEqual(error?.code, "SERVER_REJECTED");
+});
+
+
+// ── 발행 확인 모달 — 소속 유무로 모양이 갈린다 ─────────────────────────────
+
+/**
+ * ⚠ **문장만 더하면 같은 반사가 삼킨다.** 소속 있는 폴더의 일상 발행과 소속 없는 폴더의 위험
+ *   발행이 같은 모양이면, 매일 누르던 손이 위험한 날에도 그대로 누른다. 그래서 **버튼까지** 갈라
+ *   클릭 자체가 고지된 진술이 되게 한다.
+ */
+test("소속 없는 폴더의 발행은 **버튼까지** 다르다", () => {
+    const 일상 = say.publishConfirm(captureTenant("bix"), "/srv/site", "bix");
+    const 처음 = say.publishConfirm(captureTenant("bix"), "/srv/site", null);
+    notStrictEqual(처음.action, 일상.action, "모양이 같으면 반사가 삼킨다");
+    notStrictEqual(처음.message, 일상.message);
+    match(처음.detail, /연결됩니다/, "무엇이 새로 정해지는지 말하지 않는다");
+});
+
+test("두 갈래 모두 **경로**를 싣는다 — 모달이 뜨면 사이드바는 안 보인다", () => {
+    for (const binding of ["bix", null]) {
+        const ask = say.publishConfirm(captureTenant("bix"), "/srv/fin-01-v7", binding);
+        ok(
+            ask.detail.startsWith("/srv/fin-01-v7"),
+            `「이 폴더」의 지시대상이 없다(binding=${binding}): ${ask.detail}`,
+        );
+    }
+});
+
+test("경로를 줄이지 않는다 — 모달 본문은 잘리지 않고 전체가 요점이다", () => {
+    const long = "/home/jonghwa/projects/zalkera/customers/fin-01-v7-really-long";
+    ok(say.publishConfirm(captureTenant("bix"), long, "bix").detail.includes(long));
 });

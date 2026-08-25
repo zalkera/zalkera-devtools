@@ -58,6 +58,11 @@ export function captureTenant(tenant: string): CapturedTenant {
  */
 const shown = (tenant: CapturedTenant | string): string => plainNotice(tenant, 64);
 
+/** 발행이 낳는 결과 두 줄. **갈래 둘이 나눠 쓴다** — 사본으로 두면 한쪽만 고쳐진다. */
+const PUBLISH_OUTCOME =
+    "올리면 방문자가 보는 사이트가 이 소스로 바뀝니다.\n" +
+    "이전에 올리신 판은 「버전 전환」에 남습니다.";
+
 export const say = {
     /**
      * 미리보기가 도는 사이 폴더가 다른 사이트로 재연결됐다. **다시 세우지 않고 멈춘다** —
@@ -222,12 +227,36 @@ export const say = {
      * 끝나는 순간이다. 그러니 이 모달이 **마지막 확인 지점**이고, 여기서 "안 바뀐다"고 말하면
      * 사람은 읽지 않고 넘긴 뒤 미검수 소스를 손님에게 보낸다.
      */
-    publishConfirm(tenant: CapturedTenant): { message: string; detail: string; action: string } {
+    /**
+     * ⚠ **모양이 갈린다 — 문장만 더하지 않는다.** 소속 있는 폴더의 일상 발행과 소속 없는 폴더의
+     *   위험 발행이 같은 모양이면, 매일 누르던 반사가 위험한 날에도 그대로 눌린다. 그래서
+     *   `binding === null` 갈래는 **버튼까지** 다르다 — 클릭 자체가 고지된 진술이 되게 한다
+     *   (`provenanceNotice` 가 세운 형태). 이 갈래는 **폴더당 한 번뿐**이다: 발행이 성공하면
+     *   표식이 소속을 결정화하므로 다음부터는 일상 갈래로 돌아온다.
+     *
+     * ⚠ **`detail` 첫 줄에 경로를 싣는다.** 이 모달은 며칠 전에 연 폴더에서 눌릴 수 있고, 뜨는
+     *   순간 사이드바는 안 보인다 — 마지막 확인 지점은 **자족**해야 한다. `message` 의 「이 폴더」가
+     *   가리키는 것이 바로 아래 선다. 형제 「zip 으로 교체」 확인이 이미 같은 형태다.
+     *   **축약하지 않는다** — 모달 본문은 잘리지 않고 줄바꿈되며, 여기서는 전체가 요점이다.
+     */
+    publishConfirm(
+        tenant: CapturedTenant,
+        dir: string,
+        binding: string | null,
+    ): { message: string; detail: string; action: string } {
+        // ⚠ **중간 변수를 템플릿에 보간하지 않는다.** 소독 검사는 문면이 아니라 **구문**으로 보므로
+        //    `${where}` 같은 이름은 통과시킬 근거가 없다 — 이어붙이기로 두면 소독을 지난 조각
+        //    (`ours(dir)`)만 템플릿에 남는다. 공용 두 줄은 상수 하나로 둔다(사본이 갈리지 않게).
+        if (binding === null) {
+            return {
+                message: `이 폴더는 아직 어느 사이트에도 연결되어 있지 않습니다 — 「${shown(tenant)}」 사이트로 올립니다.`,
+                detail: `${ours(dir)}\n\n` + PUBLISH_OUTCOME + "\n올리면 이 폴더가 그 사이트에 연결됩니다.",
+                action: "이 사이트로 올리고 연결",
+            };
+        }
         return {
             message: `「${shown(tenant)}」 사이트를 지금 이 폴더의 소스로 바꿉니다.`,
-            detail:
-                "올리면 방문자가 보는 사이트가 이 소스로 바뀝니다.\n" +
-                "이전에 올리신 판은 「버전 전환」에 남습니다.",
+            detail: `${ours(dir)}\n\n` + PUBLISH_OUTCOME,
             action: "올리고 게시",
         };
     },
