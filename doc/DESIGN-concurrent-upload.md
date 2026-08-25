@@ -48,14 +48,18 @@
   (올린 판) — `packages/core/src/localMark.ts`. `LinkedMark` 에는 판이 없다 — 주석이 「판 주장을
   하지 않는다」고 적어 뒀다.
   재현: `grep -n "revisionNo" packages/core/src/localMark.ts`
-- 서버는 기반을 **안 받는다**: `SiteArchiveConfirmRequest` 는 `{storageKey,
-  discardPendingChanges}` 뿐이다(backend 레포
+- 서버는 기반을 **받는다**(§4.1 구현됨·미배포): `SiteArchiveConfirmRequest` 가
+  `{storageKey, discardPendingChanges, baseRevisionNo}` 다(backend 레포
   `apps/inbound-client-api/src/main/kotlin/kr/oneque/app/tenantrepo/admin/request/SiteArchiveConfirmRequest.kt`).
+  선언은 **선택**이고 `null` 은 현행 그대로 지난다.
+- 확장은 아직 **안 보낸다**: `api.confirmArchive(storageKey, discard)` — §4.3 이 남은 몫이고,
+  배포 순서가 「백엔드 먼저」라 이 순서가 맞다.
+  재현: `grep -n "confirmArchive" packages/core/src/api.ts`
 - 계보는 기반이 아니다: `SiteOnboardingPipeline` 의 `parentRevisionId =
   previousActiveRevisionId` — 「내가 편집한 판」이 아니라 「내가 올릴 때 켜져 있던 판」이다.
-- 올리기 문(확장): `publishCommand` → core `publish()` → `api.confirmArchive(storageKey,
-  discard)` → `POST /api/partner/site-archive/confirm`.
-  재현: `grep -n "confirmArchive" packages/core/src/api.ts packages/core/src/publish.ts`
+- 올리기 문(확장): `publishCommand` → core `publish()` → `api.confirmArchive(...)` →
+  `POST /api/partner/site-archive/confirm`.
+  재현: `grep -n "confirmArchive" packages/core/src/publish.ts`
 - 포장기가 `.zalkera/source.json` 을 zip 에서 빼므로, 콘솔로 올라오는 zip 은 스스로도 기반을
   모른다.
   재현: `grep -n "EXCLUDED_PATHS" packages/core/src/zip.ts`
