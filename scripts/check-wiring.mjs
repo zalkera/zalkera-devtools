@@ -14,7 +14,7 @@
  *   무력화해도 이 검사기가 초록이었다. 그래서 목록의 넷째 칸이 **기대 횟수**다(생략하면 1).
  *
  * ■ **래퍼 안쪽도 목록에 적는다**
- *   등록부(`register(..., () => withReceiveGuard(f))`)만 고정하면 그 래퍼의 본문을 비워도 안 걸린다.
+ *   호출부(`await whileExtracting(() => …)`)만 고정하면 그 래퍼의 본문을 비워도 안 걸린다.
  *   가드가 실제로 서는 줄을 따로 적는다.
  *
  * ■ 왜 AST 가 아니라 문면인가
@@ -233,8 +233,8 @@ const WIRES = [
     ],
     [
         "packages/vscode/src/extension.ts",
-        "await withReceiveGuard(() => openSite(pinned))",
-        "제안 흐름의 받기가 겹쳐 돌거나, 라이브 사이트를 읽어 엉뚱한 사이트의 소스를 내려받는다",
+        "await openSite(pinned);",
+        "제안 흐름의 받기가 라이브 사이트를 읽어 엉뚱한 사이트의 소스를 내려받는다(겹침은 `whileExtracting` 이 막는다)",
     ],
     [
         "packages/core/src/dev.ts",
@@ -242,9 +242,22 @@ const WIRES = [
         "Node 없는 컴퓨터에서 미리보기 첫 화면이 500 으로 돌아간다(Turbopack 이 PATH 에서 node 를 못 찾는다)",
     ],
     [
+        // ⚠ **등록부가 아니라 «푸는 구간»을 센다.** 진입점에서 잡던 시절, 답하지 않은 알림·파일
+        //    대화상자 하나가 가드를 영영 붙들어 형제 명령 둘이 창이 죽을 때까지 막혔다(실사용
+        //    신고). 지금은 셋이 각자 해제 직전에 잡으므로 **횟수가 셋**이다 — 하나만 세면 나머지
+        //    둘을 벗겨도 초록이 된다.
         "packages/vscode/src/extension.ts",
-        'register("zalkera.site.open", () => withReceiveGuard(openSite))',
-        "소스 받기가 겹쳐 돌아 두 꾸러미가 같은 폴더에 섞이고, 한쪽 롤백이 다른 쪽 파일을 지운다",
+        "await whileExtracting(() =>",
+        "소스 받기·zip 시작·zip 교체가 겹쳐 돌아 두 꾸러미가 같은 폴더에 섞이고, 한쪽 롤백이 다른 쪽 파일을 지운다",
+        3,
+    ],
+    [
+        // ⚠ **효과를 센다.** 가드를 부르고도 [BUSY] 를 무시하면, 이미 누가 풀고 있는 폴더에
+        //    두 번째 해제가 그대로 들어간다 — 부르는 줄만 세는 검사는 그것을 못 본다.
+        "packages/vscode/src/extension.ts",
+        "if (result === BUSY) return;",
+        "가드가 「이미 푸는 중」이라고 답해도 그대로 밀고 들어가, 가드가 장식이 된다",
+        3,
     ],
     [
         "packages/vscode/src/extension.ts",
@@ -313,9 +326,9 @@ const WIRES = [
     ],
     [
         "packages/vscode/src/extension.ts",
-        "if ((await receiveGuard.run(run)) === BUSY)",
-        "등록부는 `withReceiveGuard` 를 부르는데 그 **본문**이 가드를 안 지나면 소스 받기가 겹친다 — " +
-            "등록줄만 보는 검사는 래퍼 속을 못 본다(심의 실증: 본문을 `await run()` 으로 갈아도 초록이었다)",
+        "const outcome = await receiveGuard.run(async () => run());",
+        "호출부는 `whileExtracting` 을 부르는데 그 **본문**이 가드를 안 지나면 소스 받기가 겹친다 — " +
+            "호출줄만 보는 검사는 래퍼 속을 못 본다(심의 실증: 본문을 `await run()` 으로 갈아도 초록이었다)",
     ],
     [
         "packages/vscode/src/extension.ts",
@@ -443,6 +456,16 @@ const BANS = [
         "packages/core/src/*.test.ts",
         /\btmpdir\s*\(\s*\)/,
         "`tempDir()` — `tmpdir()` 바로 아래에 쓴 것은 회수 대상이 아니다",
+    ],
+    [
+        // ⚠ **이 형태가 실제로 난 사고다.** 진입점에서 받기 가드를 잡으면 로그인·폴더 고르기·
+        //    완료 알림까지 덮인다. VS Code 알림은 단추가 달리면 저절로 안 사라지고 파일
+        //    대화상자는 창 뒤에 남으므로, 답하지 않은 물음 하나가 가드를 영영 붙든다 —
+        //    실수로 누른 「소스 다운로드」 하나에 「zip 으로 시작」·「zip 으로 교체」가 창이
+        //    죽을 때까지 막혔다(실사용 신고). 탈출구는 창 다시 열기뿐이었다.
+        "packages/vscode/src/*.ts",
+        /register\("zalkera\.[^"]*",[^\n]*(?:whileExtracting|[Rr]eceiveGuard)/,
+        "`whileExtracting` 을 **아카이브를 푸는 구간**에서만 잡는 형태 — 묻는 자리를 덮으면 답 없는 물음 하나가 형제 명령을 영영 막는다",
     ],
 ];
 

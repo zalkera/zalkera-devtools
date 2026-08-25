@@ -246,13 +246,14 @@ function decideSiteChoice(input: {
   버튼은 리터럴로 둔다(서버 값 소독 문제를 버튼에서 만들지 않는다):
   - 레지스트리가 y 의 폴더를 알고 확증되면 「그 사이트 폴더 열기」 → `vscode.openFolder`(같은 창).
     열린 폴더의 워크스페이스 링크가 창을 y 로 만든다.
-  - 모르면 「그 사이트 소스 다운로드」 → `withReceiveGuard(() => openSite(pinned))`. 받기는 새 빈
-    폴더로만 가므로(`fetchSiteSource`) 지금 폴더는 손대지 않는다.
+  - 모르면 「그 사이트 소스 다운로드」 → `openSite(pinned)`. 받기는 새 빈
+    폴더로만 가므로(`fetchSiteSource`) 지금 폴더는 손대지 않는다. 재진입 가드는 `openSite`
+    안쪽의 해제 구간이 잡는다(`whileExtracting`).
 - **`openSite(pinned?: CapturedTenant)`**: 이 흐름에서는 창의 유효 사이트가 여전히 x 라
   `ensureApiFor()` 의 기본 경로가 x 를 잡는다. 고른 y 를 `captureTenant(picked.code)` 로 잡아
   넘긴다 — `check-capture-tenant.mjs` 의 EXPECTED 를 1→2 로 올리고 커밋에 사유를 적는다
-  (고르는 그 순간이 이 값이 API 에 묶일 값으로 고정되는 순간이다). 등록부의
-  `register("zalkera.site.open", () => withReceiveGuard(openSite))` 줄은 그대로다(배선 검사 유지).
+  (고르는 그 순간이 이 값이 API 에 묶일 값으로 고정되는 순간이다). 등록부는 가드를 안 잡는다 —
+  `register("zalkera.site.open", () => openSite())` 이고, 가드는 해제 구간이 잡는다(배선 검사 유지).
 - **레지스트리**: `globalState` 키 `zalkera.folderRegistry` — `사이트 코드 → 마지막 로컬본 절대경로`.
   - 쓰는 곳: 받기 성공(`openSite` 의 root)·발행 성공·「사이트에 연결」 성공.
   - **정본이 아니다.** 제안 전에 반드시 확증한다: 폴더가 실재하고, 그 폴더의

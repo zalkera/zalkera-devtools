@@ -138,22 +138,41 @@ const previewGuard = createReentrancyGuard();
  * **소스 받기 재진입 가드.** 판정은 `createReentrancyGuard`(core)가 하고 여기서는 **문면만** 정한다 —
  * 확장 안에 판정을 두면 시험도 검사기도 못 닿는다(실측: 조건을 무력화해도 297건 전부 초록이었다).
  *
- * 「소스 다운로드」와 「zip 으로 시작」이 **같은 가드**를 쓴다 — 둘 다 같은 폴더에 아카이브를 푸는
- * 일이라 어느 조합이든 겹치면 안 된다. 겹쳤을 때 나는 일은 core 쪽 KDoc 에 적혀 있다.
+ * 「소스 다운로드」·「zip 으로 시작」·「zip 으로 교체」가 **같은 가드**를 쓴다 — 셋 다 폴더에
+ * 아카이브를 푸는 일이라 어느 조합이든 겹치면 안 된다. 겹쳤을 때 나는 일은 core 쪽 KDoc 에 있다.
  *
  * 취소 단추는 별건이다: `fetchSiteSource`·`fetchPresetZip` 이 아직 취소 신호를 안 받으므로,
  * 단추만 달면 눌러도 아무 일이 없는 **거짓 단추**가 된다.
  */
 const receiveGuard = createReentrancyGuard();
 
-async function withReceiveGuard(run: () => Promise<void>): Promise<void> {
-  // ⚠ 문면을 **상태 중립**으로 둔다. 이 가드는 로그인·사이트 선택까지 감싸므로, 「받는 중입니다」로
-  //   적으면 아직 아무것도 안 받고 있는데 그렇게 말하게 된다.
-  if ((await receiveGuard.run(run)) === BUSY) {
+/**
+ * **푸는 동안만** 가드를 들고 `run` 을 돌린다. 이미 누가 풀고 있으면 [BUSY] — 부르는 쪽이 손을 뗀다.
+ *
+ * ⚠ **사람에게 묻는 자리를 덮지 않는다.** 종전에는 명령 진입점에서 가드를 잡아 로그인·사이트
+ *   선택·받을 폴더 고르기·완료 알림까지 통째로 덮었다. 그런데 VS Code 알림은 **단추가 달리면
+ *   저절로 사라지지 않고** 파일 대화상자는 창 뒤에 남는다 — 답하지 않은 물음 하나가 프라미스를
+ *   영영 붙들어 `finally` 가 돌지 못했다. 그러면 **실수로 누른 「소스 다운로드」 하나가** 창을 새로
+ *   열 때까지 「zip 으로 시작」·「zip 으로 교체」를 막았다(실사용 신고). 탈출구도 없다 — 받기에는
+ *   취소 단추가 없고 「초기화」도 이 가드를 안 푼다.
+ *
+ * 잡는 자리를 **아카이브를 실제로 푸는 구간 하나**로 둔다. 그것이 이 가드가 막으려는 위험의
+ * 전부이기도 하다(`reentrancy.ts`). 그 구간은 진행 알림이 내내 떠 있고 상한도 있어(전송 15분),
+ * 그때만 「푸는 중」이 참이다.
+ */
+async function whileExtracting<T>(run: () => Thenable<T>): Promise<T | typeof BUSY> {
+  // `withProgress` 가 주는 것은 `Thenable` 이라 그대로는 core 의 계약(`Promise`)에 안 맞는다.
+  // **감싸는 자리는 여기 하나다** — 부르는 셋이 각자 감싸면 한쪽만 고쳐진다.
+  const outcome = await receiveGuard.run(async () => run());
+  if (outcome === BUSY) {
+    // ⚠ 문면이 **가리키는 것이 실제로 화면에 있어야 한다.** 이 갈래는 해제가 도는 동안에만
+    //   서므로 진행 알림이 반드시 떠 있다 — 종전 문면(「진행 중인 알림을 확인해 주세요」)은
+    //   가드가 묻는 자리까지 덮던 시절 **없는 알림을 가리키는** 말이었다.
     void vscode.window.showInformationMessage(
-      "소스 받기가 이미 진행 중입니다 — 진행 중인 알림을 확인해 주세요.",
+      "다른 소스를 푸는 중입니다 — 진행 알림이 끝나면 다시 눌러 주세요.",
     );
   }
+  return outcome;
 }
 
 /**
@@ -390,15 +409,18 @@ export function activate(context: vscode.ExtensionContext): void {
     register("zalkera.signOut", async () => {
       await signOut();
     }),
-    // ⚠ **파일로 받는 둘은 `withReceiveGuard` 를 안 쓴다.** 그 가드가 막는 것은 «같은 폴더에
-    //    두 아카이브를 동시에 푸는 것»이다(`reentrancy.ts`). 이 둘은 폴더를 안 풀고 고르신 자리에
-    //    파일 하나를 놓으며, 그 쓰기는 `writeOwnFile` 이 임시 파일 + `rename` 으로 원자적으로 한다.
-    //    가드를 달면 15분짜리 소스 받기가 도는 동안 예제 zip 받기가 **이유 없이 거절**된다.
+    // ⚠ **등록부에서는 아무도 가드를 안 잡는다.** 가드가 막는 것은 «같은 폴더에 두 아카이브를
+    //    동시에 푸는 것»이고(`reentrancy.ts`), 그 일은 명령 안쪽 한 구간에서만 일어난다 —
+    //    거기서 `whileExtracting` 이 잡는다. 진입점에서 잡으면 로그인·폴더 고르기·완료 알림까지
+    //    덮여, 답하지 않은 물음 하나가 창이 죽을 때까지 나머지 둘을 막는다.
+    //
+    // ⚠ **파일로 받는 둘은 가드 자체가 없다.** 폴더를 안 풀고 고르신 자리에 파일 하나를 놓으며,
+    //    그 쓰기는 `writeOwnFile` 이 임시 파일 + `rename` 으로 원자적으로 한다.
     register("zalkera.preset.download", downloadPresetZipCommand),
     register("zalkera.site.downloadZip", downloadSourceZipCommand),
-    register("zalkera.site.open", () => withReceiveGuard(openSite)),
-    register("zalkera.site.importZip", () => withReceiveGuard(importZipCommand)),
-    register("zalkera.site.updateZip", () => withReceiveGuard(updateZipCommand)),
+    register("zalkera.site.open", () => openSite()),
+    register("zalkera.site.importZip", importZipCommand),
+    register("zalkera.site.updateZip", updateZipCommand),
     register("zalkera.export", exportZipCommand),
     register("zalkera.site.link", linkFolder),
     register("zalkera.site.useFolder", useFolderSite),
@@ -850,19 +872,24 @@ async function openSite(pinned?: CapturedTenant): Promise<void> {
   const target = await chooseFetchTarget(tenant, choice.revisionNo, openDir);
   if (!target) return;
 
-  const result = await vscode.window.withProgress<FetchSourceResult>(
-    {
-      location: vscode.ProgressLocation.Notification,
-      title: say.fetchProgress(tenant, choice.revisionNo),
-    },
-    () =>
-      fetchSiteSource({
-        api,
-        revisionNo: choice.revisionNo,
-        targetDir: target,
-        onProgress: log,
-      }),
+  // ⚠ **가드는 여기서부터다.** 위의 로그인·판 고르기·받을 자리 묻기는 사람의 답을 기다리는
+  //    구간이라, 덮으면 답 없는 물음 하나가 형제 명령을 영영 막는다(`whileExtracting`).
+  const result = await whileExtracting(() =>
+    vscode.window.withProgress<FetchSourceResult>(
+      {
+        location: vscode.ProgressLocation.Notification,
+        title: say.fetchProgress(tenant, choice.revisionNo),
+      },
+      () =>
+        fetchSiteSource({
+          api,
+          revisionNo: choice.revisionNo,
+          targetDir: target,
+          onProgress: log,
+        }),
+    ),
   );
+  if (result === BUSY) return;
 
   const root = await findProjectRoot(target);
   log(
@@ -1352,10 +1379,15 @@ async function importZipCommand(): Promise<void> {
   const target = await chooseImportTarget();
   if (!target) return;
 
-  const result = await vscode.window.withProgress(
-    {location: vscode.ProgressLocation.Notification, title: "사이트 소스를 푸는 중"},
-    () => importZipInto(zipPath, target),
+  // ⚠ **가드는 여기서부터다** — 형제 받기와 같은 규율이다. zip 고르기·풀 자리 묻기를 덮으면
+  //    답 없는 물음 하나가 창이 죽을 때까지 나머지를 막는다(`whileExtracting`).
+  const result = await whileExtracting(() =>
+    vscode.window.withProgress(
+      {location: vscode.ProgressLocation.Notification, title: "사이트 소스를 푸는 중"},
+      () => importZipInto(zipPath, target),
+    ),
   );
+  if (result === BUSY) return;
 
   log(`파일 ${count(result.fileCount)}개를 풀었습니다: ${target}`);
   if (result.dropped.length > 0) {
@@ -1534,16 +1566,25 @@ async function updateZipCommand(): Promise<void> {
   //    한복판에서 난다 — 되돌리기가 도는 자리지만 애초에 거기까지 안 가는 편이 낫다.
   await stopPreview();
 
-  const result = await vscode.window.withProgress(
-    {location: vscode.ProgressLocation.Notification, title: "사이트 소스를 갈아 끼우는 중"},
-    async () => {
-      let fileCount = 0;
-      const {preserved, kept} = await replaceContents(dir, [SOURCE_MARK_PATH], keep, async () => {
-        ({fileCount} = await extractZip(zip, dir, plan));
-      });
-      return {fileCount, preserved, kept};
-    },
+  // ⚠ **가드는 여기서부터다** — 형제 둘과 같은 규율이다(`whileExtracting`). 확인 창까지 덮으면
+  //    사람이 답을 미룬 그 시간 내내 나머지가 막힌다.
+  //
+  // 여기서 [BUSY] 로 물러나면 **미리보기는 이미 멈춘 뒤다.** 그 순서를 바꾸지 않는다 — 멈추는
+  // 것은 위 주석이 적은 이유로 해제 «앞»이어야 하고, 되돌릴 수 없는 것은 폴더뿐인데 그쪽은
+  // 아무것도 안 건드렸다. 다시 눌러 주시면 된다.
+  const result = await whileExtracting(() =>
+    vscode.window.withProgress(
+      {location: vscode.ProgressLocation.Notification, title: "사이트 소스를 갈아 끼우는 중"},
+      async () => {
+        let fileCount = 0;
+        const {preserved, kept} = await replaceContents(dir, [SOURCE_MARK_PATH], keep, async () => {
+          ({fileCount} = await extractZip(zip, dir, plan));
+        });
+        return {fileCount, preserved, kept};
+      },
+    ),
   );
+  if (result === BUSY) return;
 
   log(`파일 ${count(result.fileCount)}개로 갈아 끼웠습니다: ${dir}`);
   if (plan.dropped.length > 0) {
@@ -2951,7 +2992,8 @@ async function runElsewhere(
       return;
     }
     case "fetch":
-      await withReceiveGuard(() => openSite(pinned));
+      // 가드는 여기서 안 잡는다 — `openSite` 안쪽의 해제 구간이 잡는다(`whileExtracting`).
+      await openSite(pinned);
       return;
     case "pick-folder":
       await openPickedLocalFolder(pinned, picked);
