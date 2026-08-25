@@ -99,7 +99,35 @@ export async function login(config: AuthConfig, store: TokenStore, options: Logi
  * **refresh 실패는 재로그인 요구로 환원한다** — 만료·폐기·발급자 변경을 구분해 봐야 사람이 할 일은
  * 하나(다시 로그인)라서다.
  */
+/**
+ * **갱신은 한 번에 하나만 난다.** 진행 중인 갱신이 있으면 그것을 나눠 쓴다.
+ *
+ * ⚠ **없으면 병렬 호출이 refresh 를 확정적으로 두 번 던진다** — 경합이 아니라 결정론이다:
+ *   같은 틱에 시작한 둘이 **둘 다 낡은 토큰을 읽고 둘 다 갱신한다**(실측: 왕복 2회·보관소 쓰기 2회).
+ *   Keycloak 렘에 **재사용 폐기**가 켜져 있으면 둘째 교환이 실패하고, 이 함수는 실패를
+ *   `store.clear()` + 재로그인 요구로 환원하므로 **이유 없는 강제 재로그인**이 된다.
+ *   창은 좁지 않다 — `REFRESH_SKEW_MS`(20초) 안이면 열려 있고, 편집기를 켜 둔 채 명령을
+ *   누르는 흔한 상황이 곧 그 창이다.
+ *
+ * ⚠ **키는 보관소다.** 창마다 확장 호스트가 따로이므로 이 가드는 **프로세스 안**에서만 산다 —
+ *   창을 둘 열면 여전히 둘이 갱신할 수 있다. 그것까지 막으려면 보관소 잠금이 필요하고 별건이다.
+ */
+const refreshing = new WeakMap<TokenStore, Promise<string>>();
+
 export async function getAccessToken(config: AuthConfig, store: TokenStore): Promise<string> {
+    const inFlight = refreshing.get(store);
+    if (inFlight) return inFlight;
+    const run = refreshToken(config, store);
+    refreshing.set(store, run);
+    try {
+        return await run;
+    } finally {
+        // **반드시 푼다.** 성공 경로에서만 풀면 한 번 실패한 창이 영영 낡은 프라미스를 나눠 준다.
+        refreshing.delete(store);
+    }
+}
+
+async function refreshToken(config: AuthConfig, store: TokenStore): Promise<string> {
     const current = await store.read();
     if (!current) {
         throw new DevtoolsError("NOT_AUTHENTICATED", "로그인이 필요합니다.", "먼저 잘커라에 로그인해 주세요.");

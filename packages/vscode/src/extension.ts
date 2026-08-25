@@ -1846,6 +1846,26 @@ async function updateZipCommand(): Promise<void> {
  *   전환은 **방문자가 보는 화면이 즉시 바뀌는** 동작이다. 잘못 누르면 손님이 다른 화면을 본다.
  *   「새 버전 배포」도 modal 로 묻는다 — 둘 다 배포 사건이라 문의 무게가 같아야 한다.
  */
+/**
+ * 조회 하나에 **화면을 안 붙드는 시한**을 씌운다. 시한을 넘기면 거절한다 — 부르는 쪽이 이미
+ * 「못 읽으면 강하」를 갖고 있으므로 그 자리로 수렴한다.
+ *
+ * ⚠ **이긴 쪽이 정해지면 타이머를 지운다** — 안 지우면 그만큼 살아 있다(형제 `probeFetchable`
+ *   의 KDoc 이 세운 규율).
+ */
+function withProbeDeadline<T>(work: Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`조회가 ${FETCHABLE_PROBE_MS}ms 안에 안 끝났습니다`)),
+      FETCHABLE_PROBE_MS,
+    );
+  });
+  return Promise.race([work, deadline]).finally(() => {
+    if (timer !== undefined) clearTimeout(timer);
+  });
+}
+
 async function switchVersion(): Promise<void> {
   const { api, tenant } = await ensureApiFor();
   // ⚠ **되돌리기 대상은 서버가 답한다** — 화면이 `isActive` 로 지어내면 활성 포인터 없는
@@ -1856,7 +1876,15 @@ async function switchVersion(): Promise<void> {
   //    종전과 같다 — 「모르는 것으로는 막지 않는다」.
   const [revisions, revertTarget] = await Promise.all([
     api.listRevisions(),
-    api.draftState().then(
+    // ⚠ **이 조회가 화면을 붙들지 않게 시한을 건다.** 「못 읽으면 막지 않는다」가 이 자리의
+    //    약속인데, `.then(성공, 실패)` 는 **거절에만** 강하한다 — 응답을 삼키는 프록시·먹통
+    //    게이트웨이는 거절하지 않고 제어 평면 상한까지 매단다. 실측으로, 그러면 「버전 전환」
+    //    목록이 **30초 동안 아무 표시 없이** 안 떴다(성능 심의).
+    //
+    //    형제 `probeFetchable` 이 같은 이유로 같은 상수를 쓴다. 시한에 걸리면 되돌리기 대상이
+    //    목록에 남지만, 그 뒤를 **이 판이 만든 동의 모달**이 받는다 — 오류 경로에서 이미
+    //    받아들인 자세와 같고, 파괴적 결과 앞에 문이 하나 더 있다.
+    withProbeDeadline(api.draftState()).then(
       // ⚠ **응답 몸통과 필드 둘 다 안 믿는다.** `request()` 는 봉투에 `data` 키가 **있는지**만
       //    보므로 `{"data": null}` 이 그대로 통과해 `d === null` 이 된다 — 그러면 여기서 원시
       //    `TypeError` 가 나고, `.then(성공, 실패)` 의 둘째 인자는 **첫째가 던진 것을 안 잡는다.**

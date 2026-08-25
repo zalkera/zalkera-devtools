@@ -246,3 +246,68 @@ test("수신기는 **127.0.0.1 에만** 바인딩한다 — 같은 망의 다른
         await receiver.waitForCode().catch(() => undefined);
     }
 });
+
+/**
+ * ⚠ **경합이 아니라 결정론이었다.** 같은 틱에 시작한 인증 호출 둘은 **둘 다 낡은 토큰을 읽고
+ *   둘 다 갱신**한다 — Keycloak 렘에 재사용 폐기가 켜져 있으면 둘째 교환이 실패하고, 이 함수는
+ *   실패를 `store.clear()` + 재로그인 요구로 환원하므로 **이유 없는 강제 재로그인**이 된다.
+ *   「버전 전환」이 이 레포 최초로 병렬 인증 호출을 세우면서 그 창이 열렸다(성능 심의 실측).
+ */
+async function withStubbedTokenEndpoint<T>(
+    handler: () => Promise<Response>,
+    run: () => Promise<T>,
+): Promise<T> {
+    const real = globalThis.fetch;
+    globalThis.fetch = (async () => handler()) as unknown as typeof fetch;
+    try {
+        return await run();
+    } finally {
+        globalThis.fetch = real;
+    }
+}
+
+const staleTokens = () => ({
+    accessToken: "stale",
+    refreshToken: "r",
+    expiresAt: Date.now() - 1_000,
+    issuer: config.issuer,
+});
+
+test("병렬 호출은 갱신을 한 번만 던진다 — 나눠 쓴다", async () => {
+    const store = new MemoryTokenStore();
+    await store.write(staleTokens());
+    let exchanges = 0;
+    const [a, b] = await withStubbedTokenEndpoint(
+        async () => {
+            exchanges += 1;
+            // 첫 교환이 끝나기 전에 둘째가 들어올 틈을 준다 — 가드가 없으면 여기서 갈린다.
+            await new Promise((r) => setTimeout(r, 5));
+            return new Response(
+                JSON.stringify({ access_token: "fresh", refresh_token: "r2", expires_in: 300 }),
+                { status: 200, headers: { "content-type": "application/json" } },
+            );
+        },
+        () => Promise.all([getAccessToken(config, store), getAccessToken(config, store)]),
+    );
+    strictEqual(a, "fresh");
+    strictEqual(b, "fresh");
+    strictEqual(exchanges, 1, `갱신이 ${exchanges}회 났다 — 재사용 폐기 렘에서 강제 재로그인이 된다`);
+});
+
+test("갱신이 실패해도 가드가 풀린다 — 한 번 실패한 창이 낡은 프라미스에 갇히지 않는다", async () => {
+    const store = new MemoryTokenStore();
+    let exchanges = 0;
+    await withStubbedTokenEndpoint(
+        async () => {
+            exchanges += 1;
+            return new Response("nope", { status: 400 });
+        },
+        async () => {
+            await store.write(staleTokens());
+            await rejects(() => getAccessToken(config, store));
+            await store.write(staleTokens());
+            await rejects(() => getAccessToken(config, store));
+        },
+    );
+    strictEqual(exchanges, 2, "두 번째 시도가 가드에 갇혀 갱신을 안 던졌다");
+});
