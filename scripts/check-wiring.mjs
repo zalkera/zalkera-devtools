@@ -369,7 +369,10 @@ const WIRES = [
         // ⚠ **판정 재료를 못 얻었다고 막지 않는다.** 이 줄이 사라지면 구서버·권한 부족·망 단절이
         //    전환 자체를 막는 회귀가 된다 — 「모르는 것으로는 막지 않는다」.
         "packages/vscode/src/extension.ts",
-        "(d) => d.revertTargetRevisionNo ?? null,",
+        // ⚠ **`typeof` 검사까지 문다.** 이 줄이 지키는 것은 「못 읽으면 막지 않는다」인데,
+        //    응답 몸통이 `null` 이거나 번호가 문자열로 오면 그 약속이 깨진다 — 앵커를 짧게 잡으면
+        //    그 조각이 밖으로 나가고, 오늘 그 형태로 이미 한 번 걸렸다.
+        '(d) => (typeof d?.revertTargetRevisionNo === "number" ? d.revertTargetRevisionNo : null),',
         "되돌리기 대상을 못 읽으면 전환이 통째로 막힌다 — 모르는 것으로 막는 형상",
     ],
     [

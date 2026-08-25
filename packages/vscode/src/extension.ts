@@ -1857,7 +1857,16 @@ async function switchVersion(): Promise<void> {
   const [revisions, revertTarget] = await Promise.all([
     api.listRevisions(),
     api.draftState().then(
-      (d) => d.revertTargetRevisionNo ?? null,
+      // ⚠ **응답 몸통과 필드 둘 다 안 믿는다.** `request()` 는 봉투에 `data` 키가 **있는지**만
+      //    보므로 `{"data": null}` 이 그대로 통과해 `d === null` 이 된다 — 그러면 여기서 원시
+      //    `TypeError` 가 나고, `.then(성공, 실패)` 의 둘째 인자는 **첫째가 던진 것을 안 잡는다.**
+      //    결과는 「버전 전환」이 통째로 막히고 고객이 원시 오류 문면을 보는 것 — 바로 아래
+      //    배선이 「모르는 것으로 막는 형상」이라며 막겠다고 선언한 그 피해다(보안 심의 🟠).
+      //
+      // ⚠ **형도 안 믿는다.** 이 번호와 목록의 번호는 **다른 엔드포인트**에서 온다 — 한쪽이
+      //    문자열로 직렬화되면 `!==` 가 늘 참이 되어 제외 가드가 통째로 무력화된다.
+      //    읽는 자리에서 정규화한다(`count()` 가 세운 잣대와 같다).
+      (d) => (typeof d?.revertTargetRevisionNo === "number" ? d.revertTargetRevisionNo : null),
       (error) => {
         log(`되돌리기 대상을 확인하지 못했습니다 — ${error instanceof Error ? error.message : error}`);
         return null;
