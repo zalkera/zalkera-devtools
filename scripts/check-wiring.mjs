@@ -45,6 +45,12 @@ const WIRES = [
     ],
     [
         "packages/vscode/src/extension.ts",
+        "i < REFLECT_POLL_MAX",
+        "상한이 사라지면 관측이 계속 pending 인 사이트에서 폴링이 **끝나지 않는다** — 종료 조건 둘이 " +
+            "있어도 그 둘에 안 걸리는 상태가 있고, 그때 조회가 창이 닫힐 때까지 나간다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
         'if (state !== "pending") {',
         "종료 조건이 빠지면 관측이 없는 사이트(구 백엔드·박스 미보고·git 레인)에서 폴링이 상한까지 돈다 — " +
             "오지 않을 소식을 기다리는 것이고, 그 사이 조회가 계속 나간다",
