@@ -106,6 +106,10 @@ const NEEDS: Readonly<Record<string, ReadonlyArray<Need>>> = {
     // 「열린 폴더」뿐이고 그 판정은 `linkFolder` 자신이 한다. `site` 를 달면 소스가 없는 창에서
     // 「소스를 먼저 받으세요 → 받기」로 보내는데, 그 받기가 다시 사이트 미선택으로 막힌다.
     "zalkera.site.link": ["signedIn"],
+    // ⚠ **요건이 없다.** 이 문은 창을 옮길 뿐 아무것도 안 적는다 — 로그인도 사이트도 소스도
+    //    필요 없다. 특히 **열린 폴더가 없는 창의 출구**가 이것이라, `site` 를 달면 「폴더가
+    //    없어서 폴더를 못 바꾸는」 고리가 된다.
+    "zalkera.folder.change": [],
     "zalkera.site.useFolder": [],
 };
 

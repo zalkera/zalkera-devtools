@@ -12,14 +12,40 @@
  *   `vscode` 의존이 딸려 와 시험이 다시 못 닿는다.
  */
 
+import {displayPath} from "./displayPath.ts";
+import {ours, plainNotice} from "./notice.ts";
+
 export interface SidebarState {
     signedIn: boolean;
     tenant: string;
     site: string | null;
     previewUrl: string | null;
     keyExpiresAt: string | null;
-    /** 열린 폴더가 속한 사이트. 모르면 `null` — 그때는 아무 말도 하지 않는다. */
+    /**
+     * 열린 폴더가 속한 사이트. 모르면 `null`.
+     *
+     * ⚠ **모른다고 아무 말도 안 하지는 않는다.** 종전 주석이 그렇게 적혀 있었는데, 소속 없는
+     *   폴더가 전역 잔값을 물려받아 **화면이 남의 사이트를 건강하게 단언하던** 것이 실사용
+     *   신고로 왔다. 지금은 그 칸에서 **예고형 한 줄**을 낸다 — 막지도, 나무라지도 않고
+     *   「처음 올리실 때 정해집니다」라는 사실만 말한다(배송 문서가 이미 그렇게 약속했다).
+     */
     folderTenant: string | null;
+    /**
+     * 지금 작업 폴더의 경로. 열린 폴더가 없으면 `null`.
+     *
+     * ⚠ **이 값이 「이 폴더」의 지시대상이다.** 배송 문면 열두 자리가 「이 폴더」라고 말하는데
+     *   화면 어디에도 그 폴더가 무엇인지 없었다 — 「사이트에 연결」 툴팁부터 발행 확인 모달까지.
+     *   그리는 자리는 **묶음 머리**여야 한다(접어도 보인다).
+     */
+    folderPath: string | null;
+    /**
+     * 홈 폴더. 주면 그 아래 경로를 `~` 로 접는다 — **머리를 접는 것보다 짧고 안 잃는다**
+     * (`/home/x/projects/…` 50자 → `~/projects/…` 38자, 접기 자체가 불필요해진다).
+     *
+     * ⚠ **판정이 스스로 읽지 않는다.** 이 값은 기계마다 다르므로 판정 안에서 읽으면 시험이
+     *   기계에 따라 갈린다. 확장이 `node:os` 의 `homedir()` 로 넘긴다.
+     */
+    home?: string | null;
 }
 
 /**
@@ -110,7 +136,17 @@ export function sidebarPlan(state: SidebarState): PlanGroup[] {
         ];
     }
 
-    const {tenant, site, previewUrl, keyExpiresAt, folderTenant} = state;
+    const {tenant, site, previewUrl, keyExpiresAt, folderTenant, folderPath, home} = state;
+    // 화면에 적을 경로. 홈은 **확장이 넘긴다** — 기계마다 다른 값을 판정이 스스로 읽으면 시험이 갈린다.
+    // ⚠ **「없음」을 총체적으로 받는다.** 타입은 `string | null` 이지만 이 판정은 JS 에서도
+    //    불린다(라벨 검사기가 상태를 손으로 짜서 넘긴다) — `undefined` 한 칸에 터지면 그 검사기가
+    //    옛 코드를 검사하는 것보다 나쁘게, 아예 안 돈다. 실제로 그렇게 터졌다.
+    // ⚠ **소독을 먼저, 축약을 나중에.** 툴팁만 소독하고 이 자리를 빼먹었었다 — 그런데 이쪽이
+    //    **상시 보이는** 자리다(툴팁은 올려야 보인다). 검사기는 템플릿 보간만 보므로 이 **대입**을
+    //    못 잡는다(성능 축이 보안으로 넘긴 지적) — 그래서 사람이 여기 적어 둔다.
+    const folderShown = folderPath ? displayPath(plainNotice(folderPath, 512), home) : null;
+    // 「소스 폴더인데 그 폴더가 어느 사이트 것인지 모른다」 — 발행 모달·상태바와 **같은 술어**다.
+    const undeclared = site !== null && folderTenant === null && tenant !== "";
     // 어긋난 폴더는 **화면에서도** 어긋나 보여야 한다. 게이트가 누를 때 막는 것만으로는,
     // 누르기 전까지 이 창이 건강해 보인다.
     const mismatched = folderTenant !== null && tenant !== "" && site !== null && folderTenant !== tenant;
@@ -136,7 +172,8 @@ export function sidebarPlan(state: SidebarState): PlanGroup[] {
     {
         const making: PlanItem[] = [
             previewUrl
-                ? live(`미리보기 열기 — ${previewUrl}`, "zalkera.preview.start", "browser", "실행 중")
+                // 우리가 띄운 dev 서버의 주소다 — 서버가 준 값이 아니라 **우리 것**이라 표기만 한다.
+                ? live(`미리보기 열기 — ${ours(previewUrl)}`, "zalkera.preview.start", "browser", "실행 중")
                 : act("미리보기 시작", "zalkera.preview.start", "play", "로컬에서 확인합니다"),
         ];
         if (previewUrl) making.push(act("미리보기 중지", "zalkera.preview.stop", "debug-stop"));
@@ -144,7 +181,9 @@ export function sidebarPlan(state: SidebarState): PlanGroup[] {
         // 종전에는 팔레트에만 있어 비개발자가 찾지 못했다 — "말로 고치기"의 입구인데.
         making.push(act("에이전트 연결(MCP)", "zalkera.agent.connect", "plug", "쓰시는 AI 가 이 사이트를 다루게 합니다"));
         if (keyExpiresAt) {
-            making.push({kind: "info", label: `미리보기 자격증명 만료: ${keyExpiresAt}`, icon: "key"});
+            // ⚠ **서버가 준 값이다**(열쇠 발급 응답의 `expiresAt`) — 검사기를 이 파일까지 넓히니
+            //    이 자리가 무소독인 채 배송되고 있었다(보안 심의가 연 관할의 첫 수확).
+            making.push({kind: "info", label: `미리보기 자격증명 만료: ${plainNotice(keyExpiresAt, 64)}`, icon: "key"});
         }
         groups.push(
             {
@@ -207,10 +246,31 @@ export function sidebarPlan(state: SidebarState): PlanGroup[] {
     //      없는 것은 「갱신이 안 됐다」로 읽힌다(오너 확정).
     groups.push({
         id: "workdir",
+        // ⚠ **경로는 묶음 머리에 둔다.** 항목으로만 두면 묶음을 접은 사람에게 지시대상이 다시
+        //    없어진다 — 사이트 묶음이 같은 자리에 사이트 코드를 두는 것과 같은 이유다.
+        //    긴 경로의 잘림은 `displayPath` 가 **머리를 접고 꼬리를 지켜** 처리한다.
+        description: folderShown ?? "열린 폴더 없음",
         label: "작업 폴더",
         icon: "folder-opened",
-        tooltip: "어느 폴더로 일할지 정합니다 — 「교체」만 지금 폴더를 지웁니다",
+        // 경로 전체는 여기 — VS Code 는 툴팁을 안 자른다. **다만 우리가 512자에서 자른다**
+        // (`plainNotice` 의 상한). 그보다 긴 작업 폴더에서는 묶음 머리(꼬리 보존)와 툴팁(머리
+        // 보존) 어느 쪽도 전체가 아니다 — 흔치 않으나 「안 잘린다」로 적으면 거짓이다.
+        // 기존 약속 문장은 그대로 뒤에 둔다.
+        tooltip:
+            // ⚠ **경로는 소독을 지난다.** 폴더 이름은 남이 정할 수 있고, 이 값이 서던 날
+            //    `notice.ts` 의 「트리 툴팁도 전부 리터럴 문자열」이 거짓이 됐다(보안 심의).
+            //    툴팁이 언젠가 `MarkdownString` 이 되면 그 거짓이 **거짓 안심**이 되므로,
+            //    그날을 기다리지 않고 지금 지난다.
+            (folderPath ? `${plainNotice(folderPath, 512)}\n` : "") +
+            "어느 폴더로 일할지 정합니다 — 「교체」만 지금 폴더를 지웁니다",
         items: [
+            // ⚠ **맨 위다.** 묶음 툴팁 첫 구(「어느 폴더로 일할지 정합니다」)를 그대로 동사화한
+            //    항목이고, 「시작」·「교체」 쌍을 갈라놓지 않는 유일한 삽입 자리다 — 그 둘은
+            //    두 글자 차이라 나란히 보여야 한다.
+            //
+            // ⚠ **이 문은 아무것도 적지 않는다**(`changeFolderPlan`). 소속을 바꾸는 것은
+            //    「사이트에 연결」 하나다 — 툴팁이 그 경계를 말한다.
+            act("작업 폴더 변경", "zalkera.folder.change", "folder-opened", "이 창을 다른 폴더로 옮깁니다 — 연결은 「사이트에 연결」이 바꿉니다"),
             act("zip 으로 시작", "zalkera.site.importZip", "file-zip", "받으신 zip 을 새 빈 폴더에 풉니다"),
             // 「갱신」이 아니라 「교체」다 — 「갱신」은 덧쓰기·병합으로 읽혀 **되돌릴 수 없다는
             // 사실을 숨긴다.** 핵심 함수 이름도 `replaceContents` 다.
@@ -221,6 +281,14 @@ export function sidebarPlan(state: SidebarState): PlanGroup[] {
                 "지금 폴더를 지우고 받으신 zip 으로 바꿉니다. 지금 내용은 사라집니다",
             ),
             act("사이트에 연결", "zalkera.site.link", "link", "이 폴더가 어느 사이트 것인지 적어 둡니다"),
+            // ⚠ **예고형이다.** 이 칸은 밀림 피해자만의 상태가 아니라 **정상 온보딩**의 상태이기도
+            //    하다(예제 팩으로 막 시작한 폴더). 결핍형(「연결되지 않았습니다」)으로 쓰면 정상
+            //    진행 중인 사람에게 「뭔가 빠졌다」로 읽힌다 — 배송 문서가 이미 「처음 올리실 때
+            //    정해집니다」라고 약속해 둔 그 말을 그대로 쓴다.
+            //
+            // ⚠ **사이트 이름을 넣지 않는다.** 이름을 박은 고지는 발행 확인 모달의 일이고,
+            //    여기 이름을 넣으면 그 값을 라이브로 읽고 싶어진다.
+            ...(undeclared ? [{kind: "info" as const, label: "처음 올리실 때 사이트가 정해집니다", icon: "info"}] : []),
         ],
     });
 

@@ -58,6 +58,11 @@ export function captureTenant(tenant: string): CapturedTenant {
  */
 const shown = (tenant: CapturedTenant | string): string => plainNotice(tenant, 64);
 
+/** 발행이 낳는 결과 두 줄. **갈래 둘이 나눠 쓴다** — 사본으로 두면 한쪽만 고쳐진다. */
+const PUBLISH_OUTCOME =
+    "올리면 방문자가 보는 사이트가 이 소스로 바뀝니다.\n" +
+    "이전에 올리신 판은 「버전 전환」에 남습니다.";
+
 export const say = {
     /**
      * 미리보기가 도는 사이 폴더가 다른 사이트로 재연결됐다. **다시 세우지 않고 멈춘다** —
@@ -157,6 +162,29 @@ export const say = {
     alreadyFetchedAt(tenant: CapturedTenant, revisionNo: number, path: string): string {
         return `「${shown(tenant)}」 버전 ${countJosa(revisionNo, "은/는")} 이미 ${ours(path)} 에 받아 두셨습니다.`;
     },
+    /**
+     * **고른 사이트로 시작하는** zip 을 풀 자리. 옆에 만들 폴더를 본문에 적는다.
+     *
+     * ⚠ **맨몸 「zip 으로 시작」에는 이 문장을 쓰지 마라.** 그 문은 로그인만 요구하고 그 zip 이
+     *   어느 사이트 것인지 알 방법이 없어, 사이트 이름을 적으면 **그 zip 이 그 사이트 것이라고
+     *   우리가 말해 주는 셈**이 된다. 이 문장이 서는 자리는 사람이 **방금 사이트를 고른** 흐름
+     *   하나뿐이고, 거기서는 이름이 사람의 선택을 되읽는 것이다.
+     */
+    importTargetSibling(tenant: CapturedTenant, path: string): string {
+        // 안심 문구가 경로 앞이다 — `fetchTargetHere` 와 같은 이유(비-모달은 한 줄로 잘린다).
+        return `지금 폴더는 그대로 둡니다. 「${shown(tenant)}」 로 쓰실 소스를 ${ours(path)} 에 풉니다.`;
+    },
+    /** zip 을 푼 폴더를 **그 사이트에 붙였다**는 사실. 다음에 할 일은 여는 것뿐이다. */
+    importedFor(tenant: CapturedTenant): string {
+        return `「${shown(tenant)}」 사이트 소스를 풀고 그 사이트에 연결해 두었습니다 — 폴더를 열면 바로 이어집니다.`;
+    },
+    /**
+     * zip 의 **출처 표시**가 고른 사이트와 다르다. **막지 않는다** — 표시는 서명 없는 선언이고,
+     * 대행사가 다른 이름으로 내보낸 팩을 쓰는 것이 정상 흐름이다(`judgeUpdate` 와 같은 규율).
+     */
+    importProvenanceMismatch(tenant: CapturedTenant, zipTenant: string): string {
+        return `이 zip 은 「${shown(zipTenant)}」 에서 내보낸 것으로 표시되어 있습니다 — 「${shown(tenant)}」 로 쓰시려는 것이 맞는지 확인해 주세요.`;
+    },
     fetchProgress(tenant: CapturedTenant, revisionNo: number): string {
         return `「${shown(tenant)}」 버전 ${countJosa(revisionNo, "을/를")} 받는 중`;
     },
@@ -199,12 +227,43 @@ export const say = {
      * 끝나는 순간이다. 그러니 이 모달이 **마지막 확인 지점**이고, 여기서 "안 바뀐다"고 말하면
      * 사람은 읽지 않고 넘긴 뒤 미검수 소스를 손님에게 보낸다.
      */
-    publishConfirm(tenant: CapturedTenant): { message: string; detail: string; action: string } {
+    /**
+     * ⚠ **모양이 갈린다 — 문장만 더하지 않는다.** 소속 있는 폴더의 일상 발행과 소속 없는 폴더의
+     *   위험 발행이 같은 모양이면, 매일 누르던 반사가 위험한 날에도 그대로 눌린다. 그래서
+     *   `binding === null` 갈래는 **버튼까지** 다르다 — 클릭 자체가 고지된 진술이 되게 한다
+     *   (`provenanceNotice` 가 세운 형태). 이 갈래는 **폴더당 한 번뿐**이다: 발행이 성공하면
+     *   표식이 소속을 결정화하므로 다음부터는 일상 갈래로 돌아온다.
+     *
+     * ⚠ **`detail` 첫 줄에 경로를 싣는다.** 이 모달은 며칠 전에 연 폴더에서 눌릴 수 있고, 뜨는
+     *   순간 사이드바는 안 보인다 — 마지막 확인 지점은 **자족**해야 한다. `message` 의 「이 폴더」가
+     *   가리키는 것이 바로 아래 선다. 형제 「zip 으로 교체」 확인이 이미 같은 형태다.
+     *   **축약하지 않는다** — 모달 본문은 잘리지 않고 줄바꿈되며, 여기서는 전체가 요점이다.
+     *
+     * ⚠ **경로도 소독을 지난다.** 폴더 이름은 **남이 정할 수 있다**(대행사가 보낸 zip 을 푼 폴더·
+     *   git clone 한 레포). 개행이 든 이름 하나면 뒤의 경고 줄을 **복제해 액자에 가두고**
+     *   「이전 화면의 잔여 표시입니다」로 무력화할 수 있다(보안 심의가 실측 재현). `ours` 는
+     *   항등 함수라 그것을 못 막는다 — 형제 모달 둘(`discardPendingConfirm`·`draftBlocked`)이
+     *   이미 **모달 `detail` 이라는 이유로** `plainNotice` 를 지나는데 이 자리만 빠져 있었다.
+     *   상한은 `MAX_CAP` 이라 정상 경로는 글자 그대로 남는다(축약과 충돌하지 않는다).
+     */
+    publishConfirm(
+        tenant: CapturedTenant,
+        dir: string,
+        binding: string | null,
+    ): { message: string; detail: string; action: string } {
+        // ⚠ **중간 변수를 템플릿에 보간하지 않는다.** 소독 검사는 문면이 아니라 **구문**으로 보므로
+        //    `${where}` 같은 이름은 통과시킬 근거가 없다 — 이어붙이기로 두면 **소독 대상이
+        //    소독을 지난 조각(`plainNotice(dir, …)`)만 템플릿에 남는다. 공용 두 줄은 상수 하나로 둔다(사본이 갈리지 않게).
+        if (binding === null) {
+            return {
+                message: `이 폴더는 아직 어느 사이트에도 연결되어 있지 않습니다 — 「${shown(tenant)}」 사이트로 올립니다.`,
+                detail: `${plainNotice(dir, 512)}\n\n` + PUBLISH_OUTCOME + "\n올리면 이 폴더가 그 사이트에 연결됩니다.",
+                action: "이 사이트로 올리고 연결",
+            };
+        }
         return {
             message: `「${shown(tenant)}」 사이트를 지금 이 폴더의 소스로 바꿉니다.`,
-            detail:
-                "올리면 방문자가 보는 사이트가 이 소스로 바뀝니다.\n" +
-                "이전에 올리신 판은 「버전 전환」에 남습니다.",
+            detail: `${plainNotice(dir, 512)}\n\n` + PUBLISH_OUTCOME,
             action: "올리고 게시",
         };
     },

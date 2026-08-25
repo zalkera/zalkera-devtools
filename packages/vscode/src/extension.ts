@@ -66,6 +66,11 @@ import {
   snapshotEntries,
   readZipFile,
   folderBinding,
+  changeFolderPlan,
+  linkedTenantOf,
+  decideImportBinding,
+  type WorkspaceLink,
+  type ImportBinding,
   decideTenantScope,
   type TenantScope,
   decideSiteChoice,
@@ -138,22 +143,41 @@ const previewGuard = createReentrancyGuard();
  * **소스 받기 재진입 가드.** 판정은 `createReentrancyGuard`(core)가 하고 여기서는 **문면만** 정한다 —
  * 확장 안에 판정을 두면 시험도 검사기도 못 닿는다(실측: 조건을 무력화해도 297건 전부 초록이었다).
  *
- * 「소스 다운로드」와 「zip 으로 시작」이 **같은 가드**를 쓴다 — 둘 다 같은 폴더에 아카이브를 푸는
- * 일이라 어느 조합이든 겹치면 안 된다. 겹쳤을 때 나는 일은 core 쪽 KDoc 에 적혀 있다.
+ * 「소스 다운로드」·「zip 으로 시작」·「zip 으로 교체」가 **같은 가드**를 쓴다 — 셋 다 폴더에
+ * 아카이브를 푸는 일이라 어느 조합이든 겹치면 안 된다. 겹쳤을 때 나는 일은 core 쪽 KDoc 에 있다.
  *
  * 취소 단추는 별건이다: `fetchSiteSource`·`fetchPresetZip` 이 아직 취소 신호를 안 받으므로,
  * 단추만 달면 눌러도 아무 일이 없는 **거짓 단추**가 된다.
  */
 const receiveGuard = createReentrancyGuard();
 
-async function withReceiveGuard(run: () => Promise<void>): Promise<void> {
-  // ⚠ 문면을 **상태 중립**으로 둔다. 이 가드는 로그인·사이트 선택까지 감싸므로, 「받는 중입니다」로
-  //   적으면 아직 아무것도 안 받고 있는데 그렇게 말하게 된다.
-  if ((await receiveGuard.run(run)) === BUSY) {
+/**
+ * **푸는 동안만** 가드를 들고 `run` 을 돌린다. 이미 누가 풀고 있으면 [BUSY] — 부르는 쪽이 손을 뗀다.
+ *
+ * ⚠ **사람에게 묻는 자리를 덮지 않는다.** 종전에는 명령 진입점에서 가드를 잡아 로그인·사이트
+ *   선택·받을 폴더 고르기·완료 알림까지 통째로 덮었다. 그런데 VS Code 알림은 **단추가 달리면
+ *   저절로 사라지지 않고** 파일 대화상자는 창 뒤에 남는다 — 답하지 않은 물음 하나가 프라미스를
+ *   영영 붙들어 `finally` 가 돌지 못했다. 그러면 **실수로 누른 「소스 다운로드」 하나가** 창을 새로
+ *   열 때까지 「zip 으로 시작」·「zip 으로 교체」를 막았다(실사용 신고). 탈출구도 없다 — 받기에는
+ *   취소 단추가 없고 「초기화」도 이 가드를 안 푼다.
+ *
+ * 잡는 자리를 **아카이브를 실제로 푸는 구간 하나**로 둔다. 그것이 이 가드가 막으려는 위험의
+ * 전부이기도 하다(`reentrancy.ts`). 그 구간은 진행 알림이 내내 떠 있고 상한도 있어(전송 15분),
+ * 그때만 「푸는 중」이 참이다.
+ */
+async function whileExtracting<T>(run: () => Thenable<T>): Promise<T | typeof BUSY> {
+  // `withProgress` 가 주는 것은 `Thenable` 이라 그대로는 core 의 계약(`Promise`)에 안 맞는다.
+  // **감싸는 자리는 여기 하나다** — 부르는 셋이 각자 감싸면 한쪽만 고쳐진다.
+  const outcome = await receiveGuard.run(async () => run());
+  if (outcome === BUSY) {
+    // ⚠ 문면이 **가리키는 것이 실제로 화면에 있어야 한다.** 이 갈래는 해제가 도는 동안에만
+    //   서므로 진행 알림이 반드시 떠 있다 — 종전 문면(「진행 중인 알림을 확인해 주세요」)은
+    //   가드가 묻는 자리까지 덮던 시절 **없는 알림을 가리키는** 말이었다.
     void vscode.window.showInformationMessage(
-      "소스 받기가 이미 진행 중입니다 — 진행 중인 알림을 확인해 주세요.",
+      "다른 소스를 푸는 중입니다 — 진행 알림이 끝나면 다시 눌러 주세요.",
     );
   }
+  return outcome;
 }
 
 /**
@@ -244,17 +268,35 @@ function confirmedFolderFor(tenant: string): string | null {
  * 그 폴더가 **자기 `.vscode/settings.json` 에** 적어 둔 사이트. 지금 창의 설정이 아니다 —
  * 다른 폴더를 확증하는 자리라 파일을 직접 읽는다.
  */
-function workspaceLinkAt(dir: string): string | null {
-  const text = readSmallOwnFile(join(dir, ".vscode", "settings.json"));
-  if (text === null) return null;
+/**
+ * **판독은 여기 한 벌이다.** 「없다」와 「못 읽었다」를 갈라 돌려주고, 종전 계약이 필요한 자리는
+ * `linkedTenantOf` 로 좁혀 쓴다 — 판독기가 둘이면 한쪽만 고쳐진다.
+ *
+ * ⚠ **JSONC 를 못 읽는다.** VS Code 는 주석·후행 쉼표가 있는 `settings.json` 을 정상으로 다루는데
+ *   생 `JSON.parse` 는 던진다. 그래서 그 칸이 `unreadable` 이다 — 「없다」로 접으면 소속 있는
+ *   폴더가 소속 없어 보인다(보안 심의 🟠). 왜 그 접힘이 위험한지는 core 쪽 KDoc 에 있다.
+ */
+function workspaceLinkState(dir: string): WorkspaceLink {
+  const path = join(dir, ".vscode", "settings.json");
+  const text = readSmallOwnFile(path);
+  // 파일 자체가 없으면 「없다」, 파일은 있는데 못 읽었으면 「모른다」.
+  if (text === null) {
+    return existsSync(path) ? {kind: "unreadable"} : {kind: "absent"};
+  }
   try {
     const raw: unknown = JSON.parse(text);
-    if (typeof raw !== "object" || raw === null) return null;
+    if (typeof raw !== "object" || raw === null) return {kind: "unreadable"};
     const value = (raw as Record<string, unknown>)["zalkera.tenant"];
-    return typeof value === "string" && value.length > 0 ? value : null;
+    return typeof value === "string" && value.length > 0
+      ? {kind: "tenant", tenant: value}
+      : {kind: "absent"};
   } catch {
-    return null;
+    return {kind: "unreadable"};
   }
+}
+
+function workspaceLinkAt(dir: string): string | null {
+  return linkedTenantOf(workspaceLinkState(dir));
 }
 
 /**
@@ -390,16 +432,20 @@ export function activate(context: vscode.ExtensionContext): void {
     register("zalkera.signOut", async () => {
       await signOut();
     }),
-    // ⚠ **파일로 받는 둘은 `withReceiveGuard` 를 안 쓴다.** 그 가드가 막는 것은 «같은 폴더에
-    //    두 아카이브를 동시에 푸는 것»이다(`reentrancy.ts`). 이 둘은 폴더를 안 풀고 고르신 자리에
-    //    파일 하나를 놓으며, 그 쓰기는 `writeOwnFile` 이 임시 파일 + `rename` 으로 원자적으로 한다.
-    //    가드를 달면 15분짜리 소스 받기가 도는 동안 예제 zip 받기가 **이유 없이 거절**된다.
+    // ⚠ **등록부에서는 아무도 가드를 안 잡는다.** 가드가 막는 것은 «같은 폴더에 두 아카이브를
+    //    동시에 푸는 것»이고(`reentrancy.ts`), 그 일은 명령 안쪽 한 구간에서만 일어난다 —
+    //    거기서 `whileExtracting` 이 잡는다. 진입점에서 잡으면 로그인·폴더 고르기·완료 알림까지
+    //    덮여, 답하지 않은 물음 하나가 창이 죽을 때까지 나머지 둘을 막는다.
+    //
+    // ⚠ **파일로 받는 둘은 가드 자체가 없다.** 폴더를 안 풀고 고르신 자리에 파일 하나를 놓으며,
+    //    그 쓰기는 `writeOwnFile` 이 임시 파일 + `rename` 으로 원자적으로 한다.
     register("zalkera.preset.download", downloadPresetZipCommand),
     register("zalkera.site.downloadZip", downloadSourceZipCommand),
-    register("zalkera.site.open", () => withReceiveGuard(openSite)),
-    register("zalkera.site.importZip", () => withReceiveGuard(importZipCommand)),
-    register("zalkera.site.updateZip", () => withReceiveGuard(updateZipCommand)),
+    register("zalkera.site.open", () => openSite()),
+    register("zalkera.site.importZip", importZipCommand),
+    register("zalkera.site.updateZip", updateZipCommand),
     register("zalkera.export", exportZipCommand),
+    register("zalkera.folder.change", changeFolder),
     register("zalkera.site.link", linkFolder),
     register("zalkera.site.useFolder", useFolderSite),
     register("zalkera.preview.start", startPreviewCommand),
@@ -850,19 +896,24 @@ async function openSite(pinned?: CapturedTenant): Promise<void> {
   const target = await chooseFetchTarget(tenant, choice.revisionNo, openDir);
   if (!target) return;
 
-  const result = await vscode.window.withProgress<FetchSourceResult>(
-    {
-      location: vscode.ProgressLocation.Notification,
-      title: say.fetchProgress(tenant, choice.revisionNo),
-    },
-    () =>
-      fetchSiteSource({
-        api,
-        revisionNo: choice.revisionNo,
-        targetDir: target,
-        onProgress: log,
-      }),
+  // ⚠ **가드는 여기서부터다.** 위의 로그인·판 고르기·받을 자리 묻기는 사람의 답을 기다리는
+  //    구간이라, 덮으면 답 없는 물음 하나가 형제 명령을 영영 막는다(`whileExtracting`).
+  const result = await whileExtracting(() =>
+    vscode.window.withProgress<FetchSourceResult>(
+      {
+        location: vscode.ProgressLocation.Notification,
+        title: say.fetchProgress(tenant, choice.revisionNo),
+      },
+      () =>
+        fetchSiteSource({
+          api,
+          revisionNo: choice.revisionNo,
+          targetDir: target,
+          onProgress: log,
+        }),
+    ),
   );
+  if (result === BUSY) return;
 
   const root = await findProjectRoot(target);
   log(
@@ -1075,6 +1126,65 @@ async function linkFolderToSite(
   log(
     `사이트에 연결을 적지 못했습니다(${done.reason}). 새 폴더를 연 뒤 「사이트에 연결」을 눌러 주세요.`,
   );
+}
+
+/**
+ * 「작업 폴더 변경」 — **창만 옮긴다.**
+ *
+ * ⚠ **아무것도 적지 않는다.** 링크도 표식도 전역 사이트도 쓰지 않는다 — 소속을 **바꾸는** 동사는
+ *   「사이트에 연결」 하나로 남긴다(`decidePickedFolder` 가 세운 규율). 고르신 폴더가 남의 사이트
+ *   것이어도 막지 않는다: 도착한 창의 어긋남 표면(상태바 경고·「이 폴더의 사이트로 돌아가기」)이
+ *   받고, 마지막 방어선은 발행 확인이다. 사전 게이트를 달면 「모르는 것으로는 막지 않는다」와
+ *   어긋난다.
+ *
+ * ⚠ **`openSiteFolder` 를 지난다.** 직접 여는 것과 다른 점은 미리보기가 돌거나 저장 안 된 편집이
+ *   있을 때 **새 창**을 기본으로 준다는 것이다 — 파일 → 폴더 열기에는 없는 보호이고, 이 문이
+ *   존재할 값어치의 절반이 거기 있다.
+ */
+async function changeFolder(): Promise<void> {
+  const plan = changeFolderPlan({
+    openDir: workspaceDir() ?? null,
+    // 확증(실재 + 소속 일치)을 지난 것만 제안한다 — 기억만 믿고 열어 주는 것이 이 설계가 막는 사고다.
+    confirmedDir: confirmedFolderFor(tenantCode()),
+  });
+  if (plan.kind === "offer") {
+    const OPEN = "폴더 열기";
+    const picked = await vscode.window.showQuickPick(
+      [
+        {label: OPEN, detail: plainNotice(plan.dir, 120)},
+        {label: "다른 폴더 고르기…", detail: "이 창을 그 폴더로 옮깁니다 — 소속은 바뀌지 않습니다"},
+      ],
+      {title: "작업 폴더 변경"},
+    );
+    if (picked === undefined) return;
+    if (picked.label === OPEN) {
+      // ⚠ **누른 시점에 다시 확증한다** — 목록을 만든 뒤 폴더가 사라지거나 다른 사이트를 담게
+      //    됐을 수 있고, 그때 여는 것이 이 규율이 막는 사고다(`runElsewhere` 와 같은 잣대).
+      const still = confirmedFolderFor(tenantCode());
+      // ⚠ **보인 것과 여는 것이 같아야 한다.** `null` 만 보면, 목록을 띄운 사이 다른 창이
+      //    레지스트리를 바꿨을 때 `detail` 에 적힌 것과 **다른 폴더**가 열린다 — 이 축의 주제가
+      //    바로 「보이는 것과 실제가 갈리지 않게」다.
+      if (still === null || still !== plan.dir) {
+        void vscode.window.showInformationMessage(
+          ours("그 폴더를 더는 찾지 못했습니다 — 직접 골라 주세요."),
+        );
+        return;
+      }
+      await openSiteFolder(still);
+      return;
+    }
+  }
+  const chosen = await vscode.window.showOpenDialog({
+    canSelectFolders: true,
+    canSelectFiles: false,
+    canSelectMany: false,
+    openLabel: "이 폴더로 옮기기",
+    defaultUri: workspaceDir() ? vscode.Uri.file(dirname(workspaceDir() as string)) : undefined,
+    title: "작업 폴더 변경",
+  });
+  const dir = chosen?.[0]?.fsPath;
+  if (dir === undefined) return;
+  await openSiteFolder(dir);
 }
 
 /**
@@ -1302,7 +1412,9 @@ async function downloadSourceZipCommand(): Promise<void> {
  * 빈 폴더 **강제**는 여기가 아니라 `importZipInto` 가 실행 시점에 다시 잰다. 제안과 강제를 한
  * 판정으로 합치지 않는다 — 고르고 푸는 사이에 파일이 생길 수 있다.
  */
-async function chooseImportTarget(): Promise<string | undefined> {
+async function chooseImportTarget(
+  pinned?: CapturedTenant,
+): Promise<string | undefined> {
   const openDir = workspaceDir();
   // ⚠ **`siteFolderOpen` 을 먼저 잰다** — 참이면 판정이 `sibling` 을 돌려주며 빈 폴더 판정을
   //    버린다(그 자리에서 `readdir` 을 미리 돌면 매번 버려질 I/O 다).
@@ -1327,6 +1439,34 @@ async function chooseImportTarget(): Promise<string | undefined> {
     if (answer === undefined) return undefined;
     if (answer === HERE) return plan.dir;
   }
+  // ⚠ **사이트를 아는 흐름에서만 옆자리를 제안한다.** 위 `here` 갈래의 주석이 「사이트 이름을
+  //    적지 않는다」고 적은 것은 **맨몸 명령** 얘기다 — 그 문은 zip 이 어느 사이트 것인지 알
+  //    방법이 없다. 여기 `pinned` 는 zip 의 주장이 아니라 **사람이 방금 고른 사이트**라, 이름이
+  //    있어야 어디에 무엇이 생기는지 말할 수 있다. 형제 받기의 옆자리 제안과 같은 규율이고,
+  //    「빈 폴더를 새로 만들어 고르세요」가 비개발자를 멈춰 세우던 그 자리를 없앤다.
+  if (plan.kind === "sibling" && pinned !== undefined && openDir !== undefined) {
+    const free = suggestSiteSibling(openDir, pinned);
+    if (free !== null) {
+      const NEW = "옆에 새 폴더로 풀기";
+      const answer = await vscode.window.showInformationMessage(
+        ours(say.importTargetSibling(pinned, free)),
+        NEW,
+        "다른 폴더 고르기…",
+      );
+      if (answer === undefined) return undefined;
+      if (answer === NEW) {
+        try {
+          // `recursive: false` — 이미 있으면 던진다. **덮어쓰기로 흘러가지 않는다**(받기와 같다).
+          await mkdir(free, {recursive: false});
+          return free;
+        } catch (error) {
+          log(
+            `옆에 폴더를 만들지 못했습니다(${error instanceof Error ? error.message : error}) — 직접 골라 주세요.`,
+          );
+        }
+      }
+    }
+  }
   const picked = await vscode.window.showOpenDialog({
     canSelectFolders: true,
     canSelectFiles: false,
@@ -1337,7 +1477,61 @@ async function chooseImportTarget(): Promise<string | undefined> {
   return picked?.[0]?.fsPath;
 }
 
-async function importZipCommand(): Promise<void> {
+/**
+ * 옆에 만들 폴더 이름을 **사이트 코드**로 짓는다. 받기의 [suggestSibling] 과 갈라 두는 이유는
+ * 이름의 뜻이 다르기 때문이다 — 받기는 판 번호를 알아 `이름-v판` 이고, zip 은 판을 모르므로
+ * 사이트 코드가 유일하게 뜻 있는 이름이다.
+ *
+ * ⚠ 이름은 **서버 값에서 그대로 짓지 않는다** — 사이트 코드는 서버 목록에서 오므로
+ *   `safeFileName` 을 지난 것만 쓴다(형제 팩·zip 저장 이름과 같은 규율).
+ */
+function suggestSiteSibling(
+  openDir: string,
+  tenant: CapturedTenant,
+): string | null {
+  const parent = dirname(openDir);
+  const base = safeFileName(String(tenant), "site");
+  const free = nextAvailableName(base, (name) => existsSync(join(parent, name)));
+  return free === null ? null : join(parent, free);
+}
+
+/**
+ * 푼 폴더를 **고른 사이트에 붙인다** — 받기(`openSite`)가 하는 세 쓰기와 같은 자리다.
+ * 신뢰 근거는 zip 의 주장이 아니라 **사람이 방금 고른 선택**이라, 「zip 의 출처 표시를 소속으로
+ * 승격하지 않는다」는 규율과 충돌하지 않는다.
+ *
+ * ⚠ **소속을 바꾸지 않는다.** 이미 다른 사이트에 붙은 폴더에는 안 쓴다 — 소속을 **바꾸는** 동사는
+ *   「사이트에 연결」 하나로 남긴다(`decidePickedFolder` 가 세운 규율). 빈 폴더 강제가 `.vscode` 를
+ *   통과시키므로(`emptyDir.ts` 의 IGNORED), 링크만 가진 폴더가 실제로 여기까지 온다.
+ *
+ * ⚠ **표식은 `linked` 다**(판 주장 없음). 받기의 `fetched` 는 판 번호·sha 를 주장하는데 zip 은
+ *   그 둘을 모른다 — 모르는 것을 적으면 그 표식이 거짓이 된다.
+ */
+async function bindImportedFolder(
+  target: string,
+  tenant: CapturedTenant,
+  plan: ImportBinding,
+): Promise<boolean> {
+  if (plan.kind === "keep") {
+    log(
+      `고르신 폴더는 이미 ${plainNotice(plan.bound, 64)} 에 연결돼 있어 소속을 바꾸지 않았습니다 — 「사이트에 연결」로 정해 주세요.`,
+    );
+    return false;
+  }
+  if (plan.kind === "unknown") {
+    // 「못 읽었다」는 「없다」가 아니다 — 모르는 폴더를 우리 값으로 덮지 않는다.
+    log(
+      "고르신 폴더의 `.vscode/settings.json` 을 읽지 못해 소속을 적지 않았습니다 — 「사이트에 연결」로 정해 주세요.",
+    );
+    return false;
+  }
+  await markFolderLinked(target, String(tenant));
+  await linkFolderToSite(target, tenant);
+  rememberFolder(String(tenant), target);
+  return true;
+}
+
+async function importZipCommand(pinned?: CapturedTenant): Promise<void> {
   const chosen = await vscode.window.showOpenDialog({
     canSelectFiles: true,
     canSelectFolders: false,
@@ -1349,31 +1543,91 @@ async function importZipCommand(): Promise<void> {
   const zipPath = chosen?.[0]?.fsPath;
   if (!zipPath) return;
 
-  const target = await chooseImportTarget();
+  // ⚠ **읽기·판정은 한 문을 지난다**(`readZipWithPlan`) — 시작과 갱신이 각자 판정을 들면
+  //    한쪽만 고쳐진다. 여기서 미리 읽는 것은 출처 대조를 **풀기 전에** 하기 위해서다.
+  //
+  // ⚠ **읽는 동안 화면이 조용하면 안 된다**(성능 심의 🟡). 이 읽기는 종전에 진행 알림 «안»에
+  //    있었는데 앞으로 나오면서 표시를 잃었다 — 큰 zip 을 느린 매체에서 읽으면 zip 을 고른 뒤
+  //    다음 물음까지 몇 초가 비고, 그 침묵은 멈춘 것으로 읽힌다.
+  //    **상태 표시줄에 낸다**(`Window`) — 전형 zip 은 1초 안에 끝나므로 알림으로 내면 깜박임만
+  //    남는다. 알림 자리는 실제로 오래 도는 해제가 쓴다.
+  const {zip, plan} = await vscode.window.withProgress(
+    {location: vscode.ProgressLocation.Window, title: "zip 을 읽는 중"},
+    () => readZipWithPlan(zipPath),
+  );
+
+  // ⚠ **출처가 다르면 말하고, 막지는 않는다.** 표시는 서명 없는 선언이지 증명이 아니고, 대행사가
+  //    다른 이름으로 내보낸 팩을 쓰는 것이 정상 흐름이다(`judgeUpdate` 와 같은 규율). 다만 이
+  //    흐름은 폴더를 그 사이트에 **붙이므로**, 어긋남을 조용히 넘기면 그 폴더가 남의 소스를 담은
+  //    채 이 사이트 것이라고 주장하게 된다 — 그래서 클릭 자체가 고지된 진술이 되게 한다.
+  if (pinned !== undefined) {
+    const prov = await readProvenance(zip, plan);
+    const zipTenant = prov?.tenant ?? null;
+    if (zipTenant !== null && zipTenant !== String(pinned)) {
+      const GO = "알고 계속";
+      log(`zip 출처 표시(${zipTenant})가 고르신 사이트(${String(pinned)})와 다릅니다.`);
+      const answer = await vscode.window.showWarningMessage(
+        ours(say.importProvenanceMismatch(pinned, zipTenant)),
+        GO,
+      );
+      if (answer !== GO) return;
+    }
+  }
+
+  const target = await chooseImportTarget(pinned);
   if (!target) return;
 
-  const result = await vscode.window.withProgress(
-    {location: vscode.ProgressLocation.Notification, title: "사이트 소스를 푸는 중"},
-    () => importZipInto(zipPath, target),
+  // 붙일지 말지는 **풀기 전 상태**로 정한다. 지금은 `EXCLUDED_PATHS` 가 표식을 계획 단계에서
+  // 떨구므로 zip 이 실어 온 표식이 디스크에 닿지 않지만, 그 목록이 무너져도 소속 판정은
+  // 안 뒤집히게 둔다 — 판정의 재료를 **우리가 아는 시점**에서 뜨는 것이 요점이다.
+  //
+  // ⚠ **판정은 core 가 한다**(`decideImportBinding`). 확장 안 조건문으로 두면 「못 읽었다」를
+  //    「없다」로 접어도 시험이 못 문다 — 실제로 그 접힘이 이 가드를 열어 뒀다(보안 심의 🟠).
+  const bindPlan =
+    pinned === undefined
+      ? null
+      : decideImportBinding(
+          readSourceMarkAt(target),
+          workspaceLinkState(target),
+          String(pinned),
+        );
+
+  // ⚠ **가드는 여기서부터다** — 형제 받기와 같은 규율이다. zip 고르기·풀 자리 묻기를 덮으면
+  //    답 없는 물음 하나가 창이 죽을 때까지 나머지를 막는다(`whileExtracting`).
+  const result = await whileExtracting(() =>
+    vscode.window.withProgress(
+      {location: vscode.ProgressLocation.Notification, title: "사이트 소스를 푸는 중"},
+      () => importZipInto(zip, plan, target),
+    ),
   );
+  if (result === BUSY) return;
 
   log(`파일 ${count(result.fileCount)}개를 풀었습니다: ${target}`);
   if (result.dropped.length > 0) {
     // **무엇이 빠졌는지 말한다.** 조용히 빼면 「보낸 파일이 없다」는 문의가 우리에게 온다.
     log(`정본에 싣지 않는 ${count(result.dropped.length)}개는 빼고 풀었습니다: ${result.dropped.join(", ")}`);
   }
+  // ⓒ 붙이기 — 사이트를 아는 흐름에서만. 사이드바 갱신 **앞**이다: 붙인 결과가 화면에 보여야 한다.
+  const bound =
+    pinned !== undefined && bindPlan !== null && (await bindImportedFolder(target, pinned, bindPlan));
   await refreshSidebar();
 
   // ⚠ **푼 곳이 지금 열린 폴더 자신일 수 있다.** 그때 「폴더 열기」는 이미 열려 있는 것을 다시
   //    여는 죽은 단추이고, 「폴더를 열고」라는 안내도 할 일이 없는 말이 된다.
   if (target === workspaceDir()) {
     void vscode.window.showInformationMessage(
-      ours("사이트 소스를 이 폴더에 풀었습니다. 「사이트에 연결」로 사이트에 붙이면 미리보기·올리기가 됩니다."),
+      bound && pinned !== undefined
+        ? ours(say.importedFor(pinned))
+        : ours("사이트 소스를 이 폴더에 풀었습니다. 「사이트에 연결」로 사이트에 붙이면 미리보기·올리기가 됩니다."),
     );
     return;
   }
+  // ⚠ **붙인 폴더에 「사이트에 연결」을 다시 시키지 않는다.** 그 문장은 할 일이 없는 말이고,
+  //    비개발자는 시키는 대로 하다가 「왜 또 고르지」에서 멈춘다.
   const open = await vscode.window.showInformationMessage(
-    ours("사이트 소스를 풀었습니다. 폴더를 열고 「사이트에 연결」로 사이트에 붙이면 미리보기·올리기가 됩니다."),
+    bound && pinned !== undefined
+      ? ours(say.importedFor(pinned))
+      : ours("사이트 소스를 풀었습니다. 폴더를 열고 「사이트에 연결」로 사이트에 붙이면 미리보기·올리기가 됩니다."),
     "폴더 열기",
   );
   if (open === "폴더 열기") {
@@ -1395,11 +1649,16 @@ async function readZipWithPlan(zipPath: string): Promise<{zip: Buffer; plan: Imp
   return {zip, plan: decideImportPlan(listZipEntries(zip))};
 }
 
+/**
+ * ⚠ **읽은 zip 과 계획을 받는다 — 여기서 다시 읽지 않는다.** 부르는 쪽이 이미 `readZipWithPlan`
+ *   으로 읽고 그 계획으로 출처를 대조했다. 여기서 또 읽으면 **대조한 바이트와 푸는 바이트가
+ *   다를 수 있다**(그 사이 파일이 바뀌면 그렇다) — 고지한 것과 실제가 갈리는 자리가 된다.
+ */
 async function importZipInto(
-  zipPath: string,
+  zip: Buffer,
+  plan: ImportPlan,
   targetDir: string,
 ): Promise<{fileCount: number; dropped: string[]}> {
-  const {zip, plan} = await readZipWithPlan(zipPath);
   // ⚠ **빈 폴더 강제는 해제기 밖이다**(형제 `fetchSiteSource` 와 같은 규율) — 있는 파일을
   //    덮어쓰지 않는다. `meaningfulEntries` 가 편집기·OS 부스러기는 「비어 있음」으로 본다.
   await mkdir(targetDir, {recursive: true});
@@ -1524,7 +1783,12 @@ async function updateZipCommand(): Promise<void> {
     ours("이 폴더의 소스를 고르신 zip 으로 갈아 끼웁니다. 지금 내용은 사라집니다."),
     {
       modal: true,
-      detail: `${provNotice.line}\n\n${dir}\n\n그대로 두는 것: ${keep.length > 0 ? keep.join(" · ") : "없습니다"}`,
+      // ⚠ **셋 다 소독을 지난다.** 보간 셋이 무표기·무소독이었다 — `dir` 과 `keep` 은 **디스크
+      //    이름**이라 남이 정할 수 있고, 개행 하나로 뒷줄(「그대로 두는 것: …」)을 위조할 수
+      //    있다. 형제 발행 모달과 같은 자를 댄다(보안 심의).
+      detail:
+        `${plainNotice(provNotice.line, 512)}\n\n${plainNotice(dir, 512)}\n\n` +
+        `그대로 두는 것: ${keep.length > 0 ? plainNotice(keep.join(" · "), 512) : "없습니다"}`,
     },
     provNotice.action,
   );
@@ -1534,16 +1798,25 @@ async function updateZipCommand(): Promise<void> {
   //    한복판에서 난다 — 되돌리기가 도는 자리지만 애초에 거기까지 안 가는 편이 낫다.
   await stopPreview();
 
-  const result = await vscode.window.withProgress(
-    {location: vscode.ProgressLocation.Notification, title: "사이트 소스를 갈아 끼우는 중"},
-    async () => {
-      let fileCount = 0;
-      const {preserved, kept} = await replaceContents(dir, [SOURCE_MARK_PATH], keep, async () => {
-        ({fileCount} = await extractZip(zip, dir, plan));
-      });
-      return {fileCount, preserved, kept};
-    },
+  // ⚠ **가드는 여기서부터다** — 형제 둘과 같은 규율이다(`whileExtracting`). 확인 창까지 덮으면
+  //    사람이 답을 미룬 그 시간 내내 나머지가 막힌다.
+  //
+  // 여기서 [BUSY] 로 물러나면 **미리보기는 이미 멈춘 뒤다.** 그 순서를 바꾸지 않는다 — 멈추는
+  // 것은 위 주석이 적은 이유로 해제 «앞»이어야 하고, 되돌릴 수 없는 것은 폴더뿐인데 그쪽은
+  // 아무것도 안 건드렸다. 다시 눌러 주시면 된다.
+  const result = await whileExtracting(() =>
+    vscode.window.withProgress(
+      {location: vscode.ProgressLocation.Notification, title: "사이트 소스를 갈아 끼우는 중"},
+      async () => {
+        let fileCount = 0;
+        const {preserved, kept} = await replaceContents(dir, [SOURCE_MARK_PATH], keep, async () => {
+          ({fileCount} = await extractZip(zip, dir, plan));
+        });
+        return {fileCount, preserved, kept};
+      },
+    ),
   );
+  if (result === BUSY) return;
 
   log(`파일 ${count(result.fileCount)}개로 갈아 끼웠습니다: ${dir}`);
   if (plan.dropped.length > 0) {
@@ -2130,7 +2403,10 @@ async function publishCommand(): Promise<void> {
 
   // 문구는 core 가 만든다 — **`tenant` 를 인자로 요구하므로 라이브로 읽을 방법이 없다**(§tenantScope).
   // 오늘 이 자리에서 난 결함이 정확히 "알림이 라이브로 다시 읽는 것"이었다.
-  const ask = say.publishConfirm(tenant);
+  // ⚠ **경로와 소속을 함께 넘긴다.** 경로는 `message` 의 「이 폴더」가 가리키는 것이고(모달이
+  //    뜨면 사이드바는 안 보인다), 소속은 **모양을 가르는 재료**다 — 소속 없는 폴더의 발행은
+  //    다른 모달을 봐야 한다(`say.publishConfirm` 의 KDoc).
+  const ask = say.publishConfirm(tenant, dir, currentFolderBinding());
   const confirm = await vscode.window.showWarningMessage(
     ask.message,
     { modal: true, detail: ask.detail },
@@ -2951,13 +3227,19 @@ async function runElsewhere(
       return;
     }
     case "fetch":
-      await withReceiveGuard(() => openSite(pinned));
+      // 가드는 여기서 안 잡는다 — `openSite` 안쪽의 해제 구간이 잡는다(`whileExtracting`).
+      await openSite(pinned);
       return;
     case "pick-folder":
       await openPickedLocalFolder(pinned, picked);
       return;
     case "import-zip":
-      await vscode.commands.executeCommand("zalkera.site.importZip");
+      // ⚠ **맨몸 명령으로 이탈하지 않는다.** 그 문은 로그인만 요구하고 사이트를 모르므로, 방금
+      //    고르신 사이트가 여기서 버려졌다 — 푼 폴더가 어느 사이트 것인지 아무 데도 안 적혔고
+      //    사람이 「사이트에 연결」로 같은 선택을 한 번 더 해야 했다(형제 `fetch` 갈래는 처음부터
+      //    `pinned` 를 들고 간다). 팔레트의 맨몸 문은 그대로 남는다 — 그 문의 정체성은
+      //    `whyBlocked` 의 `["signedIn"]` 요건이다.
+      await importZipCommand(pinned);
       return;
   }
 }
@@ -3216,6 +3498,12 @@ async function refreshSidebar(): Promise<void> {
     // ⚠ **게이트와 같은 값을 본다**(`announceIfBlocked`). 둘이 다른 기준을 쓰면 사이드바는
     //    건강해 보이는데 누르면 막히는, 이 레포가 이미 한 번 겪은 형상이 된다.
     folderTenant: currentFolderBinding(),
+    // ⚠ **게이트가 보는 그 값 하나에서 나와야 한다**(`workspaceDir()`). 화면이 다른 경로를
+    //    말하면 「이 폴더」의 지시대상이 또 갈린다 — 이 값을 세우는 이유가 바로 그 갈림을 없애는
+    //    것이다.
+    folderPath: dir ?? null,
+    // 기계마다 다른 값이라 판정이 스스로 읽지 않는다 — 여기서 넘긴다(`sidebarPlan` 의 KDoc).
+    home: homedir(),
   });
 }
 

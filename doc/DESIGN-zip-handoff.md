@@ -100,8 +100,14 @@
    재연결 동의 모달은 뜨지 않는다(`needsRelinkConsent` 가 `binding === null` 에서 이미 false).
 7. **「이 폴더 열기」 제안**(형제 입구와 같은 마무리).
 
-재진입은 `withReceiveGuard` 를 형제 둘과 **같이** 쓴다 — 같은 폴더에 아카이브를 푸는 일이라
-어느 조합이든 겹치면 안 된다는 기존 근거 그대로다.
+들여오기에는 두 입구가 있다. **맨몸**(팔레트·사이드바 — 요건 `signedIn` 뿐, 어긋난 창의 탈출구라
+사이트를 모른다)과 **사이트를 아는 흐름**(「사이트 선택」이 낸 고르는 화면). 뒤쪽만 대상 제안·소속
+쓰기·출처 대조를 한다 — 신뢰 근거가 zip 의 주장이 아니라 **사람이 방금 고른 사이트**이기 때문이다.
+
+재진입은 `whileExtracting` 을 형제 둘과 **같이** 쓴다 — 같은 폴더에 아카이브를 푸는 일이라
+어느 조합이든 겹치면 안 된다는 기존 근거 그대로다. 다만 잡는 자리는 **푸는 구간 하나**다:
+가드가 묻는 자리(zip 고르기·풀 자리 확인·완료 알림)를 덮으면, 답 없는 물음 하나가 프라미스를
+붙들어 형제 명령이 창이 죽을 때까지 막힌다.
 
 ### 3.2 순수 판정 `decideImportPlan` — core, 쓰기 전
 
@@ -187,7 +193,7 @@ type ImportPlan =
 | 무결성 | sha256 fail-closed | 없음 — 구조 fail-closed + 무주장(§3.4) |
 | 해제 | `extractZip` | 같음 + 플랜(제외·흡수) |
 | 롤백 | `removeAdded` | 같음 |
-| 재진입 | `withReceiveGuard` | 같음(같은 가드) |
+| 재진입 | `whileExtracting`(해제 구간만) | 같음(같은 가드) |
 | 푼 뒤 쓰기 | 없음 | 없음, 단 연결 단계가 선택으로 붙음(§3.5) |
 
 ---
@@ -363,7 +369,7 @@ type ImportPlan =
 | 쓰기 전 거절: not-a-site·형식 오류 zip → 대상 폴더 무변화 | `importZip.test.ts` | 배송 문서의 「폴더는 그대로입니다」 보증이 이 경로에서 거짓이 된다(tar 받기가 이미 밟은 함정) |
 | `ALWAYS_EXCLUDED` 의 `__macosx`(소문자) — 발행 zip 에 `__MACOSX/` 가 안 실린다 | `zip.test.ts` | 수동 해제 폴더의 발행이 정본을 계속 오염한다. 대문자로 넣으면 소문자 조회에 안 걸린다(그 파일의 `.DS_Store` 실측 그대로) |
 | `NEEDS` 등재(`["signedIn"]`) + MISMATCH 에서 안 막힘 명시 | `whyBlocked.test.ts` | 어긋난 창에서 다음 거래처 zip 을 못 여는 갇힘 — 순회 시험은 등재를 강제하지 못하므로 명시 한 줄이 필요하다 |
-| 연결 단계의 세 쓰기(linked 표식·링크·레지스트리)와 `withReceiveGuard` 등록 줄 | `check-wiring.mjs` WIRES | core 판정은 살아 있는데 확장이 안 부르는 그 형상 — 연결이 반쪽이 되어 「어긋남은 사고다」의 근거(표식·링크 동행)가 무너진다 |
+| 연결 단계의 세 쓰기(linked 표식·링크·레지스트리)와 `whileExtracting` 호출 줄(횟수 3)·`BUSY` 처리 줄(횟수 3)·진입점 가드 금지 | `check-wiring.mjs` WIRES | core 판정은 살아 있는데 확장이 안 부르는 그 형상 — 연결이 반쪽이 되어 「어긋남은 사고다」의 근거(표식·링크 동행)가 무너진다 |
 | QuickPick 직행: 누른 시점 `confirmedFolderFor` 재호출 줄 | `check-wiring.mjs` | 기억만 믿고 열어 주는 사고(0.3.0 이 막은 그것)가 직행 경로로 재현된다 |
 | `statusBarPlan` 판정(정상·어긋남·미로그인) + 갱신 배선(`refreshSidebar` 동행) | `sidebarPlan.test.ts`·`check-wiring.mjs`(`folderTenant` 공급 횟수 상향) | 상태바가 낡은 사이트를 보여 준다 — 교차 작업을 줄이려던 표면이 오인을 보증한다 |
 | 사이드바 라벨·팔레트 등재 | `check-sidebar-labels.mjs`(자동) | 등재 누락은 검사기가 서므로 추가 조치 불요 — 판정 기록 |

@@ -19,11 +19,24 @@ const base: SidebarState = {
   previewUrl: null,
   keyExpiresAt: null,
   folderTenant: null,
+  folderPath: null,
 };
 const plan = (patch: Partial<SidebarState> = {}) => sidebarPlan({ ...base, ...patch });
 const ids = (patch?: Partial<SidebarState>) => plan(patch).map((g) => g.id);
+/**
+ * **실행 진입점만 센다.** 종전에는 `info` 를 `undefined` 로 매핑해 배열에 남겼는데, 그러면 사실
+ * 진술 한 줄이 늘고 주는 것까지 「항목이 흔들렸다」로 읽힌다 — 원 사건은 **누를 자리가 사라진**
+ * 것이었고 이 불변식이 무는 것은 그것이다.
+ *
+ * ⚠ **이 좁힘은 면제가 아니다** — 좁힌 만큼 `info` 쪽을 무는 시험(아래 예고형 매트릭스)을 **같이**
+ *   둔다. 하나만 두면 그 자리가 검사 밖이 된다.
+ */
 const commands = (patch?: Partial<SidebarState>) =>
-  plan(patch).flatMap((g) => g.items.map((i) => (i.kind === "action" ? i.command : undefined)));
+  plan(patch).flatMap((g) => g.items.filter((i) => i.kind === "action").map((i) => i.command));
+
+/** 사실 진술(`info`) 라벨 — 예고형이 정확히 그 칸에서만 서는지를 무는 자리. */
+const notes = (patch?: Partial<SidebarState>) =>
+  plan(patch).flatMap((g) => g.items.filter((i) => i.kind === "info").map((i) => i.label));
 
 test("사이트가 붙어도 받기 진입점이 보인다", () => {
   // 이 한 줄이 이번 건의 요점이다. 사라지면 사람은 「불러오는 기능이 없다」로 읽는다.
@@ -253,4 +266,66 @@ test("어긋난 폴더는 사이드바에서도 어긋나 보인다", () => {
       .filter((i) => i.kind === "action" && i.command === "zalkera.site.useFolder");
     assert.equal(noise.length, 0, `조용해야 할 상태에서 경고가 떴다: ${JSON.stringify(state)}`);
   }
+});
+
+
+// ── 작업 폴더 묶음 — 지시대상과 예고형 ─────────────────────────────────────
+
+const workdir = (patch?: Partial<SidebarState>) =>
+  plan(patch).find((g) => g.id === "workdir");
+
+test("작업 폴더 묶음이 **접어도 보이는 자리**에 경로를 말한다", () => {
+  const group = workdir({ site: "/x", folderPath: "/home/jo/site" });
+  assert.ok(group, "작업 폴더 묶음이 사라졌다");
+  assert.ok(
+    (group.description ?? "").includes("site"),
+    `경로가 묶음 머리에 없다: ${JSON.stringify(group.description)}`,
+  );
+  assert.ok((group.tooltip ?? "").startsWith("/home/jo/site"), "전체 경로가 툴팁에 없다");
+});
+
+test("열린 폴더가 없으면 그렇게 말한다 — 빈 자리로 두지 않는다", () => {
+  assert.strictEqual(workdir({ folderPath: null })?.description, "열린 폴더 없음");
+});
+
+test("「작업 폴더 변경」은 늘 있고 **맨 위**다", () => {
+  for (const patch of [{}, { site: "/x" }, { folderPath: "/a" }]) {
+    const items = workdir(patch)?.items ?? [];
+    const first = items[0];
+    assert.ok(first && first.kind === "action" && first.command === "zalkera.folder.change",
+      `첫 항목이 「작업 폴더 변경」이 아니다: ${JSON.stringify(first)}`);
+  }
+});
+
+test("「시작」과 「교체」는 나란히 붙어 있다 — 두 글자 차이가 보여야 한다", () => {
+  const items = (workdir({ site: "/x" })?.items ?? []).filter((i) => i.kind === "action");
+  const start = items.findIndex((i) => i.command === "zalkera.site.importZip");
+  const replace = items.findIndex((i) => i.command === "zalkera.site.updateZip");
+  assert.strictEqual(replace, start + 1, "둘 사이에 다른 항목이 끼었다");
+});
+
+/**
+ * ⚠ **예고형은 정확히 한 칸에서만 선다.** 소스 폴더인데 그 폴더가 어느 사이트 것인지 모르는 칸
+ *   하나다. 다른 칸에서 뜨면 거짓이고(소스 아닌 폴더는 「올릴」 것이 없다), 그 칸에서 안 뜨면
+ *   화면이 낡은 값을 건강하게 단언하던 그 상태로 돌아간다.
+ */
+test("예고형은 「소스 폴더 · 소속 모름」 한 칸에서만 선다", () => {
+  const NOTE = "처음 올리실 때 사이트가 정해집니다";
+  const 칸 = [
+    { name: "소스·소속모름", patch: { site: "/x", folderTenant: null }, 뜬다: true },
+    { name: "소스·소속있음", patch: { site: "/x", folderTenant: "credium" }, 뜬다: false },
+    { name: "소스아님·소속모름", patch: { site: null, folderTenant: null }, 뜬다: false },
+    { name: "소스아님·소속있음", patch: { site: null, folderTenant: "credium" }, 뜬다: false },
+  ];
+  for (const { name, patch, 뜬다 } of 칸) {
+    // ⚠ **`includes` 로 재지 않는다.** 그러면 `NOTE` 말고 **다른 `info`** 가 늘어도 안 걸린다 —
+    //    좁힌 `commands()` 가 더는 그것을 안 세므로 둘 사이로 빠져나가는 형태가 생긴다.
+    //    심의가 변이로 실증했다: 다른 묶음에 `site !== null && tenant !== ""` 로 걸린 줄 하나를
+    //    넣으니 24건이 전부 초록이었다. 전수 비교라야 좁힘이 면제가 아니라 정밀화가 된다.
+    assert.deepEqual(notes(patch), 뜬다 ? [NOTE] : [], `칸이 틀렸다: ${name}`);
+  }
+});
+
+test("사이트를 안 골랐으면 예고형이 안 뜬다 — 정해질 사이트가 없다", () => {
+  assert.ok(!notes({ site: "/x", folderTenant: null, tenant: "" }).length);
 });
