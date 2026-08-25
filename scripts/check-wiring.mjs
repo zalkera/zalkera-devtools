@@ -389,6 +389,16 @@ const WIRES = [
         "되돌리기 동의가 전환 문면으로 뜬다 — 다른 행위에 대한 동의를 받는다",
     ],
     [
+        // ⚠ **재시도도 안내 분기를 지나야 한다.** 백엔드 가드는 게시 대기 AI 변경(4층)을
+        //    편집(5층)보다 **먼저** 던지므로, 둘이 겹친 테넌트에서는 동의 뒤 재시도가
+        //    `DRAFT_IN_PROGRESS` 로 거절된다. 맨몸으로 두면 빨간창에 서버 문장만 뜨고 행선지가
+        //    없다 — T5b 가 지우겠다고 선언한 그 형상이다(뒤늦은 심의가 실증).
+        //    `packages/vscode/src` 에는 시험이 없어 **이 배선이 유일한 가드**다.
+        "packages/vscode/src/extension.ts",
+        "if (!isDraftInProgress(retried)) throw retried;",
+        "동의 뒤 재시도가 편집 거절을 만나면 막다른 빨간창으로 되돌아간다 — 겹친 테넌트에서만 나는 자리라 눈에 안 띈다",
+    ],
+    [
         "packages/vscode/src/extension.ts",
         "if (!needsDiscardConsent(error)) throw error;",
         "서버가 「계속하려면 확인해 주세요」라고 말한 거절에 확인할 자리가 없어져, 버전 전환이 막다른 길이 된다",

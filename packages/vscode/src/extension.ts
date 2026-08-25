@@ -1983,7 +1983,18 @@ async function switchVersion(): Promise<void> {
       ))
     )
       return;
-    outcome = await activate(true);
+    // ⚠ **재시도도 안내 분기를 지난다.** 백엔드 가드는 **게시 대기 AI 변경(4층)을 편집(5층)보다
+    //    먼저** 던진다 — 둘이 겹친 테넌트에서는 첫 호출이 4층에 걸려 편집이 가려지고, 동의한 뒤
+    //    재시도가 `DRAFT_IN_PROGRESS` 로 거절된다. 그것을 맨몸으로 두면 **빨간창에 서버 문장만
+    //    뜨고 어디로 가야 하는지가 없다** — 이 판이 지우겠다고 선언한 바로 그 형상이다.
+    //    형제 발행 문은 이미 그렇게 받는다(`publishCommand` 의 catch) — 비대칭을 없앤다.
+    try {
+      outcome = await activate(true);
+    } catch (retried) {
+      if (!isDraftInProgress(retried)) throw retried;
+      await tellDraftBlocked(tenant, (retried as Error).message);
+      return;
+    }
   }
   // ⚠ **판이 안 움직인 경우를 「바꿨습니다」로 말하지 않는다.** 이미 켜진 판을 고르면 서버는
   //    전환이 아니라 「지금으로 되돌리기」를 하고 판은 그대로 둔다 — 그때 「바꿨습니다」는 거짓이다.

@@ -332,3 +332,17 @@ test("켤 수 없는 판은 여전히 후보가 아니다", () => {
   const list = [rev(9, false, "BUILDING"), rev(7, false, "FAILED"), rev(5, false)];
   assert.deepStrictEqual(switchCandidates(list, null).map((r) => r.revisionNo), [5]);
 });
+
+/**
+ * ⚠ **두 술어의 진리표에 서로의 코드를 넣는다.** 안 넣으면 `startsWith("DRAFT")` 류로 넓히는
+ *   변이가 전건 초록으로 산다 — 그러면 되돌리기 동의 코드가 안내 분기에 **조용히 삼켜져**
+ *   0.14.0 이 연 동의 문이 죽는다(T5b 뒤늦은 심의가 변이로 실증).
+ */
+test("두 술어는 서로의 코드를 안 문다 — 겹치면 한쪽이 죽는다", () => {
+  const 안내 = "DRAFT_IN_PROGRESS";
+  const 동의 = "DRAFT_DISCARD_CONFIRM_REQUIRED";
+  assert.strictEqual(isDraftInProgress(rejected(안내)), true);
+  assert.strictEqual(isDraftInProgress(rejected(동의)), false, "안내가 동의 코드를 삼킨다");
+  assert.strictEqual(needsDiscardConsent(rejected(동의)), true);
+  assert.strictEqual(needsDiscardConsent(rejected(안내)), false, "동의가 안내 코드를 삼킨다");
+});
