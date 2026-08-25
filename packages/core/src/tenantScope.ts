@@ -67,7 +67,14 @@ const PUBLISH_OUTCOME =
 /** 「지금으로 되돌리기」로 갈린 거절. 판은 안 옮기고 작업만 버린다. */
 const DISCARD_TO_CURRENT = "DRAFT_DISCARD_CONFIRM_REQUIRED";
 
-/** 「바꿨습니다」 한 문장. **두 표면이 나눠 쓴다** — 사본으로 두면 한쪽만 고쳐진다. */
+/**
+ * 「바꿨습니다」 한 문장.
+ *
+ * ⚠ **이 문장을 내는 표면은 [say.switchOutcome] 하나다.** 종전에는 `say.switched` 가 같은 문장을
+ *   따로 냈는데, 전환이 `switchOutcome` 으로 옮겨 간 뒤 **상용 호출처가 0** 이 됐다 — 그대로 두면
+ *   새 호출처가 그 표면을 집어 **「무동작을 바꿨다」가 배선 검사 밖에서 되살아난다**(설계자 심의).
+ *   `this` 를 못 쓰는 자리가 있어(문면 전수 시험이 떼어서 부른다) 함수로 남긴다.
+ */
 function switchedLine(tenant: CapturedTenant, revisionNo: number): string {
     return `「${shown(tenant)}」 사이트를 버전 ${countJosa(revisionNo, "으로/로")} 바꿨습니다.`;
 }
@@ -385,9 +392,6 @@ export const say = {
                 "그 편집을 먼저 처분해 주세요 — 새 버전으로 발행하거나, 지금 켜져 있는 버전으로 되돌리면 됩니다.\n" +
                 "잘커라 콘솔의 「사이트 소스」 화면 또는 사이트에 연결한 AI 대화에서 할 수 있습니다.",
         };
-    },
-    switched(tenant: CapturedTenant, revisionNo: number): string {
-        return switchedLine(tenant, revisionNo);
     },
     building(tenant: CapturedTenant, revisionNo: number): string {
         return `「${shown(tenant)}」 버전 ${countJosa(revisionNo, "을/를")} 서버가 빌드하는 중`;

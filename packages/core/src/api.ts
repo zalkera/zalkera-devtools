@@ -92,7 +92,9 @@ export interface SiteRevision {
 
 /** `activate` 응답에서 **우리가 쓰는 것**. 나머지 필드는 안 본다. */
 export interface ActivateResult {
-    revisionNo?: number;
+    // ⚠ **`revisionNo` 를 두지 않는다.** 화면이 쓰는 번호는 **사람이 고른 그 번호**이지 응답의
+    //    것이 아니다 — 선언해 두면 「소비하는 필드만 둔다」는 이 형의 약속이 그 자리에서 거짓이 되고,
+    //    다음 사람이 둘 중 어느 것을 믿을지 헷갈린다.
     /** 판을 실제로 옮겼는가. **결여는 `true`** — 서버 기본값이자 구서버의 뜻이다. */
     pointerMoved?: boolean;
     /** 되돌리기가 편집을 버렸는가. */

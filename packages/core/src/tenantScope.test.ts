@@ -129,7 +129,7 @@ test("say.* 는 서버 테넌트 코드를 소독한다", () => {
         say.publishConfirm(captureTenant(EVIL), "/x", "bix").message,
         say.published(captureTenant(EVIL), 3),
         say.switchConfirm(captureTenant(EVIL), 3).message,
-        say.switched(captureTenant(EVIL), 3),
+        say.switchOutcome(captureTenant(EVIL), 3),
         say.buildFailed(captureTenant(EVIL), 3),
     ]) {
         ok(!RENDERS_AS_LINK.test(message), `링크가 살아남았다: ${message}`);
@@ -139,7 +139,7 @@ test("say.* 는 서버 테넌트 코드를 소독한다", () => {
 test("양성 통제군 — 정상 사이트 이름은 원문 그대로 보인다", () => {
     // 소독이 과해 평범한 이름을 깨뜨리면 그것도 결함이다.
     for (const name of ["credium", "우리가게 본점", "Acme, Inc. (KR)"]) {
-        ok(say.switched(captureTenant(name), 7).includes(name), `이름이 깨졌다: ${name}`);
+        ok(say.switchOutcome(captureTenant(name), 7).includes(name), `이름이 깨졌다: ${name}`);
     }
 });
 
@@ -151,7 +151,7 @@ test("서버가 revisionNo 에 링크를 넣어도 문장에 살아남지 않는
     const evil = "1 [열기](command:workbench.action.terminal.new)" as unknown as number;
     const tenant = captureTenant("acme");
     for (const line of [
-        say.switched(tenant, evil),
+        say.switchOutcome(tenant, evil),
         say.switchConfirm(tenant, evil).message,
         say.building(tenant, evil),
         say.buildFailed(tenant, evil),
@@ -166,7 +166,7 @@ test("서버가 revisionNo 에 링크를 넣어도 문장에 살아남지 않는
 
 test("정상 숫자는 그대로 보인다 — 과소독 아님", () => {
     const tenant = captureTenant("acme");
-    ok(say.switched(tenant, 42).includes("버전 42로"), say.switched(tenant, 42));
+    ok(say.switchOutcome(tenant, 42).includes("버전 42로"), say.switchOutcome(tenant, 42));
     ok(say.building(tenant, 0).includes("버전 0을"), say.building(tenant, 0));
 });
 
@@ -175,13 +175,13 @@ test("숫자 뒤 조사가 **읽는 소리**를 따른다", () => {
     // 그것을 읽는 소리로 정해진다 — 1=일·10=십 은 받침이 있고 2=이·5=오 는 없다.
     const tenant = captureTenant("acme");
     for (const [n, expected] of [[1, "버전 1로"], [2, "버전 2로"], [3, "버전 3으로"], [7, "버전 7로"], [10, "버전 10으로"]] as const) {
-        ok(say.switched(tenant, n).includes(expected), `${n}: ${say.switched(tenant, n)}`);
+        ok(say.switchOutcome(tenant, n).includes(expected), `${n}: ${say.switchOutcome(tenant, n)}`);
     }
 });
 
 test("숫자로 못 읽으면 물음표 — 남의 글자를 문장에 싣지 않는다", () => {
     const tenant = captureTenant("acme");
-    const line = say.switched(tenant, "abc" as unknown as number);
+    const line = say.switchOutcome(tenant, "abc" as unknown as number);
     // 조사는 붙는다 — 숫자가 아니면 받침 없는 쪽으로 접는다(문장이 끊기는 것보다 낫다).
     ok(line.includes("버전 ?로"), line);
     ok(!line.includes("abc"), line);
