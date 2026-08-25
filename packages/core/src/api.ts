@@ -88,6 +88,21 @@ export interface SiteRevision {
     label?: string | null;
     /** FAILED 일 때만, 그리고 TENANT_ADMIN+ 에게만 온다 — 빌드 로그 tail. */
     failReason?: string | null;
+    /**
+     * **지금 실제로 서빙 중인가**(백엔드 명세 A). [isActive] 가 «가라»는 지시라면 이쪽은 «떠 있다»는
+     * 사실이다 — 서빙박스가 자기가 띄운 판을 보고한 것이다.
+     *
+     * ⚠ **세 상태다.** `true`/`false` 외에 `null` 이 있고, 그 `null` 은 [servingObservedAt] 과
+     *   **함께 봐야** 뜻이 갈린다(모른다 / 봤는데 아무것도 안 떠 있다). 단독으로 `!` 를 붙이지 마라.
+     *
+     * 구서버는 안 보낸다 → `undefined`. 그때도 「모른다」다.
+     */
+    isServing?: boolean | null;
+    /**
+     * 그 관측 시각(ISO) 또는 `null`. **[isServing] 이 `null` 이어도 이 값은 있을 수 있다.**
+     * 값이 하나라도 있으면 「이 사이트는 관측이 도는 사이트다」라는 뜻이라, 반영 확인의 전제가 된다.
+     */
+    servingObservedAt?: string | null;
 }
 
 /** `activate` 응답에서 **우리가 쓰는 것**. 나머지 필드는 안 본다. */
@@ -409,6 +424,49 @@ export function needsDiscardConsent(error: unknown): boolean {
  * @param revertTarget `GET /draft` 의 `revertTargetRevisionNo`. **못 읽었으면 `null`** — 모르는
  *   것으로는 막지 않는다(그때 동작은 종전과 같다).
  */
+/**
+ * 배포한 판이 **방문자에게 닿았는가**(백엔드 명세 A). 게시 직후 이 판정을 되풀이해 묻는다.
+ *
+ * ■ 왜 네 값인가
+ *
+ * `"unknown"` 이 핵심이다. 관측이 **하나도 없는** 사이트(구 백엔드·박스 미보고·git 레인)에서
+ * 「아직 반영 전」이라고 말하면 그건 **영원히 안 끝나는 대기**이고, 화면은 오지 않을 소식을 기다린다.
+ * 이 기능이 없애려던 병이 정확히 그것이라 — 모르는 것은 모른다고 답하고 **감시를 끝낸다.**
+ *
+ * `"superseded"` 도 감시 종료다. 기다리는 사이 다른 판이 활성이 되면(다른 관리자·AI 작업) 우리가
+ * 기다리던 사건은 **일어나지 않는다.** 계속 물으면 「반영됐습니다」를 영영 못 내거나, 더 나쁘게는
+ * 남이 올린 판의 반영을 내 판의 반영으로 말한다.
+ *
+ * ■ 판정
+ *
+ *   unknown     관측 자체가 없다(어느 판에도 `servingObservedAt` 이 없다) → 묻기를 그만둔다
+ *   superseded  활성이 이미 다른 판이다 → 묻기를 그만둔다
+ *   reflected   그 판이 지금 떠 있다 → 알린다
+ *   pending     관측은 있는데 아직 그 판이 아니다(전환 중 포함) → 더 기다린다
+ *
+ * ⚠ `isServing === true` 로만 `reflected` 를 낸다. `!== false` 로 느슨하게 하면 **전환 중(null)** 이
+ *   반영으로 읽혀, 아무것도 안 떠 있는 순간에 「반영됐습니다」가 뜬다.
+ */
+export type ReflectionState = "reflected" | "pending" | "superseded" | "unknown";
+
+export function reflectionOf(
+    revisions: readonly {
+        revisionNo: number;
+        isActive: boolean;
+        isServing?: boolean | null;
+        servingObservedAt?: string | null;
+    }[],
+    revisionNo: number,
+): ReflectionState {
+    // 관측이 도는 사이트인가 — 한 판이라도 시각이 있으면 그렇다. 없으면 기다릴 근거가 없다.
+    if (!revisions.some((r) => r.servingObservedAt != null)) return "unknown";
+    const active = revisions.find((r) => r.isActive);
+    if (active != null && active.revisionNo !== revisionNo) return "superseded";
+    return revisions.some((r) => r.revisionNo === revisionNo && r.isServing === true)
+        ? "reflected"
+        : "pending";
+}
+
 export function switchCandidates<T extends {revisionNo: number; isActive: boolean; status: string}>(
     revisions: readonly T[],
     revertTarget: number | null,

@@ -297,6 +297,16 @@ export const say = {
             `방문자에게 반영되기까지 잠시 걸립니다.`
         );
     },
+    /**
+     * **방문자에게 닿았다** — [published] 가 「잠시 걸립니다」로 열어 둔 문장을 닫는다.
+     *
+     * ⚠ 이 문장은 **서빙박스가 그 판을 띄웠다고 보고했을 때만** 나온다(`reflectionOf` 가 `reflected`).
+     *   활성 포인터가 옮겨진 것으로 내면 종전의 그 거짓말 — 「배포됐습니다」인데 사이트는 안 바뀐 상태 —
+     *   이 그대로 돌아온다. 관측이 없는 사이트에서는 **아무 말도 안 한다**(없는 소식을 지어내지 않는다).
+     */
+    reflected(tenant: CapturedTenant, revisionNo: number): string {
+        return `「${shown(tenant)}」 사이트에 버전 ${countJosa(revisionNo, "이/가")} 방문자에게 반영됐습니다.`;
+    },
     switchConfirm(tenant: CapturedTenant, revisionNo: number): { message: string; detail: string; action: string } {
         return {
             message: `「${shown(tenant)}」 사이트를 버전 ${countJosa(revisionNo, "으로/로")} 바꿉니다.`,

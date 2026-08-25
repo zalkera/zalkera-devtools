@@ -33,6 +33,24 @@ const read = (p) => readFileSync(join(root, p), "utf8");
 const WIRES = [
     [
         "packages/vscode/src/extension.ts",
+        "void watchReflection(api, revisionNo, tenant);",
+        "게시 뒤 반영 확인이 안 돌아 「방문자에게 반영됐습니다」가 영영 안 뜬다 — 그러면 사람은 " +
+            "「잠시 걸립니다」에서 끝나고, 실제로 바뀌었는지 확인할 길이 다시 없어진다(이 기능의 존재 이유)",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        'if (state === "reflected") {',
+        "반영 판정이 느슨해지면 전환 중(아무것도 안 떠 있는 순간)에 「반영됐습니다」가 뜬다 — " +
+            "종전의 그 거짓말이 방향만 바꿔 돌아온다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        'if (state !== "pending") {',
+        "종료 조건이 빠지면 관측이 없는 사이트(구 백엔드·박스 미보고·git 레인)에서 폴링이 상한까지 돈다 — " +
+            "오지 않을 소식을 기다리는 것이고, 그 사이 조회가 계속 나간다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
         "folderTenant: currentFolderBinding()",
         "게이트·사이드바·상태바가 서로 다른 기준으로 소속을 판정해, 화면마다 다른 말을 한다",
         3,

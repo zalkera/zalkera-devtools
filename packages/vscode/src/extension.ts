@@ -100,6 +100,8 @@ import {
   linkFolderToTenant,
   parseSourceMark,
   holdsSameRevision,
+  reflectionOf,
+  type ReflectionState,
   SOURCE_MARK_PATH,
   type SourceMark,
 } from "@zalkera/devtools-core";
@@ -2575,6 +2577,48 @@ async function publishCommand(): Promise<void> {
 }
 
 /**
+ * 반영 확인 폴링 — **끝나는 것이 급소다.**
+ *
+ * 게시는 지시일 뿐이라 실제 반영은 서빙박스 주기에 달려 있다(그 값을 우리는 소유하지 않는다).
+ * 그래서 숫자를 문장에 박는 대신 **관측이 올 때까지 물어보고**, 오면 그때 알린다.
+ *
+ * ⚠ **영원히 묻지 않는다.** 관측이 없는 사이트(구 백엔드·박스 미보고·git 레인)는 첫 물음에
+ *   `unknown` 이 나와 그 자리에서 끝난다. 그 밖에도 상한을 둔다 — 상한에 닿으면 **아무 말도 안 한다.**
+ *   「아직 반영 안 됐습니다」는 우리가 아는 사실이 아니다(그저 못 봤을 뿐이다).
+ */
+const REFLECT_POLL_MS = 5_000;
+/** 상한. 스냅샷 주기(기본 60초)의 몇 배를 덮되, 사람이 잊을 만큼 늘어지지는 않게. */
+const REFLECT_POLL_MAX = 36;
+
+/**
+ * 게시한 판이 방문자에게 닿으면 **한 번만** 알린다. 실패·상한·관측 없음은 전부 **침묵**이다 —
+ * 게시 자체는 이미 알렸고, 여기서 더 말할 사실이 없다.
+ */
+async function watchReflection(api: ZalkeraApi, revisionNo: number, tenant: CapturedTenant): Promise<void> {
+  for (let i = 0; i < REFLECT_POLL_MAX; i += 1) {
+    await new Promise((r) => setTimeout(r, REFLECT_POLL_MS));
+    let state: ReflectionState;
+    try {
+      state = reflectionOf(await api.listRevisions(), revisionNo);
+    } catch (e) {
+      // 조회 실패는 반영 실패가 아니다 — 다음 차례에 다시 묻는다. 사람에게는 말하지 않는다.
+      log(`반영 확인 조회 실패(계속 시도): ${e instanceof Error ? e.message : String(e)}`);
+      continue;
+    }
+    if (state === "reflected") {
+      void vscode.window.showInformationMessage(say.reflected(tenant, revisionNo));
+      return;
+    }
+    // 관측이 없거나(unknown) 다른 판으로 갈아탔으면(superseded) 기다리던 사건은 안 온다.
+    if (state !== "pending") {
+      log(`반영 확인 종료(${state}) — 버전 ${revisionNo}`);
+      return;
+    }
+  }
+  log(`반영 확인 상한 도달 — 버전 ${revisionNo}(못 봤을 뿐, 반영 실패가 아니다)`);
+}
+
+/**
  * 게시됐다고 **알리고 끝낸다.** 물어볼 것이 없다 — 사이트는 이미 바뀌었다.
  *
  * 확인 없이 나가는 것을 확장이 막을 수는 없다(백엔드가 켠다). 그래서 **가서 볼 길**을 준다 —
@@ -2598,6 +2642,9 @@ async function announcePublished(
   // ⚠ **문구를 지역 변수로 빼지 않는다.** 알림 소독 검사기는 본문이 `say.*` 호출 **그 자리**에
   //    있는지를 보고, 한 번 변수를 거치면 허용 목록 밖으로 떨어진다. 주소가 없으면 단추도 없으므로
   //    호출을 둘로 가르는 대신 **단추 목록을 편다** — 부르는 자리는 하나로 남는다.
+  // 반영 확인은 **뒤에서 돈다.** 여기서 기다리면 단추가 뜨기까지 사람이 멈춰 선다 — 게시는 이미 끝났고
+  // 사이트를 보러 갈 수 있어야 한다. 실패해도 이 흐름에 영향 0(그쪽은 전부 침묵으로 끝난다).
+  void watchReflection(api, revisionNo, tenant);
   const chosen = await vscode.window.showInformationMessage(
     say.published(tenant, revisionNo),
     ...(open ? [open] : []),

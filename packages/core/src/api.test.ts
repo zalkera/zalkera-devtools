@@ -1,6 +1,6 @@
 import assert, { ok, rejects, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
-import { ZalkeraApi, needsDiscardConsent, isDraftInProgress, revisionWhen, switchCandidates } from "./api.ts";
+import { ZalkeraApi, needsDiscardConsent, isDraftInProgress, reflectionOf, revisionWhen, switchCandidates } from "./api.ts";
 import { DevtoolsError } from "./errors.ts";
 
 function api(handler: (url: string, init: RequestInit) => Response): ZalkeraApi {
@@ -345,4 +345,63 @@ test("두 술어는 서로의 코드를 안 문다 — 겹치면 한쪽이 죽�
   assert.strictEqual(isDraftInProgress(rejected(동의)), false, "안내가 동의 코드를 삼킨다");
   assert.strictEqual(needsDiscardConsent(rejected(동의)), true);
   assert.strictEqual(needsDiscardConsent(rejected(안내)), false, "동의가 안내 코드를 삼킨다");
+});
+
+// ── 반영 확인(백엔드 명세 A) ────────────────────────────────────────────────
+//
+// 이 판정의 급소는 **끝나는 것**이다. 「아직 반영 전」에 머무르는 상태가 하나라도 잘못 있으면 화면은
+// **오지 않을 소식을 영영 기다린다**. 그래서 종료 조건 둘(unknown·superseded)을 먼저 못박는다.
+
+type Rev = Parameters<typeof reflectionOf>[0][number];
+const OBS_AT = "2026-08-25T09:00:00Z";
+const obsRev = (over: Partial<Rev> = {}): Rev => ({ revisionNo: 1, isActive: false, ...over });
+
+test("관측이 하나도 없으면 unknown — 감시를 끝낸다", () => {
+    // 구 백엔드·박스 미보고·git 레인. 여기서 pending 을 내면 영원히 안 끝나는 대기가 된다.
+    strictEqual(reflectionOf([obsRev({ revisionNo: 2, isActive: true })], 2), "unknown");
+});
+
+test("활성이 이미 다른 판이면 superseded — 기다리던 사건은 안 일어난다", () => {
+    strictEqual(
+        reflectionOf(
+            [
+                obsRev({ revisionNo: 3, isActive: true, isServing: false, servingObservedAt: OBS_AT }),
+                obsRev({ revisionNo: 2, isServing: true, servingObservedAt: OBS_AT }),
+            ],
+            2,
+        ),
+        "superseded",
+    );
+});
+
+test("그 판이 떠 있으면 reflected", () => {
+    strictEqual(
+        reflectionOf([obsRev({ revisionNo: 2, isActive: true, isServing: true, servingObservedAt: OBS_AT })], 2),
+        "reflected",
+    );
+});
+
+test("관측은 있는데 아직 그 판이 아니면 pending", () => {
+    strictEqual(
+        reflectionOf(
+            [
+                obsRev({ revisionNo: 2, isActive: true, isServing: false, servingObservedAt: OBS_AT }),
+                obsRev({ revisionNo: 1, isServing: true, servingObservedAt: OBS_AT }),
+            ],
+            2,
+        ),
+        "pending",
+    );
+});
+
+test("전환 중(null)은 반영이 아니다 — 아무것도 안 떠 있는 순간이다", () => {
+    // `!== false` 로 느슨하게 하면 여기서 「반영됐습니다」가 뜬다. 그 순간 사이트는 비어 있다.
+    strictEqual(
+        reflectionOf([obsRev({ revisionNo: 2, isActive: true, isServing: null, servingObservedAt: OBS_AT })], 2),
+        "pending",
+    );
+});
+
+test("활성이 아직 없어도(첫 게시 직후) 관측만 있으면 기다린다", () => {
+    strictEqual(reflectionOf([obsRev({ revisionNo: 2, isServing: false, servingObservedAt: OBS_AT })], 2), "pending");
 });

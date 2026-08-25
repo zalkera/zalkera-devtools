@@ -26,6 +26,8 @@ export {
 export {
   ZalkeraApi,
   needsDiscardConsent,
+  reflectionOf,
+  type ReflectionState,
   switchCandidates,
   type ActivateResult,
   type DraftState,
