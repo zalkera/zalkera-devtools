@@ -122,6 +122,12 @@
 
 ## 성능 (전부 소규모·기존)
 
+- **`listRevisions` 에는 시한이 없다 — 「버전 전환」이 30초까지 아무 표시 없이 붙들릴 수 있다.**
+  같은 `Promise.all` 의 형제(`draftState`)는 4초에 끊는데 이쪽은 제어 평면 상한까지 간다.
+  역설적으로 **비차단** 자리(`probeFetchable`)의 `listRevisions` 는 4초에 끊고 **차단** 자리는
+  30초다. 0.13.x 부터 같은 형상이고 0.14.0 이 악화시키지 않았다(추가된 팔은 4초 상한이라 총
+  대기 ≤ max(listRevisions, 4초)). 고치려면 그 호출에도 시한을 씌우거나 진행 표시를 감싼다.
+
 - `refreshSidebar` 1회에 `currentFolderBinding()` 이 **2번** 돈다(`showIdleStatus()` 안 1번 +
   상태 객체 1번) — 같은 두 파일을 두 번 lstat+read+parse.
 - `activate()` **동기** 구간의 `showIdleStatus()` → 동기 `lstat`+`readFileSync`.
