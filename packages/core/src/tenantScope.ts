@@ -63,6 +63,14 @@ const PUBLISH_OUTCOME =
     "올리면 방문자가 보는 사이트가 이 소스로 바뀝니다.\n" +
     "이전에 올리신 판은 「버전 전환」에 남습니다.";
 
+/** 「지금으로 되돌리기」로 갈린 거절. 판은 안 옮기고 작업만 버린다. */
+const DISCARD_TO_CURRENT = "DRAFT_DISCARD_CONFIRM_REQUIRED";
+
+/** 「바꿨습니다」 한 문장. **두 표면이 나눠 쓴다** — 사본으로 두면 한쪽만 고쳐진다. */
+function switchedLine(tenant: CapturedTenant, revisionNo: number): string {
+    return `「${shown(tenant)}」 사이트를 버전 ${countJosa(revisionNo, "으로/로")} 바꿨습니다.`;
+}
+
 export const say = {
     /**
      * 미리보기가 도는 사이 폴더가 다른 사이트로 재연결됐다. **다시 세우지 않고 멈춘다** —
@@ -297,10 +305,31 @@ export const say = {
      * 몇 건이 사라지는지는 **서버만 안다.** 그래서 서버 문장을 그대로 싣되, 나가는 자리가 모달
      * `detail` 이라 여기서 소독한다.
      */
+    /**
+     * ⚠ **동의는 하나인데 결과가 둘이다 — 그래서 문면이 갈린다.** 인자(`discardPendingChanges=true`)
+     *   하나로 뚫리는 코드가 둘이고, 하나는 **판이 옮겨지고** 하나는 **판이 그대로**다.
+     *   사람은 방금 「버전 N 으로 바꿉니다」 모달에 동의했다 — 그 프레임을 여기서 안 바로잡으면
+     *   **다른 행위에 대한 동의**를 받는 셈이다.
+     *
+     * ⚠ **건수를 되풀이하지 않는다.** 서버 문장이 이미 「편집 중인 파일 N개 · 게시 대기 AI 변경
+     *   M건(쓴 크레딧은 돌아오지 않습니다)」로 **세어서** 온다. 확장이 그 위에 사본을 얹으면
+     *   서버가 문구를 바꾸는 날 사본이 거짓이 된다.
+     */
     discardPendingConfirm(
         tenant: CapturedTenant,
         serverMessage: string,
+        serverCode: string | null,
     ): { message: string; detail: string; action: string } {
+        if (serverCode === DISCARD_TO_CURRENT) {
+            return {
+                message: `「${shown(tenant)}」 — 고르신 버전이 이미 켜져 있습니다.`,
+                detail:
+                    `${plainNotice(serverMessage, 200)}\n` +
+                    "판은 그대로 두고 위 작업만 사라집니다. 되돌릴 수 없습니다.",
+                // 「버리고 계속」이 아니다 — **계속할 전환이 없다.**
+                action: "버리기",
+            };
+        }
         return {
             message: `「${shown(tenant)}」 에 아직 게시하지 않은 AI 변경이 있습니다.`,
             detail:
@@ -308,6 +337,31 @@ export const say = {
                 "계속하면 그 변경은 사라집니다. 되돌릴 수 없습니다.",
             action: "버리고 계속",
         };
+    },
+    /**
+     * 전환이 **무엇을 했는지**. 종전에는 한 문장이라, 판이 안 움직인 경우에도 「바꿨습니다」라고
+     * 말했다 — 무동작을 한 것처럼 말하는 자리다(`unchanged`/`switched` 를 가른 그 규율).
+     *
+     * ⚠ **`pointerMoved` 가 명시로 `false` 일 때만** 갈린다. 결여는 `true` 방향이다 — 서버
+     *   기본값이 그렇고 구서버는 이 필드를 안 보낸다.
+     */
+    switchOutcome(
+        tenant: CapturedTenant,
+        revisionNo: number,
+        result?: { pointerMoved?: boolean; discardedDraft?: boolean; discardedPendingChanges?: number },
+    ): string {
+        // ⚠ **응답을 총체적으로 받는다.** 서버 값이라 형을 믿지 않고, 이 함수는 문면 전수 시험이
+        //    인자 없이도 부른다 — 한 칸에 터지면 그 시험이 통째로 죽는다(같은 형상으로 이미 한 번
+        //    검사기가 죽었다). 결여는 **`true` 방향**이라 구서버에서는 종전과 같이 말한다.
+        // ⚠ **`this` 를 쓰지 않는다.** 문면 전수 시험은 `Object.entries(say)` 로 **떼어서** 부르므로
+        //    그 자리에서 `this` 가 없다 — 실제로 그렇게 터졌다. 문장은 모듈 함수가 갖는다.
+        if (result?.pointerMoved !== false) return switchedLine(tenant, revisionNo);
+        const discarded =
+            result.discardedDraft === true ||
+            (typeof result.discardedPendingChanges === "number" && result.discardedPendingChanges > 0);
+        return discarded
+            ? `「${shown(tenant)}」 버전 ${countJosa(revisionNo, "은/는")} 이미 켜져 있었습니다 — 저장하지 않았던 작업을 버렸습니다.`
+            : `「${shown(tenant)}」 버전 ${countJosa(revisionNo, "은/는")} 이미 켜져 있습니다 — 바꾼 것이 없습니다.`;
     },
     /**
      * 발행 전 편집이 남아 막혔다 — **동의를 묻지 않는다.**
@@ -331,7 +385,7 @@ export const say = {
         };
     },
     switched(tenant: CapturedTenant, revisionNo: number): string {
-        return `「${shown(tenant)}」 사이트를 버전 ${countJosa(revisionNo, "으로/로")} 바꿨습니다.`;
+        return switchedLine(tenant, revisionNo);
     },
     building(tenant: CapturedTenant, revisionNo: number): string {
         return `「${shown(tenant)}」 버전 ${countJosa(revisionNo, "을/를")} 서버가 빌드하는 중`;

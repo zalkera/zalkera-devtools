@@ -193,6 +193,7 @@ test("동의 문면은 서버 문장을 싣되 소독한다", () => {
   const ask = say.discardPendingConfirm(
     captureTenant("bix"),
     "게시 대기 중인 AI 변경 3건이 취소됩니다. [열기](command:workbench.action.terminal.new)",
+    null,
   );
   match(ask.detail, /3건이 취소됩니다/);
   match(ask.detail, /되돌릴 수 없습니다/);
@@ -201,7 +202,7 @@ test("동의 문면은 서버 문장을 싣되 소독한다", () => {
 });
 
 test("동의 문면도 사이트 이름을 소독한다", () => {
-  const ask = say.discardPendingConfirm(captureTenant(EVIL), "");
+  const ask = say.discardPendingConfirm(captureTenant(EVIL), "", null);
   ok(!/\]\(command:/.test(ask.message), ask.message);
 });
 
@@ -241,7 +242,7 @@ test("발행 전 편집 안내도 긴 서버 문장에 밀리지 않는다", () 
 });
 
 test("서버 문장이 길어도 모달을 밀어내지 않는다", () => {
-  const ask = say.discardPendingConfirm(captureTenant("bix"), "가".repeat(5000));
+  const ask = say.discardPendingConfirm(captureTenant("bix"), "가".repeat(5000), null);
   ok(ask.detail.length < 400, `detail 이 ${ask.detail.length}자다`);
 });
 
@@ -285,4 +286,59 @@ test("받을 자리를 묻는 문면이 자기모순이 아니다", () => {
   const intoOpen = say.fetchTargetIntoOpen(captureTenant("bix"), 5, "/w/empty");
   ok(!/그대로 둡니다/.test(intoOpen), intoOpen);
   match(intoOpen, /지금 열어 두신/);
+});
+
+// ── 동의 하나, 결과 둘 ──────────────────────────────────────────────────────
+
+/**
+ * ⚠ **사람은 방금 「버전 N 으로 바꿉니다」에 동의했다.** 그런데 이 갈래는 판을 안 옮기고 작업만
+ *   버린다 — 그 프레임을 여기서 바로잡지 않으면 **다른 행위에 대한 동의**를 받는 셈이다.
+ */
+test("되돌리기 동의는 「바꾼다」고 말하지 않는다 — 판은 그대로다", () => {
+  const ask = say.discardPendingConfirm(
+    captureTenant("bix"),
+    "되돌리면 사라집니다 — 편집 중인 파일 2개. 계속하려면 확인해 주세요.",
+    "DRAFT_DISCARD_CONFIRM_REQUIRED",
+  );
+  ok(!/바꿉니다|바꾸기|바꿨/.test(ask.message + ask.action), `전환 어휘가 남았다: ${ask.message} / ${ask.action}`);
+  ok(ask.detail.includes("판은 그대로"), "판이 안 바뀐다는 사실이 없다");
+  ok(ask.detail.includes("편집 중인 파일 2개"), "서버가 센 것을 안 실었다");
+});
+
+test("전환 동의 갈래의 문면은 그대로다 — 회귀 고정", () => {
+  const ask = say.discardPendingConfirm(captureTenant("bix"), "서버 문장", "PENDING_AI_CHANGES_CONFIRM_REQUIRED");
+  strictEqual(ask.action, "버리고 계속");
+  ok(ask.message.includes("게시하지 않은 AI 변경"));
+});
+
+test("건수를 되풀이하지 않는다 — 서버가 셌다", () => {
+  const ask = say.discardPendingConfirm(
+    captureTenant("bix"),
+    "게시 대기 AI 변경 3건(쓴 크레딧은 돌아오지 않습니다). 계속하려면 확인해 주세요.",
+    "DRAFT_DISCARD_CONFIRM_REQUIRED",
+  );
+  strictEqual((ask.detail.match(/크레딧/g) ?? []).length, 1, "크레딧 문구가 두 번 나온다");
+  strictEqual((ask.detail.match(/3건/g) ?? []).length, 1, "건수가 두 번 나온다");
+});
+
+// ── 전환이 무엇을 했는가 ────────────────────────────────────────────────────
+
+test("판이 안 움직였으면 「바꿨습니다」라고 말하지 않는다", () => {
+  const t = captureTenant("bix");
+  ok(say.switchOutcome(t, 7, {pointerMoved: true}).includes("바꿨습니다"));
+  // 결여는 `true` 방향 — 구서버에서는 종전과 같이 말한다.
+  ok(say.switchOutcome(t, 7, {}).includes("바꿨습니다"));
+  ok(say.switchOutcome(t, 7).includes("바꿨습니다"));
+
+  const 버림 = say.switchOutcome(t, 7, {pointerMoved: false, discardedDraft: true});
+  ok(!버림.includes("바꿨습니다"), `무동작을 바꿨다고 말했다: ${버림}`);
+  ok(버림.includes("버렸습니다"), `버린 사실이 없다: ${버림}`);
+
+  const 무동작 = say.switchOutcome(t, 7, {pointerMoved: false});
+  ok(무동작.includes("바꾼 것이 없습니다"), `무동작을 무동작이라 안 했다: ${무동작}`);
+});
+
+test("게시 대기 건수만 버려진 경우도 버림으로 센다", () => {
+  const 말 = say.switchOutcome(captureTenant("bix"), 7, {pointerMoved: false, discardedPendingChanges: 2});
+  ok(말.includes("버렸습니다"), 말);
 });

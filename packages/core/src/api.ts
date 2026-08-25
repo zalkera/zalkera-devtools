@@ -90,6 +90,23 @@ export interface SiteRevision {
     failReason?: string | null;
 }
 
+/** `activate` 응답에서 **우리가 쓰는 것**. 나머지 필드는 안 본다. */
+export interface ActivateResult {
+    revisionNo?: number;
+    /** 판을 실제로 옮겼는가. **결여는 `true`** — 서버 기본값이자 구서버의 뜻이다. */
+    pointerMoved?: boolean;
+    /** 되돌리기가 편집을 버렸는가. */
+    discardedDraft?: boolean;
+    /** 되돌리기가 버린 게시 대기 AI 변경 건수. */
+    discardedPendingChanges?: number;
+}
+
+/** `GET /draft` 에서 **우리가 쓰는 것**. */
+export interface DraftState {
+    /** 되돌리기가 지목하는 판. **편집이 없으면 `null`** 이다(그때 답은 활성 행이다). */
+    revertTargetRevisionNo?: number | null;
+}
+
 /**
  * 업로드 확정 결과. **버리지 않는다** — 종전에는 `unknown` 이라 방금 만든 버전의 번호도 상태도 몰랐고,
  * 그래서 "올렸습니다"에서 이야기가 끊겼다.
@@ -188,10 +205,27 @@ export class ZalkeraApi {
     }
 
     /** 버전 전환(롤백 포함). READY 인 버전만 받는다. */
-    activateRevision(revisionNo: number, discardPendingChanges = false): Promise<unknown> {
-        return this.request("POST", `/api/partner/site-upload/revisions/${revisionNo}/activate`, {
-            body: { discardPendingChanges },
-        });
+    /**
+     * ⚠ **소비하는 필드만 형에 둔다.** `pointerMoved` 는 「판을 옮겼다」와 「아무것도 안 옮겼다」를
+     *   가른다 — 종전에는 둘 다 성공이라 화면이 무동작을 「바꿨습니다」로 말했다.
+     *   **결여는 `true` 방향**이다(서버 기본값이 그렇고, 구서버는 이 필드를 안 보낸다).
+     */
+    activateRevision(revisionNo: number, discardPendingChanges = false): Promise<ActivateResult> {
+        return this.request<ActivateResult>(
+            "POST",
+            `/api/partner/site-upload/revisions/${revisionNo}/activate`,
+            { body: { discardPendingChanges } },
+        );
+    }
+
+    /**
+     * 「지금 편집 중인 것이 있는가」 — 우리는 **`revertTargetRevisionNo` 하나만** 본다.
+     *
+     * ⚠ **못 읽어도 막지 않는다.** 구서버·권한 부족·망 단절이면 부르는 쪽이 `null` 로 강하하고,
+     *   그때 동작은 종전과 같다(`switchCandidates` 의 KDoc). 「모르는 것으로는 막지 않는다」.
+     */
+    draftState(): Promise<DraftState> {
+        return this.request<DraftState>("GET", "/api/partner/site-upload/draft");
     }
 
     /** 업로드 presign — zip 을 S3 로 **직접** 올린다(백엔드 미경유). */
@@ -332,11 +366,54 @@ async function toError(response: Response): Promise<DevtoolsError> {
  * 다른 409(게시 진행 중·AI 작업 중·레포 연결 테넌트)에는 동의로 뚫는 길이 없다 — 그래서 코드를
  * 정확히 하나만 본다. 「409 면 물어본다」로 넓히면 뚫을 수 없는 거절에도 동의 창을 띄우게 된다.
  */
-const PENDING_AI_CHANGES = "PENDING_AI_CHANGES_CONFIRM_REQUIRED";
+/**
+ * **동의 인자 하나(`discardPendingChanges=true`)가 서버에서 실제로 통과시키는 코드의 명시 집합.**
+ *
+ * ⚠ **409 전반으로 넓히지 마라 — 그리고 이름 패턴으로도 넓히지 마라.** 뚫을 수 없는 거절에도
+ *   동의 창을 띄우게 된다. 같은 409 이웃에 `DRAFT_PRECONDITION_FAILED`·`DRAFT_BASE_MOVED`·
+ *   `DRAFT_CONCURRENT_EDIT` 가 있고 셋 다 동의로 못 뚫는다. `*_CONFIRM_REQUIRED` 접미로 잡는 것도
+ *   같은 이유로 금지다 — 이름은 계약이 아니다.
+ *
+ * **집합에 넣는 조건은 하나다**: 백엔드에서 그 코드를 던지는 자리가 이 인자를 받아 통과시키는가.
+ */
+const DISCARD_CONSENT_CODES: ReadonlySet<string> = new Set([
+    // 판이 옮겨진다 — 전환은 진행되고, 게시 안 한 AI 변경이 함께 사라진다(`BaselineShiftGuard`).
+    "PENDING_AI_CHANGES_CONFIRM_REQUIRED",
+    // **판은 그대로다** — 이미 켜진 판을 다시 고른 것이라 「지금으로 되돌리기」로 갈리고,
+    // 편집과 게시 대기 AI 변경만 버린다(`discardToCurrent`). 잃는 것이 더 크므로 문면이 다르다.
+    "DRAFT_DISCARD_CONFIRM_REQUIRED",
+]);
 
 /** 이 거절이 **사용자 동의 한 번으로 넘어갈 수 있는가.** */
 export function needsDiscardConsent(error: unknown): boolean {
-    return error instanceof DevtoolsError && error.serverCode === PENDING_AI_CHANGES;
+    return error instanceof DevtoolsError && DISCARD_CONSENT_CODES.has(error.serverCode ?? "");
+}
+
+/**
+ * **되돌리기가 지목하는 판인가** — 이것도 목록에서 뺀다.
+ *
+ * ⚠ **`isActive` 만으로는 못 뺀다.** 백엔드는 활성 포인터가 없는 테넌트(첫 업로드가 빌드 실패한
+ *   경우)에서 **드래프트의 기준 판**을 「지금 켜진 판」으로 본다 — 안 그러면 편집을 만들 수는
+ *   있는데 버릴 수도 발행할 수도 없기 때문이다. 그 판이 목록에 후보로 뜨면, 고르는 순간
+ *   전환이 아니라 **폐기**가 된다.
+ *
+ *   백엔드가 그 자리 응답 KDoc 에 **「화면이 `isActive` 로 직접 찾으면 안 된다」**고 적어 뒀고,
+ *   콘솔이 먼저 그 함정을 밟았다.
+ *
+ * ⚠ **서버 답 둘의 합집합이다 — 화면이 규칙을 지어내지 않는다.** 드래프트가 있으면
+ *   `revertTargetRevisionNo` 가 곧 그 답이고, 없으면 그 필드는 `null` 이며 답은 목록의
+ *   `isActive` 행이다. 둘을 합치면 서버가 답한 것만 남는다.
+ *
+ * @param revertTarget `GET /draft` 의 `revertTargetRevisionNo`. **못 읽었으면 `null`** — 모르는
+ *   것으로는 막지 않는다(그때 동작은 종전과 같다).
+ */
+export function switchCandidates<T extends {revisionNo: number; isActive: boolean; status: string}>(
+    revisions: readonly T[],
+    revertTarget: number | null,
+): T[] {
+    return revisions.filter(
+        (r) => r.status === "READY" && !r.isActive && r.revisionNo !== revertTarget,
+    );
 }
 
 /**

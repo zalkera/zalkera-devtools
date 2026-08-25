@@ -358,6 +358,34 @@ const WIRES = [
         2,
     ],
     [
+        // ⚠ **후보 판정이 확장 로컬 조건으로 돌아가면 그 함정이 되살아난다.** 활성 포인터 없는
+        //    테넌트에서 드래프트 기준 판이 후보로 떠, 고르는 순간 전환이 아니라 폐기가 된다 —
+        //    백엔드 응답 KDoc 이 「화면이 `isActive` 로 직접 찾으면 안 된다」고 적어 둔 자리다.
+        "packages/vscode/src/extension.ts",
+        "switchCandidates(revisions, revertTarget)",
+        "되돌리기 대상이 전환 후보로 떠, 고른 순간 편집과 게시 대기 AI 변경이 사라진다",
+    ],
+    [
+        // ⚠ **판정 재료를 못 얻었다고 막지 않는다.** 이 줄이 사라지면 구서버·권한 부족·망 단절이
+        //    전환 자체를 막는 회귀가 된다 — 「모르는 것으로는 막지 않는다」.
+        "packages/vscode/src/extension.ts",
+        "(d) => d.revertTargetRevisionNo ?? null,",
+        "되돌리기 대상을 못 읽으면 전환이 통째로 막힌다 — 모르는 것으로 막는 형상",
+    ],
+    [
+        // ⚠ **무동작을 「바꿨습니다」로 말하던 자리다.** 판정을 안 지나면 그 거짓이 되살아난다.
+        "packages/vscode/src/extension.ts",
+        "say.switchOutcome(tenant, target.revisionNo, outcome)",
+        "판이 안 움직인 전환을 「바꿨습니다」로 말한다 — 되돌리기가 작업만 버린 경우도 성공으로 보인다",
+    ],
+    [
+        // ⚠ **동의 문면이 코드를 안 보면 갈래가 하나로 접힌다** — 판이 그대로인데 「버리고 계속」을
+        //    묻게 되고, 사람은 전환에 동의한 줄 안다.
+        "packages/vscode/src/extension.ts",
+        "error instanceof DevtoolsError ? error.serverCode ?? null : null,",
+        "되돌리기 동의가 전환 문면으로 뜬다 — 다른 행위에 대한 동의를 받는다",
+    ],
+    [
         "packages/vscode/src/extension.ts",
         "if (!needsDiscardConsent(error)) throw error;",
         "서버가 「계속하려면 확인해 주세요」라고 말한 거절에 확인할 자리가 없어져, 버전 전환이 막다른 길이 된다",
@@ -421,7 +449,7 @@ const WIRES = [
     ],
     [
         "packages/vscode/src/extension.ts",
-        "onConsent: (serverMessage) => askDiscardConsent(tenant, serverMessage),",
+        "onConsent: (serverMessage, serverCode) =>",
         "새 버전 배포가 zip 을 다 올린 뒤 409 를 받고 「계속하려면 확인해 주세요」만 반복한다 — 확인할 자리가 없는 막다른 길이 된다",
     ],
     [
@@ -437,7 +465,7 @@ const WIRES = [
     ],
     [
         "packages/vscode/src/extension.ts",
-        "if (!(await askDiscardConsent(tenant, (error as Error).message))) return;",
+        "await askDiscardConsent(\n        tenant,",
         "전환에서 거절해도 그대로 진행한다 — 사람이 「아니오」를 눌렀는데 AI 변경이 사라진다",
     ],
     [

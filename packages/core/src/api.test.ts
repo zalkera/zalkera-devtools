@@ -1,6 +1,6 @@
-import { ok, rejects, strictEqual } from "node:assert/strict";
+import assert, { ok, rejects, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
-import { ZalkeraApi, needsDiscardConsent, isDraftInProgress, revisionWhen } from "./api.ts";
+import { ZalkeraApi, needsDiscardConsent, isDraftInProgress, revisionWhen, switchCandidates } from "./api.ts";
 import { DevtoolsError } from "./errors.ts";
 
 function api(handler: (url: string, init: RequestInit) => Response): ZalkeraApi {
@@ -267,4 +267,68 @@ test("정상 시각은 그대로 그린다", () => {
   const shown = revisionWhen("2026-08-20T01:23:45Z");
   ok(shown !== "시각 모름", shown);
   ok(/2026/.test(shown), shown);
+});
+
+// ── 동의로 뚫리는 거절 ──────────────────────────────────────────────────────
+
+const rejected = (code: string) =>
+  new DevtoolsError("SERVER_REJECTED", "거절", undefined, undefined, code);
+
+/**
+ * ⚠ **이름으로 잡지 않는다.** 같은 409 이웃에 `DRAFT_PRECONDITION_FAILED`·`DRAFT_BASE_MOVED`·
+ *   `DRAFT_CONCURRENT_EDIT` 가 있고 셋 다 동의로 못 뚫는다. `*_CONFIRM_REQUIRED` 접미로 잡으면
+ *   **뚫을 수 없는 거절에 동의 창을 띄운다** — 가짜 코드 한 칸이 그 회귀를 문다.
+ */
+test("동의 인자가 실제로 통과시키는 두 코드만 참이다", () => {
+  const 진리표: [string, boolean][] = [
+    ["PENDING_AI_CHANGES_CONFIRM_REQUIRED", true],
+    ["DRAFT_DISCARD_CONFIRM_REQUIRED", true],
+    ["DRAFT_IN_PROGRESS", false],
+    ["DRAFT_BASE_MOVED", false],
+    ["DRAFT_PRECONDITION_FAILED", false],
+    ["DRAFT_CONCURRENT_EDIT", false],
+    // 접미만 같은 가짜 — 패턴 매칭으로 넓히면 여기서 빨개진다.
+    ["FAKE_CONFIRM_REQUIRED", false],
+  ];
+  for (const [code, 참] of 진리표) {
+    assert.strictEqual(needsDiscardConsent(rejected(code)), 참, `코드가 틀렸다: ${code}`);
+  }
+  assert.strictEqual(needsDiscardConsent(new Error("plain")), false);
+});
+
+// ── 되돌리기 대상은 후보에서 뺀다 ──────────────────────────────────────────
+
+const rev = (revisionNo: number, isActive: boolean, status = "READY") => ({
+  revisionNo,
+  isActive,
+  status,
+});
+
+/**
+ * ⚠ **이 칸이 콘솔이 먼저 밟은 함정이다.** 활성 포인터가 없는 테넌트에서 백엔드는 드래프트의
+ *   기준 판을 「지금 켜진 판」으로 본다 — `isActive` 만 보면 그 판이 후보로 떠서, 고르는 순간
+ *   전환이 아니라 **폐기**가 된다.
+ */
+test("활성 포인터가 없어도 되돌리기 대상은 후보가 아니다", () => {
+  const list = [rev(9, false), rev(7, false), rev(5, false)];
+  assert.deepStrictEqual(
+    switchCandidates(list, 7).map((r) => r.revisionNo),
+    [9, 5],
+    "드래프트 기준 판이 후보에 남았다",
+  );
+});
+
+test("활성 행도 여전히 뺀다 — 둘의 합집합이다", () => {
+  const list = [rev(9, true), rev(7, false), rev(5, false)];
+  assert.deepStrictEqual(switchCandidates(list, 7).map((r) => r.revisionNo), [5]);
+});
+
+test("대상을 못 읽었으면 막지 않는다 — 종전 동작 그대로", () => {
+  const list = [rev(9, true), rev(7, false)];
+  assert.deepStrictEqual(switchCandidates(list, null).map((r) => r.revisionNo), [7]);
+});
+
+test("켤 수 없는 판은 여전히 후보가 아니다", () => {
+  const list = [rev(9, false, "BUILDING"), rev(7, false, "FAILED"), rev(5, false)];
+  assert.deepStrictEqual(switchCandidates(list, null).map((r) => r.revisionNo), [5]);
 });

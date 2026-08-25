@@ -31,7 +31,12 @@ export interface PublishOptions {
      *
      * @param serverMessage 서버가 보낸 문장(건수가 들어 있다). 표시 자리에서 소독한다.
      */
-    onConsent?: (serverMessage: string) => Promise<boolean>;
+    /**
+     * ⚠ **문면 재료가 둘이다** — 서버 문장과 **서버 코드**. 같은 동의 인자로 뚫리는 코드가 둘이고
+     *   결과가 다르다(판이 옮겨진다 / 판은 그대로고 작업만 버린다). 코드를 안 넘기면 부르는 쪽이
+     *   그 둘을 못 갈라 **다른 행위에 대한 동의**를 받게 된다.
+     */
+    onConsent?: (serverMessage: string, serverCode: string | null) => Promise<boolean>;
 }
 
 export interface PublishResult {
@@ -64,7 +69,13 @@ async function confirmWithConsent(options: PublishOptions, storageKey: string): 
         return await options.api.confirmArchive(storageKey);
     } catch (error) {
         if (!needsDiscardConsent(error) || !options.onConsent) throw error;
-        if (!(await options.onConsent(error instanceof Error ? error.message : String(error)))) {
+        const rejected = error instanceof DevtoolsError ? error : null;
+        if (
+            !(await options.onConsent(
+                rejected?.message ?? String(error),
+                rejected?.serverCode ?? null,
+            ))
+        ) {
             throw new DevtoolsError("CANCELLED", "올리기를 그만두었습니다.");
         }
         return await options.api.confirmArchive(storageKey, true);

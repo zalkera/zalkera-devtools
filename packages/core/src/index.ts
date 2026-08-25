@@ -26,6 +26,9 @@ export {
 export {
   ZalkeraApi,
   needsDiscardConsent,
+  switchCandidates,
+  type ActivateResult,
+  type DraftState,
   isDraftInProgress,
   revisionWhen,
   type ApiOptions,

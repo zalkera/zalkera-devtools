@@ -90,6 +90,8 @@ import {
   type IssuedKey,
   noRevisionError,
   needsDiscardConsent,
+  switchCandidates,
+  type ActivateResult,
   isDraftInProgress,
   revisionWhen,
   suggestFolderName,
@@ -1846,7 +1848,22 @@ async function updateZipCommand(): Promise<void> {
  */
 async function switchVersion(): Promise<void> {
   const { api, tenant } = await ensureApiFor();
-  const revisions = await api.listRevisions();
+  // ⚠ **되돌리기 대상은 서버가 답한다** — 화면이 `isActive` 로 지어내면 활성 포인터 없는
+  //    테넌트에서 그 판이 후보로 떠, 고르는 순간 전환이 아니라 **폐기**가 된다(백엔드 응답
+  //    KDoc 이 「화면이 `isActive` 로 직접 찾으면 안 된다」고 적어 뒀고 콘솔이 먼저 밟았다).
+  //
+  // ⚠ **못 읽으면 막지 않는다.** 구서버·권한 부족·망 단절이면 `null` 로 강하하고 그때 동작은
+  //    종전과 같다 — 「모르는 것으로는 막지 않는다」.
+  const [revisions, revertTarget] = await Promise.all([
+    api.listRevisions(),
+    api.draftState().then(
+      (d) => d.revertTargetRevisionNo ?? null,
+      (error) => {
+        log(`되돌리기 대상을 확인하지 못했습니다 — ${error instanceof Error ? error.message : error}`);
+        return null;
+      },
+    ),
+  ]);
   // **켤 수 있는 것만 고르게 한다.** BUILDING·FAILED 를 목록에 넣으면 골랐다가 409 로 거절당한다 —
   // 고를 수 없는 것을 보여 주고 거절하는 것은 화면이 사람에게 거짓말을 하는 것이다.
   //
@@ -1854,9 +1871,7 @@ async function switchVersion(): Promise<void> {
   //    번호를 받으면 전환이 아니라 「지금으로 되돌리기」로 갈라져 **편집 중인 파일과 게시 대기 AI
   //    변경을 버린다.** 이 필터가 그 문 앞을 막고 있다 — 걷어내면 롤백 목록에서 지금 판을 골랐다가
   //    작업이 사라진다.
-  const candidates = revisions.filter(
-    (r) => !r.isActive && r.status === "READY",
-  );
+  const candidates = switchCandidates(revisions, revertTarget);
   if (candidates.length === 0) {
     const building = revisions.filter((r) => r.status === "BUILDING").length;
     void vscode.window.showInformationMessage(
@@ -1901,7 +1916,7 @@ async function switchVersion(): Promise<void> {
   );
   if (confirm !== ask.action) return;
 
-  const activate = (discardPendingChanges: boolean): Thenable<unknown> =>
+  const activate = (discardPendingChanges: boolean): Thenable<ActivateResult> =>
     vscode.window.withProgress(
       {
         location: vscode.ProgressLocation.Notification,
@@ -1909,8 +1924,9 @@ async function switchVersion(): Promise<void> {
       },
       () => api.activateRevision(target.revisionNo, discardPendingChanges),
     );
+  let outcome: ActivateResult;
   try {
-    await activate(false);
+    outcome = await activate(false);
   } catch (error) {
     // 서버가 「계속하려면 확인해 주세요」라고 말했는데 확인할 자리가 없으면 그 문장이 곧 막다른
     // 길이다. **여기 하나만 뚫는다** — 다른 거절(게시 진행 중·AI 작업 중)에는 동의로 넘어가는
@@ -1922,13 +1938,26 @@ async function switchVersion(): Promise<void> {
       return;
     }
     if (!needsDiscardConsent(error)) throw error;
-    if (!(await askDiscardConsent(tenant, (error as Error).message))) return;
-    await activate(true);
+    if (
+      !(await askDiscardConsent(
+        tenant,
+        (error as Error).message,
+        error instanceof DevtoolsError ? error.serverCode ?? null : null,
+      ))
+    )
+      return;
+    outcome = await activate(true);
   }
-  log(`사이트를 버전 ${countJosa(target.revisionNo, "으로/로")} 바꿨습니다.`);
-  void vscode.window.showInformationMessage(
-    say.switched(tenant, target.revisionNo),
-  );
+  // ⚠ **판이 안 움직인 경우를 「바꿨습니다」로 말하지 않는다.** 이미 켜진 판을 고르면 서버는
+  //    전환이 아니라 「지금으로 되돌리기」를 하고 판은 그대로 둔다 — 그때 「바꿨습니다」는 거짓이다.
+  //    판정은 core 가 한다(`switchOutcome`) — 결여는 `true` 방향이라 구서버에서는 종전과 같다.
+  //
+  // ⚠ **로그도 같은 분기를 탄다.** 알림과 로그가 갈리면 로그가 거짓 증언이 된다.
+  // 한 번만 짓고 두 자리가 나눠 쓴다 — 두 번 부르면 나중에 한쪽만 고쳐진다.
+  // `say` 가 지은 문장이라 서버 값이 아니다(테넌트는 그 안에서 이미 소독을 지났다) — 표기만 붙인다.
+  const said = say.switchOutcome(tenant, target.revisionNo, outcome);
+  log(said);
+  void vscode.window.showInformationMessage(ours(said));
 }
 
 /**
@@ -2387,8 +2416,9 @@ async function tellDraftBlocked(
 async function askDiscardConsent(
   tenant: CapturedTenant,
   serverMessage: string,
+  serverCode: string | null,
 ): Promise<boolean> {
-  const ask = say.discardPendingConfirm(tenant, serverMessage);
+  const ask = say.discardPendingConfirm(tenant, serverMessage, serverCode);
   const answer = await vscode.window.showWarningMessage(
     ask.message,
     { modal: true, detail: ask.detail },
@@ -2430,7 +2460,8 @@ async function publishCommand(): Promise<void> {
           onProgress: log,
           // 서버가 「계속하려면 확인해 주세요」라고 말한 자리 — 확인할 곳을 준다. 전환 쪽과
           // **같은 문면**을 쓴다: 두 문이 같은 가드를 지나므로 사람이 보는 말도 같아야 한다.
-          onConsent: (serverMessage) => askDiscardConsent(tenant, serverMessage),
+          onConsent: (serverMessage, serverCode) =>
+            askDiscardConsent(tenant, serverMessage, serverCode),
         }),
     );
   } catch (error) {
