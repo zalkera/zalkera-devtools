@@ -593,6 +593,11 @@ const NOTICE_SOURCES = [
     "packages/core/src/tenantScope.ts",
     "packages/core/src/errorNotice.ts",
     "packages/core/src/whyBlocked.ts",
+    // ⚠ **사이드바도 표시 표면이다.** 작업 폴더 묶음이 폴더 경로를 싣기 시작하면서, 이 검사기가
+    //    아무도 안 보는 자리를 하나 갖게 됐다 — 알림 호출의 `arguments[0]` 만 보는 구조라
+    //    `MessageOptions` 도, 트리 `description`·`tooltip` 도 관할 밖이었다(보안 심의 🟡).
+    //    경로 이름은 **남이 정할 수 있으므로** 서버 값과 같은 자를 댄다.
+    "packages/core/src/sidebarPlan.ts",
 ];
 
 /**

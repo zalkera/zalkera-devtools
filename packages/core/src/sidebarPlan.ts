@@ -13,6 +13,7 @@
  */
 
 import {displayPath} from "./displayPath.ts";
+import {ours, plainNotice} from "./notice.ts";
 
 export interface SidebarState {
     signedIn: boolean;
@@ -168,7 +169,8 @@ export function sidebarPlan(state: SidebarState): PlanGroup[] {
     {
         const making: PlanItem[] = [
             previewUrl
-                ? live(`미리보기 열기 — ${previewUrl}`, "zalkera.preview.start", "browser", "실행 중")
+                // 우리가 띄운 dev 서버의 주소다 — 서버가 준 값이 아니라 **우리 것**이라 표기만 한다.
+                ? live(`미리보기 열기 — ${ours(previewUrl)}`, "zalkera.preview.start", "browser", "실행 중")
                 : act("미리보기 시작", "zalkera.preview.start", "play", "로컬에서 확인합니다"),
         ];
         if (previewUrl) making.push(act("미리보기 중지", "zalkera.preview.stop", "debug-stop"));
@@ -176,7 +178,9 @@ export function sidebarPlan(state: SidebarState): PlanGroup[] {
         // 종전에는 팔레트에만 있어 비개발자가 찾지 못했다 — "말로 고치기"의 입구인데.
         making.push(act("에이전트 연결(MCP)", "zalkera.agent.connect", "plug", "쓰시는 AI 가 이 사이트를 다루게 합니다"));
         if (keyExpiresAt) {
-            making.push({kind: "info", label: `미리보기 자격증명 만료: ${keyExpiresAt}`, icon: "key"});
+            // ⚠ **서버가 준 값이다**(열쇠 발급 응답의 `expiresAt`) — 검사기를 이 파일까지 넓히니
+            //    이 자리가 무소독인 채 배송되고 있었다(보안 심의가 연 관할의 첫 수확).
+            making.push({kind: "info", label: `미리보기 자격증명 만료: ${plainNotice(keyExpiresAt, 64)}`, icon: "key"});
         }
         groups.push(
             {
@@ -247,7 +251,11 @@ export function sidebarPlan(state: SidebarState): PlanGroup[] {
         icon: "folder-opened",
         // 전체 경로는 여기 — 툴팁은 안 잘린다. 기존 약속 문장은 그대로 뒤에 둔다.
         tooltip:
-            (folderPath ? `${folderPath}\n` : "") +
+            // ⚠ **경로는 소독을 지난다.** 폴더 이름은 남이 정할 수 있고, 이 값이 서던 날
+            //    `notice.ts` 의 「트리 툴팁도 전부 리터럴 문자열」이 거짓이 됐다(보안 심의).
+            //    툴팁이 언젠가 `MarkdownString` 이 되면 그 거짓이 **거짓 안심**이 되므로,
+            //    그날을 기다리지 않고 지금 지난다.
+            (folderPath ? `${plainNotice(folderPath, 512)}\n` : "") +
             "어느 폴더로 일할지 정합니다 — 「교체」만 지금 폴더를 지웁니다",
         items: [
             // ⚠ **맨 위다.** 묶음 툴팁 첫 구(「어느 폴더로 일할지 정합니다」)를 그대로 동사화한

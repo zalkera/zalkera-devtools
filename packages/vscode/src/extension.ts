@@ -1783,7 +1783,12 @@ async function updateZipCommand(): Promise<void> {
     ours("이 폴더의 소스를 고르신 zip 으로 갈아 끼웁니다. 지금 내용은 사라집니다."),
     {
       modal: true,
-      detail: `${provNotice.line}\n\n${dir}\n\n그대로 두는 것: ${keep.length > 0 ? keep.join(" · ") : "없습니다"}`,
+      // ⚠ **셋 다 소독을 지난다.** 보간 셋이 무표기·무소독이었다 — `dir` 과 `keep` 은 **디스크
+      //    이름**이라 남이 정할 수 있고, 개행 하나로 뒷줄(「그대로 두는 것: …」)을 위조할 수
+      //    있다. 형제 발행 모달과 같은 자를 댄다(보안 심의).
+      detail:
+        `${plainNotice(provNotice.line, 512)}\n\n${plainNotice(dir, 512)}\n\n` +
+        `그대로 두는 것: ${keep.length > 0 ? plainNotice(keep.join(" · "), 512) : "없습니다"}`,
     },
     provNotice.action,
   );

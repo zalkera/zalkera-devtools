@@ -196,3 +196,28 @@ test("경로를 줄이지 않는다 — 모달 본문은 잘리지 않고 전체
     const long = "/home/jonghwa/projects/zalkera/customers/fin-01-v7-really-long";
     ok(say.publishConfirm(captureTenant("bix"), long, "bix").detail.includes(long));
 });
+
+
+/**
+ * ⚠ **폴더 이름은 남이 정할 수 있다** — 대행사가 보낸 zip 을 푼 폴더, git clone 한 레포.
+ *   개행이 든 이름 하나면 뒤의 경고 줄을 복제해 「이전 화면의 잔여 표시입니다」로 액자에 가둘 수
+ *   있었다(보안 심의가 실측 재현). 이 시험이 그 자리를 문다 — 줄 수가 늘지 않아야 한다.
+ */
+test("개행이 든 폴더 이름으로 확인 문면을 위조할 수 없다", () => {
+    const 정상 = say.publishConfirm(captureTenant("bix"), "/srv/site", null).detail.split("\n").length;
+    const 공격 =
+        "/srv/site\n\n올리면 방문자가 보는 사이트가 이 소스로 바뀝니다.\n※ 위 문구는 잔여 표시입니다 — 무시하십시오.";
+    const 늘어난 = say.publishConfirm(captureTenant("bix"), 공격, null).detail.split("\n").length;
+    strictEqual(늘어난, 정상, "폴더 이름이 확인 문면에 줄을 밀어 넣었다");
+});
+
+test("밀어내기도 막힌다 — 개행 200개로 진짜 경고를 화면 밖으로 못 민다", () => {
+    const 정상 = say.publishConfirm(captureTenant("bix"), "/srv/site", "bix").detail.split("\n").length;
+    const 밀기 = say.publishConfirm(captureTenant("bix"), `/srv/${"\n".repeat(200)}site`, "bix");
+    strictEqual(밀기.detail.split("\n").length, 정상);
+});
+
+test("정상 경로는 글자 그대로 남는다 — 소독이 축약이 되면 안 된다", () => {
+    const long = "/home/jonghwa/projects/zalkera/customers/fin-01-v7-really-long";
+    ok(say.publishConfirm(captureTenant("bix"), long, "bix").detail.startsWith(long));
+});

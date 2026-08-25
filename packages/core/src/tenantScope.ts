@@ -238,6 +238,13 @@ export const say = {
      *   순간 사이드바는 안 보인다 — 마지막 확인 지점은 **자족**해야 한다. `message` 의 「이 폴더」가
      *   가리키는 것이 바로 아래 선다. 형제 「zip 으로 교체」 확인이 이미 같은 형태다.
      *   **축약하지 않는다** — 모달 본문은 잘리지 않고 줄바꿈되며, 여기서는 전체가 요점이다.
+     *
+     * ⚠ **경로도 소독을 지난다.** 폴더 이름은 **남이 정할 수 있다**(대행사가 보낸 zip 을 푼 폴더·
+     *   git clone 한 레포). 개행이 든 이름 하나면 뒤의 경고 줄을 **복제해 액자에 가두고**
+     *   「이전 화면의 잔여 표시입니다」로 무력화할 수 있다(보안 심의가 실측 재현). `ours` 는
+     *   항등 함수라 그것을 못 막는다 — 형제 모달 둘(`discardPendingConfirm`·`draftBlocked`)이
+     *   이미 **모달 `detail` 이라는 이유로** `plainNotice` 를 지나는데 이 자리만 빠져 있었다.
+     *   상한은 `MAX_CAP` 이라 정상 경로는 글자 그대로 남는다(축약과 충돌하지 않는다).
      */
     publishConfirm(
         tenant: CapturedTenant,
@@ -246,18 +253,17 @@ export const say = {
     ): { message: string; detail: string; action: string } {
         // ⚠ **중간 변수를 템플릿에 보간하지 않는다.** 소독 검사는 문면이 아니라 **구문**으로 보므로
         //    `${where}` 같은 이름은 통과시킬 근거가 없다 — 이어붙이기로 두면 **소독 대상이
-        //    아니라고 표기한** 조각(`ours(dir)`)만 템플릿에 남는다. `ours` 는 항등 함수라
-        //    값을 바꾸지 않는다(`notice.ts` 가 그 한계를 적어 뒀다) — 표기이지 소독이 아니다. 공용 두 줄은 상수 하나로 둔다(사본이 갈리지 않게).
+        //    소독을 지난 조각(`plainNotice(dir, …)`)만 템플릿에 남는다. 공용 두 줄은 상수 하나로 둔다(사본이 갈리지 않게).
         if (binding === null) {
             return {
                 message: `이 폴더는 아직 어느 사이트에도 연결되어 있지 않습니다 — 「${shown(tenant)}」 사이트로 올립니다.`,
-                detail: `${ours(dir)}\n\n` + PUBLISH_OUTCOME + "\n올리면 이 폴더가 그 사이트에 연결됩니다.",
+                detail: `${plainNotice(dir, 512)}\n\n` + PUBLISH_OUTCOME + "\n올리면 이 폴더가 그 사이트에 연결됩니다.",
                 action: "이 사이트로 올리고 연결",
             };
         }
         return {
             message: `「${shown(tenant)}」 사이트를 지금 이 폴더의 소스로 바꿉니다.`,
-            detail: `${ours(dir)}\n\n` + PUBLISH_OUTCOME,
+            detail: `${plainNotice(dir, 512)}\n\n` + PUBLISH_OUTCOME,
             action: "올리고 게시",
         };
     },
