@@ -2605,6 +2605,11 @@ const REFLECT_POLL_MS = 15_000;
  *   180초가 되어 반영되는 바로 그 순간에 조용히 포기한다. 두 레포에 걸쳐 있어 검사기가 없다.
  */
 const REFLECT_POLL_MAX = 12;
+/**
+ * `unknown` 을 참는 폴 수. 스냅샷 주기(기본 60초) + 여유를 덮는다 — 그동안은 「관측이 없는 사이트」와
+ * 「관측이 이제 막 시작될 사이트」를 구별할 수 없으므로, **못 가르는 것을 안다고 말하지 않는다.**
+ */
+const UNKNOWN_GRACE_POLLS = 5;
 
 /**
  * 게시한 판이 방문자에게 닿으면 **한 번만** 알린다. 실패·상한·관측 없음은 전부 **침묵**이다 —
@@ -2625,6 +2630,12 @@ async function watchReflection(api: ZalkeraApi, revisionNo: number, tenant: Capt
       void vscode.window.showInformationMessage(say.reflected(tenant, revisionNo));
       return;
     }
+    // ⚠ **첫 게시의 `unknown` 은 「관측이 없는 사이트」가 아니라 「아직 안 시작된 사이트」다.**
+    //   관측 행은 사이트가 스냅샷에 처음 등장한 뒤 박스의 다음 틱(≤60초)에야 생긴다 — 제어가 관측
+    //   행을 미리 깔지 않는 것이 이 설계의 요지이기 때문이다. 첫 폴 한 번으로 끊으면 **사이트가
+    //   처음 세상에 보이는 순간**, 즉 이 알림의 가치가 가장 큰 자리에서 알림이 죽는다.
+    //   한 동기화 주기만큼 기다려 보고, 그 뒤에도 없으면 그때가 진짜 「관측이 안 도는 사이트」다.
+    if (state === "unknown" && i < UNKNOWN_GRACE_POLLS) continue;
     // 관측이 없거나(unknown) 다른 판으로 갈아탔으면(superseded) 기다리던 사건은 안 온다.
     if (state !== "pending") {
       log(`반영 확인 종료(${state}) — 버전 ${revisionNo}`);

@@ -51,6 +51,12 @@ const WIRES = [
     ],
     [
         "packages/vscode/src/extension.ts",
+        'if (state === "unknown" && i < UNKNOWN_GRACE_POLLS) continue;',
+        "첫 게시에서 관측 행이 아직 없는 창을 「관측이 안 도는 사이트」로 오독해 **첫 폴 한 번에 감시가 " +
+            "죽는다** — 사이트가 처음 세상에 보이는 순간, 이 알림의 가치가 가장 큰 자리에서",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
         'if (state !== "pending") {',
         "종료 조건이 빠지면 관측이 없는 사이트(구 백엔드·박스 미보고·git 레인)에서 폴링이 상한까지 돈다 — " +
             "오지 않을 소식을 기다리는 것이고, 그 사이 조회가 계속 나간다",
