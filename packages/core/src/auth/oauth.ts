@@ -114,6 +114,25 @@ export async function login(config: AuthConfig, store: TokenStore, options: Logi
  */
 const refreshing = new WeakMap<TokenStore, Promise<string>>();
 
+/**
+ * **로그아웃 세대.** 로그아웃이 이 값을 올리고, 진행 중인 갱신은 **쓰기 직전에** 자기가 시작할 때
+ * 본 값과 견준다.
+ *
+ * ⚠ **없으면 로그아웃이 되살아난다.** 갱신은 read → 교환 → **write** 인데, 그 사이에 로그아웃의
+ *   `clear()` 가 끼면 **write 가 로그아웃을 되돌린다** — 보관소에 토큰이 남고, 화면은 로그아웃인데
+ *   다음 명령이 조용히 인증된다. 도달 가능하다: 미리보기 자격증명 갱신 타이머가 배경에서 갱신을
+ *   돌리므로, 사람이 로그아웃을 누르는 순간과 겹칠 수 있다(보안 심의).
+ *
+ * ⚠ **다시 읽어 견주는 것으로는 안 닫힌다.** 읽기와 쓰기 사이가 또 창이다. 세대는 그 창이 없다 —
+ *   비교와 쓰기 사이에 `await` 이 없다.
+ *
+ * ⚠ **프로세스 안에서만 산다.** 창마다 확장 호스트가 따로이므로 다른 창의 로그아웃은 못 본다 —
+ *   그쪽은 보관소 잠금이 필요하고 별건이다(형제 [refreshing] 과 같은 한계).
+ */
+const logoutEpoch = new WeakMap<TokenStore, number>();
+
+const epochOf = (store: TokenStore): number => logoutEpoch.get(store) ?? 0;
+
 export async function getAccessToken(config: AuthConfig, store: TokenStore): Promise<string> {
     const inFlight = refreshing.get(store);
     if (inFlight) return inFlight;
@@ -128,6 +147,8 @@ export async function getAccessToken(config: AuthConfig, store: TokenStore): Pro
 }
 
 async function refreshToken(config: AuthConfig, store: TokenStore): Promise<string> {
+    // **시작 시점의 세대를 붙든다** — 쓰기 직전에 이 값과 견준다.
+    const epoch = epochOf(store);
     const current = await store.read();
     if (!current) {
         throw new DevtoolsError("NOT_AUTHENTICATED", "로그인이 필요합니다.", "먼저 잘커라에 로그인해 주세요.");
@@ -151,12 +172,27 @@ async function refreshToken(config: AuthConfig, store: TokenStore): Promise<stri
             cause,
         );
     }
+    // ⚠ **교환하는 사이에 로그아웃이 났으면 쓰지 않는다.** 쓰면 로그아웃이 되살아난다.
+    //    견주기와 쓰기 사이에 `await` 이 없어야 한다 — 있으면 그 자리가 다시 창이다.
+    if (epochOf(store) !== epoch) {
+        throw new DevtoolsError(
+            "NOT_AUTHENTICATED",
+            "로그아웃되었습니다.",
+            "다시 로그인해 주세요.",
+        );
+    }
     await store.write(refreshed);
     return refreshed.accessToken;
 }
 
-/** 로그아웃 — 보관소를 비운다. 서버 세션 종료(백채널)는 확장이 별도로 부른다. */
+/**
+ * 로그아웃 — 보관소를 비운다. 서버 세션 종료(백채널)는 확장이 별도로 부른다.
+ *
+ * ⚠ **세대를 먼저 올린다.** 그래야 진행 중인 갱신의 쓰기가 무효가 된다(아래 [logoutEpoch]).
+ *   비우기보다 **앞**이어야 한다 — 뒤에 올리면 그 사이에 끝난 갱신이 여전히 되살린다.
+ */
 export async function logout(store: TokenStore): Promise<void> {
+    logoutEpoch.set(store, epochOf(store) + 1);
     await store.clear();
 }
 

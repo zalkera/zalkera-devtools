@@ -1,7 +1,7 @@
 import { ok, rejects, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
 import { DevtoolsError } from "../errors.ts";
-import { getAccessToken, login, type AuthConfig } from "./oauth.ts";
+import { getAccessToken, login, logout, type AuthConfig } from "./oauth.ts";
 import { createPkce, createState } from "./pkce.ts";
 import { MemoryTokenStore } from "./store.ts";
 
@@ -310,4 +310,126 @@ test("갱신이 실패해도 가드가 풀린다 — 한 번 실패한 창이 �
         },
     );
     strictEqual(exchanges, 2, "두 번째 시도가 가드에 갇혀 갱신을 안 던졌다");
+});
+
+/**
+ * ⚠ **로그아웃이 되살아나던 자리다.** 갱신은 read → 교환 → **write** 인데 그 사이에 로그아웃의
+ *   `clear()` 가 끼면 write 가 로그아웃을 되돌렸다 — 화면은 로그아웃인데 다음 명령이 조용히
+ *   인증된다. 자격증명 갱신 타이머가 배경에서 돌아 **도달 가능**했다(보안 심의).
+ */
+test("교환하는 사이에 로그아웃이 나면 토큰을 되살리지 않는다", async () => {
+    const store = new MemoryTokenStore();
+    await store.write({
+        accessToken: "stale",
+        refreshToken: "r",
+        expiresAt: Date.now() - 1_000,
+        issuer: config.issuer,
+    });
+    const done = withStubbedTokenEndpoint(
+        async () => {
+            // 교환이 도는 **그 사이에** 로그아웃이 난다.
+            await logout(store);
+            return new Response(
+                JSON.stringify({ access_token: "fresh", refresh_token: "r2", expires_in: 300 }),
+                { status: 200, headers: { "content-type": "application/json" } },
+            );
+        },
+        () => getAccessToken(config, store),
+    );
+    await rejects(
+        () => done,
+        (error: unknown) => error instanceof DevtoolsError && error.code === "NOT_AUTHENTICATED",
+    );
+    strictEqual(await store.read(), null, "로그아웃이 되살아났다 — 보관소에 토큰이 남았다");
+});
+
+test("로그아웃이 안 났으면 갱신은 그대로 쓴다 — 세대가 정상 경로를 막지 않는다", async () => {
+    const store = new MemoryTokenStore();
+    await store.write({
+        accessToken: "stale",
+        refreshToken: "r",
+        expiresAt: Date.now() - 1_000,
+        issuer: config.issuer,
+    });
+    const token = await withStubbedTokenEndpoint(
+        async () =>
+            new Response(
+                JSON.stringify({ access_token: "fresh", refresh_token: "r2", expires_in: 300 }),
+                { status: 200, headers: { "content-type": "application/json" } },
+            ),
+        () => getAccessToken(config, store),
+    );
+    strictEqual(token, "fresh");
+    strictEqual((await store.read())?.accessToken, "fresh");
+});
+
+test("로그아웃을 여러 번 해도 세대가 단조로 오른다 — 다음 갱신이 갇히지 않는다", async () => {
+    const store = new MemoryTokenStore();
+    await logout(store);
+    await logout(store);
+    await store.write({
+        accessToken: "stale",
+        refreshToken: "r",
+        expiresAt: Date.now() - 1_000,
+        issuer: config.issuer,
+    });
+    const token = await withStubbedTokenEndpoint(
+        async () =>
+            new Response(
+                JSON.stringify({ access_token: "fresh", refresh_token: "r2", expires_in: 300 }),
+                { status: 200, headers: { "content-type": "application/json" } },
+            ),
+        () => getAccessToken(config, store),
+    );
+    strictEqual(token, "fresh", "지난 로그아웃이 새 갱신을 막았다");
+});
+
+/**
+ * ⚠ **세대를 올리는 자리가 비우기 «앞»이어야 한다.** 뒤에 올리면 `clear()` 가 끝나고 세대가
+ *   오르기 **전**에 진행 중 갱신의 견주기가 통과해 버려, 그 쓰기가 로그아웃을 되살린다.
+ *   실제 보관소(`SecretStorage`)의 비우기는 비동기라 그 틈이 실재한다 — 여기서는 비우기가
+ *   한 틱 쉬는 보관소로 그 틈을 만든다.
+ */
+class SlowClearStore extends MemoryTokenStore {
+  override clear(): Promise<void> {
+    // ⚠ **매크로태스크로 쉰다.** 마이크로태스크 한 틱으로는 창이 안 벌어진다 — 갱신의 교환 뒤
+    //    경로도 마이크로태스크라 순서가 우연히 맞아 버린다. 타이머를 끼우면 그 창이 확실해진다.
+    return new Promise((resolve) => setTimeout(() => resolve(super.clear()), 0));
+  }
+}
+
+test("로그아웃은 비우기 **앞에서** 세대를 올린다 — 그 사이 창이 없다", async () => {
+  const store = new SlowClearStore();
+  await store.write({
+    accessToken: "stale",
+    refreshToken: "r",
+    expiresAt: Date.now() - 1_000,
+    issuer: config.issuer,
+  });
+  let release: (() => void) | undefined;
+  const parked = new Promise<void>((r) => {
+    release = r;
+  });
+
+  const refreshed = withStubbedTokenEndpoint(
+    async () => {
+      // 교환이 여기서 멈춘다 — 그동안 로그아웃이 시작된다(끝나기를 기다리지 않는다).
+      await parked;
+      return new Response(
+        JSON.stringify({ access_token: "fresh", refresh_token: "r2", expires_in: 300 }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    },
+    () => getAccessToken(config, store),
+  );
+  await Promise.resolve();
+  const loggingOut = logout(store); // ← 기다리지 않는다. 비우기가 도는 사이에 교환이 끝난다.
+  release?.();
+
+  await rejects(
+    () => refreshed,
+    (error: unknown) => error instanceof DevtoolsError && error.code === "NOT_AUTHENTICATED",
+  );
+  await loggingOut;
+  strictEqual(await store.read(), null, "비우기가 도는 사이의 갱신이 로그아웃을 되살렸다");
 });
