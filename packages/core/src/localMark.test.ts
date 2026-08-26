@@ -276,3 +276,15 @@ test("남의 사이트 표식 번호를 이 원장에 선언하지 않는다", (
   const other = {format: 1, tenant: "acme", revisionNo: 7, sha256: "a", fetchedAt: ""} as const;
   assert.strictEqual(declaredBaseRevisionNo(other, "bix"), null);
 });
+
+test("판 번호가 판일 수 없는 값이면 선언하지 않는다", () => {
+  // 표식은 폴더 안 파일이라 손으로 고칠 수 있다. Int32 밖은 서버에서 **409 가 아니라 400** 이 되고,
+  // 그러면 「그대로 올리기」가 안 열려 그 폴더는 다시 못 올린다 — 영구 막다른길이 표식 쪽 입구로
+  // 되돌아온다. 0·음수는 판이 아니다.
+  const mark = (revisionNo: unknown) =>
+    ({format: 1, tenant: "bix", revisionNo, sha256: "a", fetchedAt: ""}) as never;
+  for (const bad of [0, -1, 1.5, 2_147_483_648, 1e21, Number.NaN, Number.MAX_SAFE_INTEGER]) {
+    assert.strictEqual(declaredBaseRevisionNo(mark(bad), "bix"), null, `판일 수 없는 값이 실렸다: ${bad}`);
+  }
+  assert.strictEqual(declaredBaseRevisionNo(mark(2_147_483_647), "bix"), 2_147_483_647, "상한은 유효하다");
+});

@@ -51,6 +51,20 @@ const WIRES = [
     ],
     [
         "packages/vscode/src/extension.ts",
+        "const baseRevisionNo = declaredBaseRevisionNo(readSourceMarkAt(dir), tenant);",
+        "**소속 대조가 사라지면 남의 사이트 표식 번호를 이 원장에 선언한다.** 판 번호는 테넌트별 " +
+            "순번이라 겹칠 확률이 낮지 않고, 겹치면 서버가 「그게 꼬리다」로 **통과**시킨다 — " +
+            "근거 없는 차단이 아니라 **근거 없는 통과**, 곧 이 방어의 조용한 무력화다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "          baseRevisionNo,",
+        "**잠금장치 자체가 사라진다.** 모든 올리기가 무선언이 되는데 발행 확인은 여전히 " +
+            "`baseRevisionNo != null` 로 계산돼 「확인하지 못한 채」를 **안 띄운다** — 사람은 보호를 " +
+            "전제하고 화면도 그렇게 말하는데 방어는 0 이다(문과 표지판은 지키고 자물쇠는 안 지킨 배치)",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
         "onBaseMoved: (serverMessage) => askBaseMoved(tenant, serverMessage),",
         "409 를 맞은 폴더가 **영구 막다른길**이 된다 — 표식은 발행 성공에서만 갱신되므로 다음 올리기도 " +
             "같은 번호를 선언해 같은 409 를 무한히 맞는다. 사람이 손으로 합쳐 넣어도 빠져나갈 수 없다",

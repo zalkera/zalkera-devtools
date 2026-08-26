@@ -85,6 +85,8 @@ let spansSeen = 0;
  * 전수 검사한다. 여기서 다시 파고들 필요가 없고, 파고들면 같은 값을 두 번 요구하는 오검이 된다.
  */
 const CANON_FACTORY = "say";
+/** 그 정본이 사는 파일. ⑴-b 가 여기서만 문면 속성을 본다(다른 파일은 오검이 난다). */
+const CANON_MODULE = "packages/core/src/tenantScope.ts";
 /**
  * 정본이 **살 수 있는 모듈**. 이름만 보면 안 된다 — 어느 파일에서든 지역 `say` 나 `decideX` 를
  * 만들면 그 결과가 정본으로 인정된다(심의 실증: 셋 다 검사기를 통과시켰다).
@@ -223,6 +225,20 @@ function isCanonicalObject(e, depth = 0) {
         return inits.every((init) => isCanonicalObject(init, depth + 1));
     }
     return false;
+}
+
+/**
+ * 이 노드를 감싸는 함수의 **매개변수 이름들**. 「바깥에서 온 값」의 정의다 — 정본 안에서 만든
+ * 문자열과 갈라내는 유일한 구조적 표식이다.
+ */
+function enclosingParams(node) {
+    const names = new Set();
+    for (let n = node.parent; n; n = n.parent) {
+        if (ts.isMethodDeclaration(n) || ts.isFunctionDeclaration(n) || ts.isArrowFunction(n) || ts.isFunctionExpression(n)) {
+            for (const pr of n.parameters) if (ts.isIdentifier(pr.name)) names.add(pr.name.getText());
+        }
+    }
+    return names;
 }
 
 /** 이 표현식이 허용 목록에 드는가. **드는 것만 참** — 나머지는 전부 거부다. */
@@ -366,6 +382,27 @@ function scan(rel, { allTemplates }) {
     walk(source, (node) => {
         // ⑴ 사용자 문구 정본: 템플릿 전부
         if (allTemplates && ts.isTemplateExpression(node)) inspect(node, rel, "템플릿");
+
+        // ⑴-b 정본 파일의 **문면 속성 전부** — 템플릿이 아닌 것도 본다.
+        //
+        // ⚠ 종전엔 템플릿만 봤다. 그런데 소비처 면제의 근거가 **「정본을 전수 검사했다」**이므로
+        //    (위 CANON_FACTORY 주석), 정본에 템플릿 아닌 문면이 생기면 그 근거가 **거짓이 된다** —
+        //    그 문장은 정본에서도 소비처에서도 아무도 안 본다. 실측: `message: plainNotice(x)` 를
+        //    `message: x` 로 바꾸면 verify 가 통째로 초록이었다. 서버가 준 문장을 그대로 모달에
+        //    싣는 표면이 생기면서 이 구멍을 처음 밟았다.
+        //    ⚠ **겨냥은 좁다: 바깥에서 온 인자가 소독 없이 그대로 앉는 것.** 정본 파일의 지역 상수·
+        //    삼항·이어붙이기까지 보려 들면 검사기가 표현식 문법을 흉내내야 하고, 그 길은 오검으로
+        //    끝난다(실측: 공용 상수 두 줄이 곧바로 빨개졌다). 죽은 검사기는 지워지므로 좁게 문다.
+        if (rel === CANON_MODULE && ts.isPropertyAssignment(node) && CANON_FIELDS.has(node.name.getText())) {
+            const init = node.initializer;
+            if (ts.isIdentifier(init) && enclosingParams(node).has(init.getText())) {
+                const { line } = node.getSourceFile().getLineAndCharacterOfPosition(node.getStart());
+                findings.push(
+                    `${rel}:${line + 1} — 정본 문면 속성 \`${node.name.getText()}\` 에 ` +
+                        `바깥에서 온 인자 \`${init.getText()}\` 가 소독 없이 그대로 앉습니다`,
+                );
+            }
+        }
 
         // ⑵ 진행 알림(`withProgress`)의 `title` — 알림 본문 자리에 그려진다.
         if (ts.isObjectLiteralExpression(node)) {

@@ -89,10 +89,20 @@ export type SourceMark = FetchedMark | PublishedMark | LinkedMark;
  *
  * @param tenant 지금 올리는 사이트. 표식 소속과 다르면 `null`.
  */
+/** 판 번호의 상한 — 서버 컬럼이 `Int` 다. 넘으면 409 가 아니라 400 이라 탈출구가 안 열린다. */
+const MAX_REVISION_NO = 2_147_483_647;
+
 export function declaredBaseRevisionNo(mark: SourceMark | null, tenant: string): number | null {
     if (!mark || mark.tenant !== tenant) return null;
     if ("origin" in mark && mark.origin === "linked") return null;
-    return typeof mark.revisionNo === "number" ? mark.revisionNo : null;
+    // ⚠ **범위를 본다.** 표식은 폴더 안 파일이라 손으로 고칠 수 있다. Int32 밖 값(`1e21` 등)은 서버
+    //    역직렬화에서 **409 가 아니라 400** 이 되고, 그러면 `isUploadBaseMoved` 가 거짓이라 「그대로
+    //    올리기」가 **안 열린다** — 표식은 발행 성공에서만 갱신되므로 그 폴더는 다시 못 올린다.
+    //    이 방어가 없애려던 영구 막다른길이 표식 쪽 입구로 되돌아오는 자리다. 0·음수도 판이 아니다.
+    const no = mark.revisionNo;
+    return typeof no === "number" && Number.isSafeInteger(no) && no > 0 && no <= MAX_REVISION_NO
+        ? no
+        : null;
 }
 
 export function buildSourceMark(input: Omit<FetchedMark, "format">): string {
