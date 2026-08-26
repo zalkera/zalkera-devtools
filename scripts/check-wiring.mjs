@@ -51,6 +51,12 @@ const WIRES = [
     ],
     [
         "packages/vscode/src/extension.ts",
+        "onBaseMoved: (serverMessage) => askBaseMoved(tenant, serverMessage),",
+        "409 를 맞은 폴더가 **영구 막다른길**이 된다 — 표식은 발행 성공에서만 갱신되므로 다음 올리기도 " +
+            "같은 번호를 선언해 같은 409 를 무한히 맞는다. 사람이 손으로 합쳐 넣어도 빠져나갈 수 없다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
         'if (state === "unknown" && i < UNKNOWN_GRACE_POLLS) continue;',
         "첫 게시에서 관측 행이 아직 없는 창을 「관측이 안 도는 사이트」로 오독해 **첫 폴 한 번에 감시가 " +
             "죽는다** — 사이트가 처음 세상에 보이는 순간, 이 알림의 가치가 가장 큰 자리에서",
@@ -500,10 +506,10 @@ const WIRES = [
     ],
     [
         "packages/core/src/publish.ts",
-        "return await options.api.confirmArchive(storageKey, true, baseRevisionNo);",
-        "동의를 받아 놓고 서버에는 전하지 않는다 — 같은 409 가 반복된다. 그리고 셋째 인자가 빠지면 " +
-            "**동의 경로만 조용히 무선언**이 된다(백엔드가 동의 게이트를 기반 대조보다 먼저 지난다) — " +
-            "하필 편집이 있는 사이트에서만 방어가 없다",
+        "return await options.api.confirmArchive(storageKey, discard, base);",
+        "동의·기반 두 문이 **차례로** 걸리는데(백엔드가 동의 게이트를 기반 대조보다 먼저 지난다) " +
+            "재호출이 상태를 안 들고 가면 방금 받은 동의가 사라지거나 두 번째 409 가 아무 데도 안 걸린다 — " +
+            "빠져나갈 단추 없는 빨간창이 영구히 남는다(설계 심의 반려 사유)",
     ],
     [
         "packages/vscode/src/extension.ts",

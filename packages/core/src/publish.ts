@@ -73,52 +73,60 @@ export interface PublishResult {
 }
 
 /**
- * 업로드 확정. 서버가 **동의를 요구하면** 물어보고 다시 부른다.
+ * confirm 을 **문이 열릴 때까지** 다시 부른다.
  *
- * ■ 왜 여기 있나
- *   백엔드는 재업로드·버전 전환·프리셋 재개시 **세 문이 같은 가드**를 지나고, 셋 다 요청 본문의
- *   `discardPendingChanges` 로 동의를 받는다. 확장은 전환 쪽만 동의 경로를 갖고 있었다 — 그래서
- *   올리기는 zip 을 다 올린 뒤 409 를 받고 「계속하려면 확인해 주세요」만 반복했다.
+ * ■ 왜 반복인가 — 문이 둘이고 **차례로** 걸린다
+ *   백엔드는 동의 게이트(`BaselineShiftGuard`)를 기반 대조보다 **먼저** 지난다. 그래서 승격 사이트에
+ *   게시 대기 작업이 있고 그 사이 남이 올렸으면 **동의를 받은 뒤에 기반 409 가 온다.** 갈래를 평평하게
+ *   두면 그 두 번째 409 는 아무 데도 안 걸리고 그대로 던져진다 — 그리고 그 시도는 S3 put·tx 전에
+ *   막혀 **아무 상태도 안 바꾸므로**, 다음 올리기도 같은 두 걸음을 그대로 반복한다. 빠져나갈 단추가
+ *   없는 빨간창이 영구히 남는다(설계 심의가 반려 사유로 못 박은 그 형상).
  *
- * ■ 물어보는 것은 부르는 쪽이다
- *   core 는 화면이 없다. `onConsent` 를 안 주면 **묻지 않고 그대로 던진다** — 조용히 동의한 것으로
- *   치면 게시 대기 중인 AI 변경이 사람 모르게 사라진다(이미 정산된 토큰이 실린 작업이다).
+ * ■ 왜 끝나는가
+ *   문마다 **한 번만** 묻는다. 같은 문이 두 번 걸리면 사람의 답이 안 통한 것이므로 그대로 던진다 —
+ *   되풀이해 묻는 것은 「확인」이 아니라 조르기다. 그래서 시도는 최대 세 번이다.
+ *
+ * ■ 동의는 **상태**다
+ *   `discard` 를 인자가 아니라 상태로 들고 다닌다. 기반 갈래에서 `discard=false` 로 재전송하면
+ *   방금 받은 동의가 사라져 곧바로 같은 동의 409 를 다시 맞는다.
  */
 async function confirmWithConsent(
     options: PublishOptions,
     storageKey: string,
     baseRevisionNo: number | null,
 ): Promise<ArchiveConfirmed> {
-    try {
-        return await options.api.confirmArchive(storageKey, false, baseRevisionNo);
-    } catch (error) {
-        if (needsDiscardConsent(error) && options.onConsent) {
+    let discard = false;
+    let base = baseRevisionNo;
+    let consentAsked = false;
+    let baseAsked = false;
+    for (;;) {
+        try {
+            // ⚠ **같은 `storageKey` 로 다시 부른다 — 절대 다시 묶지 않는다.** 사람이 동의한 것은
+            //    「지금 이 바이트를 그대로 올린다」이고, 재압축하면 **동의한 것과 다른 것**이 올라간다.
+            return await options.api.confirmArchive(storageKey, discard, base);
+        } catch (error) {
             const rejected = error instanceof DevtoolsError ? error : null;
-            if (
-                !(await options.onConsent(
-                    rejected?.message ?? String(error),
-                    rejected?.serverCode ?? null,
-                ))
-            ) {
-                throw new DevtoolsError("CANCELLED", "올리기를 그만두었습니다.");
+            const message = rejected?.message ?? String(error);
+            if (needsDiscardConsent(error) && options.onConsent && !consentAsked) {
+                consentAsked = true;
+                if (!(await options.onConsent(message, rejected?.serverCode ?? null))) {
+                    throw new DevtoolsError("CANCELLED", "올리기를 그만두었습니다.");
+                }
+                discard = true;
+                continue;
             }
-            // ⚠ **선언을 여기서도 실어야 한다.** 백엔드는 동의 게이트를 기반 대조보다 **먼저** 지나므로,
-            //    빠뜨리면 편집이 있는 사이트에서만 조용히 무선언이 된다.
-            return await options.api.confirmArchive(storageKey, true, baseRevisionNo);
-        }
-        if (isUploadBaseMoved(error) && options.onBaseMoved) {
-            const rejected = error instanceof DevtoolsError ? error : null;
-            if (!(await options.onBaseMoved(rejected?.message ?? String(error)))) {
-                throw new DevtoolsError("CANCELLED", "올리기를 그만두었습니다.");
+            if (isUploadBaseMoved(error) && options.onBaseMoved && !baseAsked) {
+                baseAsked = true;
+                if (!(await options.onBaseMoved(message))) {
+                    throw new DevtoolsError("CANCELLED", "올리기를 그만두었습니다.");
+                }
+                // 무선언으로 내려놓는다. 같은 선언을 다시 실으면 같은 409 를 다시 맞고, 표식은 발행
+                // 성공에서만 갱신되므로 **영원히 못 빠져나온다** — 그것이 이 갈래가 존재하는 이유다.
+                base = null;
+                continue;
             }
-            // ⚠ **같은 `storageKey` 로 재전송한다 — 다시 묶지 않는다.** 사람이 동의한 것은 「지금 이
-            //    바이트를 그대로 올린다」이고, 여기서 재압축하면 **동의한 것과 다른 것**이 올라간다.
-            //
-            // ⚠ 무선언으로 보낸다. 선언을 그대로 실으면 같은 409 를 다시 맞고, 표식은 발행 성공에서만
-            //    갱신되므로 **영원히 못 빠져나온다** — 그것이 이 갈래가 존재하는 이유다.
-            return await options.api.confirmArchive(storageKey, false, null);
+            throw error;
         }
-        throw error;
     }
 }
 
