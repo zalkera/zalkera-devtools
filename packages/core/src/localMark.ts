@@ -67,6 +67,9 @@ export interface LinkedMark {
  */
 export type SourceMark = FetchedMark | PublishedMark | LinkedMark;
 
+/** 판 번호의 상한 — 서버 컬럼이 `Int` 다. 넘으면 409 가 아니라 400 이라 탈출구가 안 열린다. */
+const MAX_REVISION_NO = 2_147_483_647;
+
 /**
  * 이 표식이 **선언할 기반 판**을 아는가 — 안다면 그 번호.
  *
@@ -89,9 +92,6 @@ export type SourceMark = FetchedMark | PublishedMark | LinkedMark;
  *
  * @param tenant 지금 올리는 사이트. 표식 소속과 다르면 `null`.
  */
-/** 판 번호의 상한 — 서버 컬럼이 `Int` 다. 넘으면 409 가 아니라 400 이라 탈출구가 안 열린다. */
-const MAX_REVISION_NO = 2_147_483_647;
-
 export function declaredBaseRevisionNo(mark: SourceMark | null, tenant: string): number | null {
     if (!mark || mark.tenant !== tenant) return null;
     if ("origin" in mark && mark.origin === "linked") return null;
