@@ -65,6 +65,22 @@ const WIRES = [
     ],
     [
         "packages/vscode/src/extension.ts",
+        "void persistedState.update(CAN_SWITCH_STATE, isSuperAdmin || tenants.length > 1);",
+        "사이드바가 **사이트 수를 영영 모른다** — 목록을 쥐는 자리가 여기 하나뿐이라, 안 남기면 " +
+            "「전환」이 하나뿐인 계정에도 계속 뜬다(누르면 자기 하나가 뜨는 거짓 권유)",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "canSwitch: canSwitchCached(),",
+        "사이드바가 그 사실을 안 읽는다 — 캐시는 쌓이는데 화면이 안 쓰면 없는 것과 같다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "await persistedState.update(CAN_SWITCH_STATE, undefined);",
+        "로그아웃이 계정 사실을 안 지운다 — **다음 사람의 계정에 앞사람의 사실**을 쓰게 된다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
         "stopReflectionWatches();",
         "확장이 내려가는데 **반영 확인 폴링이 계속 돈다** — 조회가 더 나가고, 최악에는 이미 없는 " +
             "맥락에 대고 알림을 띄운다. 상한(180초)은 「끝난다」를 보장할 뿐 「지금 끝난다」가 아니다",

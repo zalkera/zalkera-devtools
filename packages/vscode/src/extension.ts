@@ -233,6 +233,23 @@ let workspaceScopedState: vscode.Memento;
 const FOLDER_REGISTRY_STATE = "zalkera.folderRegistry";
 
 /**
+ * **이 계정에 사이트가 여럿인가** — 사이드바가 「전환」을 말해도 되는지의 근거.
+ *
+ * 값은 고르는 창이 목록을 받을 때 남긴다(그 시점에 이미 손에 있으므로 **새 조회가 0**). 그전에는
+ * `undefined` = **모름**이고, 사이드바는 모름을 「보여 주는 쪽」으로 다룬다 — 안 보여 주면 여러
+ * 사이트를 맡은 사람이 전환할 자리를 잃는다.
+ *
+ * ⚠ 로그아웃에서 지운다. 남기면 **다음 사람의 계정에 앞사람의 사실**을 쓰게 된다.
+ */
+const CAN_SWITCH_STATE = "zalkera.canSwitch";
+
+/** 모르면 `null` — `false`(하나뿐)와 **다른 값**이다. */
+function canSwitchCached(): boolean | null {
+  const v = persistedState.get(CAN_SWITCH_STATE);
+  return typeof v === "boolean" ? v : null;
+}
+
+/**
  * 사이트 → 마지막 로컬본 절대경로.
  *
  * ⚠ **정본이 아니다.** 경로는 지워지고 옮겨지고 **재활용된다.** 제안 전에 반드시 그 폴더를 열어
@@ -732,6 +749,8 @@ async function signOut(options: { quiet?: boolean } = {}): Promise<boolean> {
   // 사이트별 로컬본 지도도 계정 것이다 — 남기면 다음 사람에게 앞사람의 사이트 코드와 폴더
   // 경로가 보이고, 확장이 그 폴더를 열도록 **권한다.**
   await clearFolderRegistry();
+  // 「사이트가 여럿인가」도 계정 사실이다 — 남기면 **다음 사람의 계정에 앞사람의 사실**을 쓴다.
+  await persistedState.update(CAN_SWITCH_STATE, undefined);
   // 로컬 자격증명도 함께 지운다(A4) — **키 줄만** 지우고 고객이 넣은 값은 남긴다.
   const dir = previewDir ?? workspaceDir();
   if (dir) {
@@ -3212,6 +3231,9 @@ async function chooseTenant(force = false): Promise<string> {
     tenantCode: () => "",
   });
   const { tenants, isSuperAdmin } = await api.whoAmI();
+  // 여기가 목록을 쥐는 유일한 자리다 — 사이드바가 「전환」을 말해도 되는지를 여기서만 알 수 있다.
+  // 본사 계정은 코드를 직접 쳐서 어디로든 가므로 언제나 전환 가능하다.
+  void persistedState.update(CAN_SWITCH_STATE, isSuperAdmin || tenants.length > 1);
 
   // **목록이 비었다고 "사이트가 없다"가 아니다.** 서버는 소속(admin_user_tenant)만 열거하는데,
   // SUPER_ADMIN 은 소속과 무관하게 전 테넌트를 다룬다(`AdminUserAuth.canAccessTenant`).
@@ -3776,6 +3798,8 @@ async function refreshSidebar(): Promise<void> {
     //    말하면 「이 폴더」의 지시대상이 또 갈린다 — 이 값을 세우는 이유가 바로 그 갈림을 없애는
     //    것이다.
     folderPath: dir ?? null,
+    // 모름(`null`)과 「하나뿐」(`false`)은 다른 값이다 — 접으면 여럿 맡은 사람이 자리를 잃는다.
+    canSwitch: canSwitchCached(),
     // 기계마다 다른 값이라 판정이 스스로 읽지 않는다 — 여기서 넘긴다(`sidebarPlan` 의 KDoc).
     home: homedir(),
   });
