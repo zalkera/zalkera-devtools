@@ -120,12 +120,24 @@ const WIRES = [
             "게시라 이미 손님에게 나갔는데 「준비되면 게시됩니다」라고 하면, 사람은 안 바뀐 줄 알고 " +
             "한 번 더 올린다. 문면 자체는 시험이 물지만 **어느 값을 넘기는지**는 여기서만 잡힌다",
     ],
+    // ⚠ **줄머리(`\n  `)부터 고정한다.** `countOccurrences` 는 부분문자열이라 줄 안쪽만 박으면
+    //    **그 앞에 가드를 붙이는 길**이 열린다 — `if (!result.cancelledLate) rememberFolder(…)` 한
+    //    줄로 부수효과를 조건부로 만들어도 조각은 그대로 있다. 들여쓰기까지 물어야 그 길이 막힌다.
+    //
+    // ⚠ **주석을 사이에 두지 않는다.** 주석을 낀 조각은 **주석의 자리**를 지킬 뿐이라, 블록만
+    //    옮기고 주석을 두고 가면 통과한다. 그래서 이 조각은 **코드끼리 맞붙은 자리**를 문다.
     [
         "packages/vscode/src/extension.ts",
-        "rememberFolder(String(tenant), dir);\n\n  // ⚠ **취소가 늦었으면 여기서 갈린다.**",
+        "\n  rememberFolder(String(tenant), dir);\n\n  if (result.cancelledLate) {",
         "늦은 취소 갈래가 **표식·폴더기억 위로 올라가면** 화면이 아니라 **디스크에 거짓**이 남는다 — " +
             "표식이 옛 판을 든 채라 다음 발행이 낡은 기반을 선언하고 자기가 방금 만든 판에 409 를 맞는다. " +
             "블록의 존재만 세면 이 순서가 안 잡힌다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "\n  const marked = await writeBindingMarkTo(dir, {\n    origin: \"published\",",
+        "표식 갱신을 **조건부로 감싸면** 늦은 취소에서 표식이 옛 판을 든 채 남는다 — 아래 순서 조각은 " +
+            "`rememberFolder` 쪽만 지키므로 이 문장은 따로 문다. 줄머리 고정이라 가드를 앞에 못 붙인다",
     ],
     [
         "packages/vscode/src/extension.ts",
