@@ -471,6 +471,10 @@ export function activate(context: vscode.ExtensionContext): void {
 
 export async function deactivate(): Promise<void> {
   clearRenewal();
+  // 반영 확인은 **뒤에서 도는 폴링**이라 사람이 창을 닫아도 스스로 안 멈춘다 — 확장이 내려가는데
+  // 조회가 계속 나가고, 알림이 뜨면 이미 없는 맥락을 말한다. 켜 둔 채 내려가는 것은 미리보기 서버와
+  // 같은 종류의 고아다(바로 아래).
+  stopReflectionWatches();
   // 미리보기를 켜 둔 채 창을 닫으면 dev 서버가 고아로 남는다 — 사용자는 그것을 볼 수도 끌 수도 없다.
   await session?.server.stop();
 }
@@ -2646,8 +2650,38 @@ const REFLECT_PAGE = 20;
  * 게시 자체는 이미 알렸고, 여기서 더 말할 사실이 없다.
  */
 async function watchReflection(api: ZalkeraApi, revisionNo: number, tenant: CapturedTenant): Promise<void> {
+  const stop = new AbortController();
+  reflectionWatches.add(stop);
+  try {
+    await pollReflection(api, revisionNo, tenant, stop.signal);
+  } finally {
+    reflectionWatches.delete(stop);
+  }
+}
+
+/**
+ * 지금 도는 반영 확인들. **확장이 내려갈 때 끊을 손잡이**다 — 폴링은 스스로 안 멈추고, 상한(180초)은
+ * 「끝난다」를 보장할 뿐 「지금 끝난다」를 보장하지 않는다.
+ */
+const reflectionWatches = new Set<AbortController>();
+
+/** 확장 비활성 — 도는 감시를 전부 끊는다. 알림도 안 뜬다(이미 없는 맥락을 말하게 된다). */
+function stopReflectionWatches(): void {
+  for (const w of reflectionWatches) w.abort();
+  reflectionWatches.clear();
+}
+
+async function pollReflection(
+  api: ZalkeraApi,
+  revisionNo: number,
+  tenant: CapturedTenant,
+  signal: AbortSignal,
+): Promise<void> {
   for (let i = 0; i < REFLECT_POLL_MAX; i += 1) {
     await new Promise((r) => setTimeout(r, REFLECT_POLL_MS));
+    // ⚠ **잠든 사이에 꺼질 수 있다.** 깨어난 자리에서 먼저 본다 — 안 보면 이미 내려간 확장이 조회를
+    //    한 번 더 내보내고, 최악에는 없는 창에 대고 알림을 띄운다.
+    if (signal.aborted) return;
     let state: ReflectionState;
     try {
       // ⚠ **전량을 안 받는다.** `reflectionOf` 가 보는 것은 셋뿐이다 — 관측이 도는 사이트인가·활성

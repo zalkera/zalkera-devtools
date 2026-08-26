@@ -65,6 +65,18 @@ const WIRES = [
     ],
     [
         "packages/vscode/src/extension.ts",
+        "stopReflectionWatches();",
+        "확장이 내려가는데 **반영 확인 폴링이 계속 돈다** — 조회가 더 나가고, 최악에는 이미 없는 " +
+            "맥락에 대고 알림을 띄운다. 상한(180초)은 「끝난다」를 보장할 뿐 「지금 끝난다」가 아니다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "if (signal.aborted) return;",
+        "**잠든 사이에 꺼진 것을 안 본다** — 깨어난 자리에서 확인하지 않으면 내려간 확장이 조회를 " +
+            "한 번 더 내보낸다. 취소 손잡이만 있고 보는 자리가 없으면 그 손잡이는 장식이다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
         "reflectionOf(await api.listRevisions(REFLECT_PAGE), revisionNo)",
         "반영 확인이 **판 전량**을 읽는다 — 판은 발행할 때마다 늘고 줄지 않으므로 그 비용이 원장 " +
             "크기에 비례해 영원히 자란다. 관측이 없는 사이트에서는 유예까지 여섯 번 되풀이된다",
