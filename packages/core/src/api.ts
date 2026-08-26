@@ -88,6 +88,21 @@ export interface SiteRevision {
     label?: string | null;
     /** FAILED 일 때만, 그리고 TENANT_ADMIN+ 에게만 온다 — 빌드 로그 tail. */
     failReason?: string | null;
+    /**
+     * **지금 실제로 서빙 중인가**(백엔드 명세 A). [isActive] 가 «가라»는 지시라면 이쪽은 «떠 있다»는
+     * 사실이다 — 서빙박스가 자기가 띄운 판을 보고한 것이다.
+     *
+     * ⚠ **세 상태다.** `true`/`false` 외에 `null` 이 있고, 그 `null` 은 [servingObservedAt] 과
+     *   **함께 봐야** 뜻이 갈린다(모른다 / 봤는데 아무것도 안 떠 있다). 단독으로 `!` 를 붙이지 마라.
+     *
+     * 구서버는 안 보낸다 → `undefined`. 그때도 「모른다」다.
+     */
+    isServing?: boolean | null;
+    /**
+     * 그 관측 시각(ISO) 또는 `null`. **[isServing] 이 `null` 이어도 이 값은 있을 수 있다.**
+     * 값이 하나라도 있으면 「이 사이트는 관측이 도는 사이트다」라는 뜻이라, 반영 확인의 전제가 된다.
+     */
+    servingObservedAt?: string | null;
 }
 
 /** `activate` 응답에서 **우리가 쓰는 것**. 나머지 필드는 안 본다. */
@@ -197,8 +212,16 @@ export class ZalkeraApi {
     }
 
     /** 버전 이력(최신순). B2「현재 사이트 내려받기」와 롤백이 여기서 대상을 고른다. */
-    listRevisions(): Promise<SiteRevision[]> {
-        return this.request<SiteRevision[]>("GET", "/api/partner/site-upload/revisions");
+    /**
+     * @param limit **최근 몇 개만** 받을지. 없으면 전량이다.
+     *
+     * ⚠ **판은 발행할 때마다 늘고 줄지 않는다.** 몇 개면 되는 소비자가 전량을 받으면 그 비용이 원장
+     *   크기에 비례해 영원히 자란다 — 반영 확인 폴링이 그 자리다(판 1,000개 테넌트에서 매 폴마다
+     *   전량). 구 서버는 이 파라미터를 **조용히 무시**하고 전량을 준다 — 동작은 종전과 같다.
+     */
+    listRevisions(limit?: number): Promise<SiteRevision[]> {
+        const path = "/api/partner/site-upload/revisions";
+        return this.request<SiteRevision[]>("GET", limit == null ? path : `${path}?limit=${limit}`);
     }
 
     /** 소스 tar.gz 다운로드 URL **+ sha256**(TENANT_ADMIN+). 소스 소유의 실물이고, 해시가 그 약속의 검산이다. */
@@ -238,13 +261,30 @@ export class ZalkeraApi {
     }
 
     /** 업로드 확정 — 서버가 언팩·검사하고 새 버전을 만든다. */
-    confirmArchive(storageKey: string, discardPendingChanges = false): Promise<ArchiveConfirmed> {
+    /**
+     * @param baseRevisionNo 이 올리기가 **딛는다고 선언하는 판**(동시 업로드 최소 방어). 서버가 판을
+     *   만들기 전에 원장 꼬리와 대조하고 다르면 `UPLOAD_BASE_MOVED` 409 로 멈춘다.
+     *   `null` 은 **무선언 — 현행 그대로 통과**다(모르는 것으로 막지 않는다).
+     *
+     * ⚠ **동의 재시도에서도 같은 값을 실어야 한다.** 백엔드는 `BaselineShiftGuard`(동의)를 기반
+     *   대조보다 **먼저** 지나므로, 동의 409 를 받고 재호출할 때 이 값을 빠뜨리면 **그 경로만 조용히
+     *   무선언**이 된다 — 방어가 있는 줄 알았는데 하필 편집이 있는 사이트에서만 없다.
+     */
+    confirmArchive(
+        storageKey: string,
+        discardPendingChanges = false,
+        baseRevisionNo: number | null = null,
+    ): Promise<ArchiveConfirmed> {
         // ⚠ **`discardPendingChanges` 를 실을 수 있어야 한다.** 백엔드는 재업로드(confirm)·버전
         //    전환(activate)·프리셋 재개시 **세 문이 같은 `BaselineShiftGuard` 를 지난다.**
         //    종전에는 activate 만 동의를 보낼 수 있어서, 올리기는 zip 을 다 올린 뒤 409 를 받고
         //    「계속하려면 확인해 주세요」만 반복했다 — 확인할 자리가 없는 막다른 길이었다.
         return this.request<ArchiveConfirmed>("POST", "/api/partner/site-archive/confirm", {
-            body: { storageKey, discardPendingChanges },
+            // 선언이 없으면 **필드 자체를 안 보낸다** — `null` 을 보내도 서버는 같게 다루지만, 안 보내는
+            // 쪽이 「주장하지 않는다」는 뜻에 정확하고 구 서버와도 같은 와이어다.
+            body: baseRevisionNo == null
+                ? { storageKey, discardPendingChanges }
+                : { storageKey, discardPendingChanges, baseRevisionNo },
         });
     }
 
@@ -391,6 +431,21 @@ export function needsDiscardConsent(error: unknown): boolean {
     return error instanceof DevtoolsError && DISCARD_CONSENT_CODES.has(error.serverCode ?? "");
 }
 
+/** 기반 대조가 막은 올리기의 서버 코드. **기계 분기는 이 코드 하나로만 한다** — 문장은 안 읽는다. */
+export const UPLOAD_BASE_MOVED = "UPLOAD_BASE_MOVED";
+
+/**
+ * **내가 딛는다고 말한 판이 원장 꼬리가 아니다** — 그 사이 누가 올렸거나, 내 표식이 이 원장의 것이
+ * 아니다. 서버가 판을 만들기 **전에** 막았으므로 원장에는 아무 일도 안 일어났다.
+ *
+ * ⚠ **[needsDiscardConsent] 와 다른 문이다.** 저쪽은 「내 편집을 버리고 계속」이고 이쪽은 「남의
+ *   변경이 안 담긴 채로 계속」이다 — 사라지는 것이 다르므로 같은 동의로 뚫으면 **다른 행위에 대한
+ *   동의**를 받는 것이 된다.
+ */
+export function isUploadBaseMoved(error: unknown): boolean {
+    return error instanceof DevtoolsError && error.serverCode === UPLOAD_BASE_MOVED;
+}
+
 /**
  * **되돌리기가 지목하는 판인가** — 이것도 목록에서 뺀다.
  *
@@ -409,6 +464,49 @@ export function needsDiscardConsent(error: unknown): boolean {
  * @param revertTarget `GET /draft` 의 `revertTargetRevisionNo`. **못 읽었으면 `null`** — 모르는
  *   것으로는 막지 않는다(그때 동작은 종전과 같다).
  */
+/**
+ * 배포한 판이 **방문자에게 닿았는가**(백엔드 명세 A). 게시 직후 이 판정을 되풀이해 묻는다.
+ *
+ * ■ 왜 네 값인가
+ *
+ * `"unknown"` 이 핵심이다. 관측이 **하나도 없는** 사이트(구 백엔드·박스 미보고·git 레인)에서
+ * 「아직 반영 전」이라고 말하면 그건 **영원히 안 끝나는 대기**이고, 화면은 오지 않을 소식을 기다린다.
+ * 이 기능이 없애려던 병이 정확히 그것이라 — 모르는 것은 모른다고 답하고 **감시를 끝낸다.**
+ *
+ * `"superseded"` 도 감시 종료다. 기다리는 사이 다른 판이 활성이 되면(다른 관리자·AI 작업) 우리가
+ * 기다리던 사건은 **일어나지 않는다.** 계속 물으면 「반영됐습니다」를 영영 못 내거나, 더 나쁘게는
+ * 남이 올린 판의 반영을 내 판의 반영으로 말한다.
+ *
+ * ■ 판정
+ *
+ *   unknown     관측 자체가 없다(어느 판에도 `servingObservedAt` 이 없다) → 묻기를 그만둔다
+ *   superseded  활성이 이미 다른 판이다 → 묻기를 그만둔다
+ *   reflected   그 판이 지금 떠 있다 → 알린다
+ *   pending     관측은 있는데 아직 그 판이 아니다(전환 중 포함) → 더 기다린다
+ *
+ * ⚠ `isServing === true` 로만 `reflected` 를 낸다. `!== false` 로 느슨하게 하면 **전환 중(null)** 이
+ *   반영으로 읽혀, 아무것도 안 떠 있는 순간에 「반영됐습니다」가 뜬다.
+ */
+export type ReflectionState = "reflected" | "pending" | "superseded" | "unknown";
+
+export function reflectionOf(
+    revisions: readonly {
+        revisionNo: number;
+        isActive: boolean;
+        isServing?: boolean | null;
+        servingObservedAt?: string | null;
+    }[],
+    revisionNo: number,
+): ReflectionState {
+    // 관측이 도는 사이트인가 — 한 판이라도 시각이 있으면 그렇다. 없으면 기다릴 근거가 없다.
+    if (!revisions.some((r) => r.servingObservedAt != null)) return "unknown";
+    const active = revisions.find((r) => r.isActive);
+    if (active != null && active.revisionNo !== revisionNo) return "superseded";
+    return revisions.some((r) => r.revisionNo === revisionNo && r.isServing === true)
+        ? "reflected"
+        : "pending";
+}
+
 export function switchCandidates<T extends {revisionNo: number; isActive: boolean; status: string}>(
     revisions: readonly T[],
     revertTarget: number | null,

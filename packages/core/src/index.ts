@@ -26,6 +26,8 @@ export {
 export {
   ZalkeraApi,
   needsDiscardConsent,
+  reflectionOf,
+  type ReflectionState,
   switchCandidates,
   type ActivateResult,
   type DraftState,
@@ -191,6 +193,7 @@ export {
     buildSourceMark,
     parseSourceMark,
     holdsSameRevision,
+    declaredBaseRevisionNo,
     mergeTenantSetting,
     SOURCE_MARK_PATH,
     writeSourceMarkTo,

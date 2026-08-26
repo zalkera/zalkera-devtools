@@ -100,6 +100,9 @@ import {
   linkFolderToTenant,
   parseSourceMark,
   holdsSameRevision,
+  declaredBaseRevisionNo,
+  reflectionOf,
+  type ReflectionState,
   SOURCE_MARK_PATH,
   type SourceMark,
 } from "@zalkera/devtools-core";
@@ -468,6 +471,10 @@ export function activate(context: vscode.ExtensionContext): void {
 
 export async function deactivate(): Promise<void> {
   clearRenewal();
+  // 반영 확인은 **뒤에서 도는 폴링**이라 사람이 창을 닫아도 스스로 안 멈춘다 — 확장이 내려가는데
+  // 조회가 계속 나가고, 알림이 뜨면 이미 없는 맥락을 말한다. 켜 둔 채 내려가는 것은 미리보기 서버와
+  // 같은 종류의 고아다(바로 아래).
+  stopReflectionWatches();
   // 미리보기를 켜 둔 채 창을 닫으면 dev 서버가 고아로 남는다 — 사용자는 그것을 볼 수도 끌 수도 없다.
   await session?.server.stop();
 }
@@ -2476,6 +2483,20 @@ async function askDiscardConsent(
   return answer === ask.action;
 }
 
+/**
+ * 「그대로 올리기」 동의 — [askDiscardConsent] 와 **다른 문이다.** 사라지는 것이 다르다(내 편집 vs
+ * 남의 변경)라, 같은 동의로 뚫으면 **다른 행위에 대한 동의**를 받는 것이 된다.
+ */
+async function askBaseMoved(tenant: CapturedTenant, serverMessage: string): Promise<boolean> {
+  const ask = say.baseMovedConfirm(tenant, serverMessage);
+  const answer = await vscode.window.showWarningMessage(
+    ask.message,
+    { modal: true, detail: ask.detail },
+    ask.action,
+  );
+  return answer === ask.action;
+}
+
 async function publishCommand(): Promise<void> {
   const dir = requireWorkspace();
   const { api, tenant } = await ensureApiFor();
@@ -2485,7 +2506,12 @@ async function publishCommand(): Promise<void> {
   // ⚠ **경로와 소속을 함께 넘긴다.** 경로는 `message` 의 「이 폴더」가 가리키는 것이고(모달이
   //    뜨면 사이드바는 안 보인다), 소속은 **모양을 가르는 재료**다 — 소속 없는 폴더의 발행은
   //    다른 모달을 봐야 한다(`say.publishConfirm` 의 KDoc).
-  const ask = say.publishConfirm(tenant, dir, currentFolderBinding());
+  // 이 올리기가 딛는다고 **선언할 판**. 표식이 판을 주장할 때만 값이 있다(`declaredBaseRevisionNo`) —
+  // 「사이트에 연결」로 이은 폴더와 무표식 폴더는 선언할 값이 없고, **없는 값을 지어내면 근거 없이
+  // 남을 막는다.**
+  const baseRevisionNo = declaredBaseRevisionNo(readSourceMarkAt(dir), tenant);
+  // ⚠ **무보호를 고지한다** — 문면은 core 가 만든다(변수를 모달에 이어 붙이면 소독 검사 밖으로 떨어진다).
+  const ask = say.publishConfirm(tenant, dir, currentFolderBinding(), baseRevisionNo != null);
   const confirm = await vscode.window.showWarningMessage(
     ask.message,
     { modal: true, detail: ask.detail },
@@ -2511,6 +2537,11 @@ async function publishCommand(): Promise<void> {
           // **같은 문면**을 쓴다: 두 문이 같은 가드를 지나므로 사람이 보는 말도 같아야 한다.
           onConsent: (serverMessage, serverCode) =>
             askDiscardConsent(tenant, serverMessage, serverCode),
+          baseRevisionNo,
+          // 이 문이 없으면 화면은 **막다른 길**이 된다 — 표식은 발행 성공에서만 갱신되므로 다음
+          // 올리기도 같은 번호를 선언해 같은 409 를 무한히 맞는다. 사람이 최신 변경을 손으로 합쳐
+          // 넣어도 표식은 옛 번호라 빠져나갈 수 없다.
+          onBaseMoved: (serverMessage) => askBaseMoved(tenant, serverMessage),
         }),
     );
   } catch (error) {
@@ -2575,6 +2606,113 @@ async function publishCommand(): Promise<void> {
 }
 
 /**
+ * 반영 확인 폴링 — **끝나는 것이 급소다.**
+ *
+ * 게시는 지시일 뿐이라 실제 반영은 서빙박스 주기에 달려 있다(그 값을 우리는 소유하지 않는다).
+ * 그래서 숫자를 문장에 박는 대신 **관측이 올 때까지 물어보고**, 오면 그때 알린다.
+ *
+ * ⚠ **영원히 묻지 않는다.** 관측이 없는 사이트(구 백엔드·박스 미보고·git 레인)는 첫 물음에
+ *   `unknown` 이 나와 그 자리에서 끝난다. 그 밖에도 상한을 둔다 — 상한에 닿으면 **아무 말도 안 한다.**
+ *   「아직 반영 안 됐습니다」는 우리가 아는 사실이 아니다(그저 못 봤을 뿐이다).
+ */
+/**
+ * ⚠ **관측값은 60초에 한 번만 바뀐다** — 상행이 오케스트레이터 동기화 틱에 붙어 있기 때문이다.
+ *   그보다 촘촘히 물으면 **같은 사실을 되풀이해 받는다.** 실측(판 100개 기준): 5초×36 은 요청 36건·
+ *   백엔드 질의 108회·1,097KB 인데, 15초×12 는 12건·36회·366KB 로 **같은 180초를 덮는다.**
+ *   대가는 검출 지연 평균 +5초이고, 사람은 이미 2분을 기다리는 흐름이다.
+ */
+const REFLECT_POLL_MS = 15_000;
+/**
+ * 상한 **180초 — 늘리지 마라.** 세션이 살아 있는 사이트의 최악 반영 지연이 `2 × 스냅샷 주기 + refresh`
+ * ≈ 125초라 한 주기의 여유를 둔 값이다.
+ *
+ * ⚠ **세션이 없는 사이트는 시간이 아니라 사건(방문자 도착)에 매여 있다** — 방문자가 오기 전엔 영영
+ *   안 뜨므로 상한을 10분으로 늘려도 결과는 똑같은 침묵이고 요청만 는다. 못 보는 것은 못 본 채로
+ *   끝내는 것이 옳다(「아직 반영 안 됐습니다」는 우리가 아는 사실이 아니다).
+ *
+ * ⚠ 이 값은 박스의 `SYNC_INTERVAL_MS`(기본 60초)와 **결합돼 있다.** 그쪽을 90초로 올리면 최악이
+ *   180초가 되어 반영되는 바로 그 순간에 조용히 포기한다. 두 레포에 걸쳐 있어 검사기가 없다.
+ */
+const REFLECT_POLL_MAX = 12;
+/**
+ * `unknown` 을 참는 폴 수. 스냅샷 주기(기본 60초) + 여유를 덮는다 — 그동안은 「관측이 없는 사이트」와
+ * 「관측이 이제 막 시작될 사이트」를 구별할 수 없으므로, **못 가르는 것을 안다고 말하지 않는다.**
+ */
+const UNKNOWN_GRACE_POLLS = 5;
+/**
+ * 반영 확인이 읽을 판 수. 방금 올린 판과 활성 판은 **꼬리 쪽**이라 이만큼이면 닿는다 —
+ * 그 사이에 20판이 더 올라가 밀려났다면 이미 `superseded` 라 감시가 끝날 자리다.
+ */
+const REFLECT_PAGE = 20;
+
+/**
+ * 게시한 판이 방문자에게 닿으면 **한 번만** 알린다. 실패·상한·관측 없음은 전부 **침묵**이다 —
+ * 게시 자체는 이미 알렸고, 여기서 더 말할 사실이 없다.
+ */
+async function watchReflection(api: ZalkeraApi, revisionNo: number, tenant: CapturedTenant): Promise<void> {
+  const stop = new AbortController();
+  reflectionWatches.add(stop);
+  try {
+    await pollReflection(api, revisionNo, tenant, stop.signal);
+  } finally {
+    reflectionWatches.delete(stop);
+  }
+}
+
+/**
+ * 지금 도는 반영 확인들. **확장이 내려갈 때 끊을 손잡이**다 — 폴링은 스스로 안 멈추고, 상한(180초)은
+ * 「끝난다」를 보장할 뿐 「지금 끝난다」를 보장하지 않는다.
+ */
+const reflectionWatches = new Set<AbortController>();
+
+/** 확장 비활성 — 도는 감시를 전부 끊는다. 알림도 안 뜬다(이미 없는 맥락을 말하게 된다). */
+function stopReflectionWatches(): void {
+  for (const w of reflectionWatches) w.abort();
+  reflectionWatches.clear();
+}
+
+async function pollReflection(
+  api: ZalkeraApi,
+  revisionNo: number,
+  tenant: CapturedTenant,
+  signal: AbortSignal,
+): Promise<void> {
+  for (let i = 0; i < REFLECT_POLL_MAX; i += 1) {
+    await new Promise((r) => setTimeout(r, REFLECT_POLL_MS));
+    // ⚠ **잠든 사이에 꺼질 수 있다.** 깨어난 자리에서 먼저 본다 — 안 보면 이미 내려간 확장이 조회를
+    //    한 번 더 내보내고, 최악에는 없는 창에 대고 알림을 띄운다.
+    if (signal.aborted) return;
+    let state: ReflectionState;
+    try {
+      // ⚠ **전량을 안 받는다.** `reflectionOf` 가 보는 것은 셋뿐이다 — 관측이 도는 사이트인가·활성
+      //    판·내 판. 그런데 이 폴링은 관측 없는 사이트에서 유예까지 여러 번 도므로, 전량을 읽으면
+      //    판이 쌓인 테넌트에서 그 비용이 폴마다 되풀이된다. 방금 올린 판과 활성 판은 꼬리 쪽이다.
+      state = reflectionOf(await api.listRevisions(REFLECT_PAGE), revisionNo);
+    } catch (e) {
+      // 조회 실패는 반영 실패가 아니다 — 다음 차례에 다시 묻는다. 사람에게는 말하지 않는다.
+      log(`반영 확인 조회 실패(계속 시도): ${e instanceof Error ? e.message : String(e)}`);
+      continue;
+    }
+    if (state === "reflected") {
+      void vscode.window.showInformationMessage(say.reflected(tenant, revisionNo));
+      return;
+    }
+    // ⚠ **첫 게시의 `unknown` 은 「관측이 없는 사이트」가 아니라 「아직 안 시작된 사이트」다.**
+    //   관측 행은 사이트가 스냅샷에 처음 등장한 뒤 박스의 다음 틱(≤60초)에야 생긴다 — 제어가 관측
+    //   행을 미리 깔지 않는 것이 이 설계의 요지이기 때문이다. 첫 폴 한 번으로 끊으면 **사이트가
+    //   처음 세상에 보이는 순간**, 즉 이 알림의 가치가 가장 큰 자리에서 알림이 죽는다.
+    //   한 동기화 주기만큼 기다려 보고, 그 뒤에도 없으면 그때가 진짜 「관측이 안 도는 사이트」다.
+    if (state === "unknown" && i < UNKNOWN_GRACE_POLLS) continue;
+    // 관측이 없거나(unknown) 다른 판으로 갈아탔으면(superseded) 기다리던 사건은 안 온다.
+    if (state !== "pending") {
+      log(`반영 확인 종료(${state}) — 버전 ${revisionNo}`);
+      return;
+    }
+  }
+  log(`반영 확인 상한 도달 — 버전 ${revisionNo}(못 봤을 뿐, 반영 실패가 아니다)`);
+}
+
+/**
  * 게시됐다고 **알리고 끝낸다.** 물어볼 것이 없다 — 사이트는 이미 바뀌었다.
  *
  * 확인 없이 나가는 것을 확장이 막을 수는 없다(백엔드가 켠다). 그래서 **가서 볼 길**을 준다 —
@@ -2598,6 +2736,9 @@ async function announcePublished(
   // ⚠ **문구를 지역 변수로 빼지 않는다.** 알림 소독 검사기는 본문이 `say.*` 호출 **그 자리**에
   //    있는지를 보고, 한 번 변수를 거치면 허용 목록 밖으로 떨어진다. 주소가 없으면 단추도 없으므로
   //    호출을 둘로 가르는 대신 **단추 목록을 편다** — 부르는 자리는 하나로 남는다.
+  // 반영 확인은 **뒤에서 돈다.** 여기서 기다리면 단추가 뜨기까지 사람이 멈춰 선다 — 게시는 이미 끝났고
+  // 사이트를 보러 갈 수 있어야 한다. 실패해도 이 흐름에 영향 0(그쪽은 전부 침묵으로 끝난다).
+  void watchReflection(api, revisionNo, tenant);
   const chosen = await vscode.window.showInformationMessage(
     say.published(tenant, revisionNo),
     ...(open ? [open] : []),

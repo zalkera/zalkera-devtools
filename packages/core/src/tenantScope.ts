@@ -262,24 +262,38 @@ export const say = {
      *   이미 **모달 `detail` 이라는 이유로** `plainNotice` 를 지나는데 이 자리만 빠져 있었다.
      *   상한은 `MAX_CAP` 이라 정상 경로는 글자 그대로 남는다(축약과 충돌하지 않는다).
      */
+    /**
+     * @param baseDeclared 이 올리기가 **기반 판을 선언하는가**. 거짓이면 detail 에 한 줄을 더한다 —
+     *   이 기능이 나가는 순간 사람은 보호를 전제하는데 **무표식 폴더는 조용히 무보호**이기 때문이다.
+     *   그 침묵이 곧 이 트랜치가 사냥한 병(모르는 것을 안다고 믿게 두기)이다.
+     *
+     *   ⚠ **새 모달로 만들지 않는다.** 올리기 전에 확인창이 둘이면 사람은 둘 다 안 읽는다. 그리고
+     *     이 고지는 미래 예측이 아니라 **지금 확실한 사실**이라 선확인의 TOCTOU 가 없다.
+     *     발행 성공이 표식을 쓰므로 폴더당 사실상 최초 1회다.
+     */
     publishConfirm(
         tenant: CapturedTenant,
         dir: string,
         binding: string | null,
+        baseDeclared = true,
     ): { message: string; detail: string; action: string } {
+        const noBase = baseDeclared
+            ? ""
+            : "\n\n이 폴더는 어느 버전에서 갈라졌는지 기록이 없어, " +
+              "그 사이 다른 사람이 올렸는지 확인하지 못한 채 올라갑니다.";
         // ⚠ **중간 변수를 템플릿에 보간하지 않는다.** 소독 검사는 문면이 아니라 **구문**으로 보므로
         //    `${where}` 같은 이름은 통과시킬 근거가 없다 — 이어붙이기로 두면 **소독 대상이
         //    소독을 지난 조각(`plainNotice(dir, …)`)만 템플릿에 남는다. 공용 두 줄은 상수 하나로 둔다(사본이 갈리지 않게).
         if (binding === null) {
             return {
                 message: `이 폴더는 아직 어느 사이트에도 연결되어 있지 않습니다 — 「${shown(tenant)}」 사이트로 올립니다.`,
-                detail: `${plainNotice(dir, 512)}\n\n` + PUBLISH_OUTCOME + "\n올리면 이 폴더가 그 사이트에 연결됩니다.",
+                detail: `${plainNotice(dir, 512)}\n\n` + PUBLISH_OUTCOME + "\n올리면 이 폴더가 그 사이트에 연결됩니다." + noBase,
                 action: "이 사이트로 올리고 연결",
             };
         }
         return {
             message: `「${shown(tenant)}」 사이트를 지금 이 폴더의 소스로 바꿉니다.`,
-            detail: `${plainNotice(dir, 512)}\n\n` + PUBLISH_OUTCOME,
+            detail: `${plainNotice(dir, 512)}\n\n` + PUBLISH_OUTCOME + noBase,
             action: "올리고 게시",
         };
     },
@@ -296,6 +310,50 @@ export const say = {
             `「${shown(tenant)}」 사이트에 버전 ${countJosa(revisionNo, "을/를")} 배포했습니다. ` +
             `방문자에게 반영되기까지 잠시 걸립니다.`
         );
+    },
+    /**
+     * **그 사이 누가 올렸다** — 선언한 기반 판이 원장 꼬리가 아니어서 서버가 막았다.
+     *
+     * ⚠ **서버 문장을 그대로 싣는다.** 최신 판 번호가 그 문장에 있고, 서버는 「꼬리가 앞섰다」와
+     *   「선언 번호를 원장에서 못 찾겠다」를 이미 갈라 보낸다. 확장이 다시 쓰려면 번호를 다시
+     *   조회해야 하는데 그때는 꼬리가 또 움직였을 수 있어 **서버가 말한 사유와 화면이 그린 사유가
+     *   갈린다.** 기계 분기는 코드(`UPLOAD_BASE_MOVED`) 하나로만 한다.
+     *
+     * ⚠ **「받아서 합치세요」라고 지시하지 않는다.** 백엔드가 같은 이유로 그 지시를 뺐다 — 오너가
+     *   방금 되돌린 판이 꼬리일 수 있고, 그때 그 지시는 **오너 결정의 반대로** 사람을 이끈다.
+     *
+     * 단추는 「그대로 올리기」다. **무엇이 걸려 있는지**를 detail 이 명명한다 — 그 문장이 없으면
+     * 이것은 그냥 「예/아니오」가 되고, 방어는 한 번 클릭으로 끄는 경고가 된다.
+     *
+     * ⚠ **「그 변경이 안 담긴다」고 단정하지 않는다.** 우리가 아는 것은 **계보**뿐이고 내용은 모른다 —
+     *   사람이 이미 손으로 합쳐 넣었으면 담겨 있고(설계가 스스로 권하는 길이다), 그때 단정은 거짓이다.
+     *   「위 버전」이라는 지시도 서버가 번호 둘을 말하는 갈래에서 흔들린다. 이 트랜치가 내내 사냥한
+     *   병이 「모르는 것을 안다고 말하기」인데, 그 자국을 방어 문면에 남길 수는 없다.
+     */
+    baseMovedConfirm(
+        tenant: CapturedTenant,
+        serverMessage: string,
+    ): { message: string; detail: string; action: string } {
+        return {
+            message: plainNotice(serverMessage),
+            detail:
+                `그대로 올리면 「${shown(tenant)}」 사이트에 지금 이 폴더의 소스가 새 버전으로 올라갑니다. ` +
+                `이 폴더는 그 버전을 딛고 있지 않아, 그쪽 수정이 담겼는지는 **확인되지 않습니다** — ` +
+                `이미 손으로 합쳐 두셨다면 담겨 있고, 아니면 빠집니다.\n\n` +
+                `원장에서 사라지는 것은 없습니다. 확인하고 싶으면 여기서 그만두고, 그 버전을 다른 폴더에 ` +
+                `받아 지금 폴더와 맞춰 본 뒤 다시 올려 주세요.`,
+            action: "그대로 올리기",
+        };
+    },
+    /**
+     * **방문자에게 닿았다** — [published] 가 「잠시 걸립니다」로 열어 둔 문장을 닫는다.
+     *
+     * ⚠ 이 문장은 **서빙박스가 그 판을 띄웠다고 보고했을 때만** 나온다(`reflectionOf` 가 `reflected`).
+     *   활성 포인터가 옮겨진 것으로 내면 종전의 그 거짓말 — 「배포됐습니다」인데 사이트는 안 바뀐 상태 —
+     *   이 그대로 돌아온다. 관측이 없는 사이트에서는 **아무 말도 안 한다**(없는 소식을 지어내지 않는다).
+     */
+    reflected(tenant: CapturedTenant, revisionNo: number): string {
+        return `「${shown(tenant)}」 사이트에 버전 ${countJosa(revisionNo, "이/가")} 방문자에게 반영됐습니다.`;
     },
     switchConfirm(tenant: CapturedTenant, revisionNo: number): { message: string; detail: string; action: string } {
         return {

@@ -33,6 +33,74 @@ const read = (p) => readFileSync(join(root, p), "utf8");
 const WIRES = [
     [
         "packages/vscode/src/extension.ts",
+        "void watchReflection(api, revisionNo, tenant);",
+        "게시 뒤 반영 확인이 안 돌아 「방문자에게 반영됐습니다」가 영영 안 뜬다 — 그러면 사람은 " +
+            "「잠시 걸립니다」에서 끝나고, 실제로 바뀌었는지 확인할 길이 다시 없어진다(이 기능의 존재 이유)",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        'if (state === "reflected") {',
+        "반영 판정이 느슨해지면 전환 중(아무것도 안 떠 있는 순간)에 「반영됐습니다」가 뜬다 — " +
+            "종전의 그 거짓말이 방향만 바꿔 돌아온다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "i < REFLECT_POLL_MAX",
+        "상한이 사라지면 관측이 계속 pending 인 사이트에서 폴링이 **끝나지 않는다** — 종료 조건 둘이 " +
+            "있어도 그 둘에 안 걸리는 상태가 있고, 그때 조회가 창이 닫힐 때까지 나간다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "const baseRevisionNo = declaredBaseRevisionNo(readSourceMarkAt(dir), tenant);",
+        "**소속 대조가 사라지면 남의 사이트 표식 번호를 이 원장에 선언한다.** 판 번호는 테넌트별 " +
+            "순번이라 겹칠 확률이 낮지 않고, 겹치면 서버가 「그게 꼬리다」로 **통과**시킨다 — " +
+            "근거 없는 차단이 아니라 **근거 없는 통과**, 곧 이 방어의 조용한 무력화다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "          baseRevisionNo,",
+        "**잠금장치 자체가 사라진다.** 모든 올리기가 무선언이 되는데 발행 확인은 여전히 " +
+            "`baseRevisionNo != null` 로 계산돼 「확인하지 못한 채」를 **안 띄운다** — 사람은 보호를 " +
+            "전제하고 화면도 그렇게 말하는데 방어는 0 이다(문과 표지판은 지키고 자물쇠는 안 지킨 배치)",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "stopReflectionWatches();",
+        "확장이 내려가는데 **반영 확인 폴링이 계속 돈다** — 조회가 더 나가고, 최악에는 이미 없는 " +
+            "맥락에 대고 알림을 띄운다. 상한(180초)은 「끝난다」를 보장할 뿐 「지금 끝난다」가 아니다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "if (signal.aborted) return;",
+        "**잠든 사이에 꺼진 것을 안 본다** — 깨어난 자리에서 확인하지 않으면 내려간 확장이 조회를 " +
+            "한 번 더 내보낸다. 취소 손잡이만 있고 보는 자리가 없으면 그 손잡이는 장식이다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "reflectionOf(await api.listRevisions(REFLECT_PAGE), revisionNo)",
+        "반영 확인이 **판 전량**을 읽는다 — 판은 발행할 때마다 늘고 줄지 않으므로 그 비용이 원장 " +
+            "크기에 비례해 영원히 자란다. 관측이 없는 사이트에서는 유예까지 여섯 번 되풀이된다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "onBaseMoved: (serverMessage) => askBaseMoved(tenant, serverMessage),",
+        "409 를 맞은 폴더가 **영구 막다른길**이 된다 — 표식은 발행 성공에서만 갱신되므로 다음 올리기도 " +
+            "같은 번호를 선언해 같은 409 를 무한히 맞는다. 사람이 손으로 합쳐 넣어도 빠져나갈 수 없다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        'if (state === "unknown" && i < UNKNOWN_GRACE_POLLS) continue;',
+        "첫 게시에서 관측 행이 아직 없는 창을 「관측이 안 도는 사이트」로 오독해 **첫 폴 한 번에 감시가 " +
+            "죽는다** — 사이트가 처음 세상에 보이는 순간, 이 알림의 가치가 가장 큰 자리에서",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        'if (state !== "pending") {',
+        "종료 조건이 빠지면 관측이 없는 사이트(구 백엔드·박스 미보고·git 레인)에서 폴링이 상한까지 돈다 — " +
+            "오지 않을 소식을 기다리는 것이고, 그 사이 조회가 계속 나간다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
         "folderTenant: currentFolderBinding()",
         "게이트·사이드바·상태바가 서로 다른 기준으로 소속을 판정해, 화면마다 다른 말을 한다",
         3,
@@ -233,8 +301,9 @@ const WIRES = [
     ],
     [
         "packages/vscode/src/extension.ts",
-        "say.publishConfirm(tenant, dir, currentFolderBinding())",
-        "발행 확인이 소속을 안 봐 늘 일상 갈래가 되고(반사가 삼킨다) 「이 폴더」의 지시대상도 잃는다",
+        "say.publishConfirm(tenant, dir, currentFolderBinding(), baseRevisionNo != null)",
+        "발행 확인이 소속을 안 봐 늘 일상 갈래가 되고(반사가 삼킨다) 「이 폴더」의 지시대상도 잃는다. " +
+            "넷째 인자가 빠지면 **무표식 폴더가 조용히 무보호인 채로 올라간다** — 사람은 보호를 전제하는데",
     ],
     [
         // ⚠ **맨몸 `executeCommand` 로 돌아가면 고른 사이트가 그 자리에서 버려진다.** 형제 `fetch`
@@ -469,14 +538,17 @@ const WIRES = [
     ],
     [
         "packages/core/src/publish.ts",
-        "return await options.api.confirmArchive(storageKey, true);",
-        "동의를 받아 놓고 서버에는 전하지 않는다 — 같은 409 가 반복된다",
+        "return await options.api.confirmArchive(storageKey, discard, base);",
+        "동의·기반 두 문이 **차례로** 걸리는데(백엔드가 동의 게이트를 기반 대조보다 먼저 지난다) " +
+            "재호출이 상태를 안 들고 가면 방금 받은 동의가 사라지거나 두 번째 409 가 아무 데도 안 걸린다 — " +
+            "빠져나갈 단추 없는 빨간창이 영구히 남는다(설계 심의 반려 사유)",
     ],
     [
         "packages/vscode/src/extension.ts",
         "return answer === ask.action;",
-        "동의 창은 뜨는데 **무엇을 누르든 동의**가 된다 — 게시 대기 중인 AI 변경이 사람이 거절해도 사라진다. " +
-            "올리기·전환 두 문이 이 한 점을 공유하므로 파급이 둘이다",
+        "동의 창은 뜨는데 **무엇을 누르든 동의**가 된다 — 사람이 거절해도 사라진다. 이 형태를 쓰는 " +
+            "동의 창이 둘이다(게시 대기 AI 변경 폐기 · 남의 변경을 안 담고 그대로 올리기)",
+        2,
     ],
     [
         "packages/vscode/src/extension.ts",

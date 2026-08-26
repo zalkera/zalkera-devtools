@@ -1,5 +1,5 @@
 import type { ArchiveConfirmed, ZalkeraApi } from "./api.ts";
-import { needsDiscardConsent } from "./api.ts";
+import { isUploadBaseMoved, needsDiscardConsent } from "./api.ts";
 import { DevtoolsError } from "./errors.ts";
 import { apiBaseUrl } from "./serverUrl.ts";
 import { packProject } from "./zip.ts";
@@ -37,6 +37,26 @@ export interface PublishOptions {
      *   그 둘을 못 갈라 **다른 행위에 대한 동의**를 받게 된다.
      */
     onConsent?: (serverMessage: string, serverCode: string | null) => Promise<boolean>;
+    /**
+     * 이 올리기가 딛는다고 **선언할 판**. `null` 은 무선언 — 서버는 현행 그대로 통과시킨다.
+     *
+     * 부르는 쪽이 폴더 표식에서 읽어 넘긴다(`declaredBaseRevisionNo`). core 가 다시 읽지 않는 이유는
+     * `tenant` 와 같다 — 판정이 두 벌이 되면 갈린다.
+     */
+    baseRevisionNo?: number | null;
+    /**
+     * 선언한 판이 원장 꼬리가 아니어서 서버가 막았을 때 사람에게 묻는다. `true` 를 돌려주면
+     * **무선언으로 같은 바이트를 다시 올린다**(그 사이 올라온 변경은 안 담긴다).
+     *
+     * ⚠ **안 주면 그대로 던진다.** 그러면 화면은 막다른 길이 된다 — 표식은 발행 성공에서만 갱신되므로
+     *   다음 올리기도 같은 번호를 선언해 **같은 409 를 무한히 맞는다.** 사람이 최신 변경을 손으로
+     *   합쳐 넣어도 표식은 옛 번호라 빠져나갈 수 없다. 화면이 없는 자리(시험)는 그 문을 안 열면 된다.
+     *
+     * ⚠ **[onConsent] 와 합치지 마라.** 사라지는 것이 다르다 — 저쪽은 내 편집, 이쪽은 남의 변경이다.
+     *
+     * @param serverMessage 서버가 보낸 문장(최신 판 번호가 들어 있다). 표시 자리에서 소독한다.
+     */
+    onBaseMoved?: (serverMessage: string) => Promise<boolean>;
 }
 
 export interface PublishResult {
@@ -53,32 +73,60 @@ export interface PublishResult {
 }
 
 /**
- * 업로드 확정. 서버가 **동의를 요구하면** 물어보고 다시 부른다.
+ * confirm 을 **문이 열릴 때까지** 다시 부른다.
  *
- * ■ 왜 여기 있나
- *   백엔드는 재업로드·버전 전환·프리셋 재개시 **세 문이 같은 가드**를 지나고, 셋 다 요청 본문의
- *   `discardPendingChanges` 로 동의를 받는다. 확장은 전환 쪽만 동의 경로를 갖고 있었다 — 그래서
- *   올리기는 zip 을 다 올린 뒤 409 를 받고 「계속하려면 확인해 주세요」만 반복했다.
+ * ■ 왜 반복인가 — 문이 둘이고 **차례로** 걸린다
+ *   백엔드는 동의 게이트(`BaselineShiftGuard`)를 기반 대조보다 **먼저** 지난다. 그래서 승격 사이트에
+ *   게시 대기 작업이 있고 그 사이 남이 올렸으면 **동의를 받은 뒤에 기반 409 가 온다.** 갈래를 평평하게
+ *   두면 그 두 번째 409 는 아무 데도 안 걸리고 그대로 던져진다 — 그리고 그 시도는 S3 put·tx 전에
+ *   막혀 **아무 상태도 안 바꾸므로**, 다음 올리기도 같은 두 걸음을 그대로 반복한다. 빠져나갈 단추가
+ *   없는 빨간창이 영구히 남는다(설계 심의가 반려 사유로 못 박은 그 형상).
  *
- * ■ 물어보는 것은 부르는 쪽이다
- *   core 는 화면이 없다. `onConsent` 를 안 주면 **묻지 않고 그대로 던진다** — 조용히 동의한 것으로
- *   치면 게시 대기 중인 AI 변경이 사람 모르게 사라진다(이미 정산된 토큰이 실린 작업이다).
+ * ■ 왜 끝나는가
+ *   문마다 **한 번만** 묻는다. 같은 문이 두 번 걸리면 사람의 답이 안 통한 것이므로 그대로 던진다 —
+ *   되풀이해 묻는 것은 「확인」이 아니라 조르기다. 그래서 시도는 최대 세 번이다.
+ *
+ * ■ 동의는 **상태**다
+ *   `discard` 를 인자가 아니라 상태로 들고 다닌다. 기반 갈래에서 `discard=false` 로 재전송하면
+ *   방금 받은 동의가 사라져 곧바로 같은 동의 409 를 다시 맞는다.
  */
-async function confirmWithConsent(options: PublishOptions, storageKey: string): Promise<ArchiveConfirmed> {
-    try {
-        return await options.api.confirmArchive(storageKey);
-    } catch (error) {
-        if (!needsDiscardConsent(error) || !options.onConsent) throw error;
-        const rejected = error instanceof DevtoolsError ? error : null;
-        if (
-            !(await options.onConsent(
-                rejected?.message ?? String(error),
-                rejected?.serverCode ?? null,
-            ))
-        ) {
-            throw new DevtoolsError("CANCELLED", "올리기를 그만두었습니다.");
+async function confirmWithConsent(
+    options: PublishOptions,
+    storageKey: string,
+    baseRevisionNo: number | null,
+): Promise<ArchiveConfirmed> {
+    let discard = false;
+    let base = baseRevisionNo;
+    let consentAsked = false;
+    let baseAsked = false;
+    for (;;) {
+        try {
+            // ⚠ **같은 `storageKey` 로 다시 부른다 — 절대 다시 묶지 않는다.** 사람이 동의한 것은
+            //    「지금 이 바이트를 그대로 올린다」이고, 재압축하면 **동의한 것과 다른 것**이 올라간다.
+            return await options.api.confirmArchive(storageKey, discard, base);
+        } catch (error) {
+            const rejected = error instanceof DevtoolsError ? error : null;
+            const message = rejected?.message ?? String(error);
+            if (needsDiscardConsent(error) && options.onConsent && !consentAsked) {
+                consentAsked = true;
+                if (!(await options.onConsent(message, rejected?.serverCode ?? null))) {
+                    throw new DevtoolsError("CANCELLED", "올리기를 그만두었습니다.");
+                }
+                discard = true;
+                continue;
+            }
+            if (isUploadBaseMoved(error) && options.onBaseMoved && !baseAsked) {
+                baseAsked = true;
+                if (!(await options.onBaseMoved(message))) {
+                    throw new DevtoolsError("CANCELLED", "올리기를 그만두었습니다.");
+                }
+                // 무선언으로 내려놓는다. 같은 선언을 다시 실으면 같은 409 를 다시 맞고, 표식은 발행
+                // 성공에서만 갱신되므로 **영원히 못 빠져나온다** — 그것이 이 갈래가 존재하는 이유다.
+                base = null;
+                continue;
+            }
+            throw error;
         }
-        return await options.api.confirmArchive(storageKey, true);
     }
 }
 
@@ -148,7 +196,7 @@ export async function publish(options: PublishOptions): Promise<PublishResult> {
     // ⚠ **여기서 다시 묶지 않는다.** 동의 뒤 재시도는 **같은 `storageKey`** 를 쓴다 — S3 에 이미
     //    올라간 그 바이트다. 다시 묶으면 사람이 그 사이 파일을 고쳤을 때 **동의한 것과 다른 것**이
     //    올라가고, 100MB 를 한 번 더 보내게 된다.
-    const confirmed = await confirmWithConsent(options, presigned.storageKey);
+    const confirmed = await confirmWithConsent(options, presigned.storageKey, options.baseRevisionNo ?? null);
     report(`버전 ${confirmed.revisionNo} 로 올렸습니다.`);
 
     return {

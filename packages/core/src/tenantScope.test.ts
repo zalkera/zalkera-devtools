@@ -353,3 +353,21 @@ test("버린 것이 0건이면 「버렸습니다」라고 하지 않는다", ()
   });
   ok(말.includes("바꾼 것이 없습니다"), 말);
 });
+
+// ── 무표식 폴더는 「조용히 무보호」다(발주서 §B) ──────────────────────────────
+//
+// 이 기능이 나가는 순간 사람은 보호를 전제한다. 그런데 어느 판에서 갈라졌는지 기록이 없는 폴더는
+// 선언할 값이 없어 **아무것도 대조되지 않는다.** 그 침묵이 곧 이 트랜치가 사냥한 병이다.
+test("기반을 선언 못 하면 발행 확인이 그 사실을 말한다", () => {
+    const t = captureTenant("bix");
+    const declared = say.publishConfirm(t, "/w/p", "bix", true);
+    const unknown = say.publishConfirm(t, "/w/p", "bix", false);
+    ok(
+        !/확인하지 못한 채/.test(declared.detail),
+        `선언이 있는데 무보호를 말했다: ${declared.detail}`,
+    );
+    match(unknown.detail, /확인하지 못한 채/);
+    // 소속 없는 폴더(다른 모달 갈래)에서도 같아야 한다 — 한쪽만 고치면 그쪽이 조용히 무보호다.
+    match(say.publishConfirm(t, "/w/p", null, false).detail, /확인하지 못한 채/);
+    ok(!/확인하지 못한 채/.test(say.publishConfirm(t, "/w/p", null, true).detail));
+});
