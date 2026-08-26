@@ -46,6 +46,8 @@ function server(opts: {
 } = {}) {
   const confirms: Record<string, unknown>[] = [];
   const keys: string[] = [];
+  /** 서버가 폐기한 아카이브 키. 재시도 가능한 거절(`UPLOAD_BASE_MOVED`)에서는 안 들어간다. */
+  const gone = new Set<string>();
   const fetchImpl = (async (input: URL | string, init?: RequestInit) => {
     const url = String(input);
     if (url.endsWith("/api/partner/site-archive/presign")) {
@@ -60,6 +62,12 @@ function server(opts: {
     if (url.endsWith("/api/partner/site-archive/confirm")) {
       const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
       confirms.push(body);
+      // ⚠ **서버는 confirm 마다 아카이브를 폐기한다** — 재시도 가능한 거절만 예외다. 대역이 그것을
+      //    모형화하지 않으면 「같은 키로 재전송」 시험이 **상용에서 죽는 경로를 초록으로** 통과시킨다
+      //    (실제로 그랬다 — 성능 축이 서버 코드에서 찾았다).
+      if (gone.has(String(body.storageKey))) {
+        return new Response(JSON.stringify({ errorCode: "ARCHIVE_NOT_FOUND", message: "아카이브가 없습니다." }), { status: 404 });
+      }
       const wantsConsent = opts.needsConsent === true || opts.needsConsentWhen?.() === true;
       if (wantsConsent && body.discardPendingChanges !== true) {
         return new Response(
@@ -79,6 +87,7 @@ function server(opts: {
           { status: 409 },
         );
       }
+      gone.add(String(body.storageKey)); // 성공 → 폐기
       return new Response(
         JSON.stringify({ data: { revisionNo: 12, siteType: "NEXT_SOURCE", status: "BUILDING" } }),
         { status: 200 },
@@ -86,7 +95,7 @@ function server(opts: {
     }
     return new Response("", { status: 404 });
   }) as typeof fetch;
-  return { confirms, keys, fetchImpl };
+  return { confirms, keys, gone, fetchImpl };
 }
 
 const api = (fetchImpl: typeof fetch) =>
