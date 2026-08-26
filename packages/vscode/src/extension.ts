@@ -2641,7 +2641,7 @@ async function publishCommand(): Promise<void> {
   //    접지 않는다: 판은 있고 준비되면 게시된다(빌드 대기 취소와 같은 의미론).
   if (result.cancelledLate) {
     void vscode.window.showInformationMessage(
-      say.publishCancelledLate(tenant, result.revisionNo),
+      say.publishCancelledLate(tenant, result.revisionNo, result.status === "READY"),
     );
     return;
   }

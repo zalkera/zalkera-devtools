@@ -133,8 +133,10 @@ async function fetchWithCancel(
 }
 
 /**
- * 둘 중 먼저 끊기는 쪽을 따르는 신호. `AbortSignal.any` 는 Node 20 에 없어 손으로 엮는다
- * (이 확장의 `engines` 는 `>=20`).
+ * 둘 중 먼저 끊기는 쪽을 따르는 신호.
+ *
+ * `AbortSignal.any` 를 안 쓴다 — 이 패키지의 `engines.node` 가 `>=20` 인데 그 API 는 20.3.0 에 들어왔다.
+ * 20.0~20.2 에서 도는 편집기가 있으면 **호출 자체가 없는 함수**가 된다.
  */
 function anySignal(a: AbortSignal | undefined, b: AbortSignal): AbortSignal {
     if (!a) return b;

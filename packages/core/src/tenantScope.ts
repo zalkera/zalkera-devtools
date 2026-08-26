@@ -366,11 +366,18 @@ export const say = {
      *   알고 다시 올린다. 취소가 실제로 하는 일은 **기다리기를 그만두는 것**뿐이라, 빌드 대기 취소와
      *   같은 의미론으로 강하시켜 말한다.
      */
-    publishCancelledLate(tenant: CapturedTenant, revisionNo: number): string {
-        return (
-            `취소보다 먼저 「${shown(tenant)}」 버전 ${countJosa(revisionNo, "이/가")} 만들어졌습니다. ` +
-            `기다리기만 그만뒀습니다 — 준비되면 게시됩니다.`
-        );
+    publishCancelledLate(tenant: CapturedTenant, revisionNo: number, alreadyLive: boolean): string {
+        // ⚠ **`STATIC` 은 확정 즉시 게시다**(`status: "READY"`) — 기다릴 것이 아예 없다. 그 판에
+        //    「준비되면 게시됩니다」라고 하면 **이미 손님에게 나간 것을 아직 안 나갔다고** 말하는
+        //    거짓이고, 사람은 안 바뀐 줄 알고 한 번 더 올린다. 미래형은 빌드가 남은 판에만 쓴다.
+        //
+        //    앞머리를 변수로 뽑지 않는다 — 소독 검사기는 **보간되는 이름**을 보므로, 한 번 감싸면
+        //    `shown`·`countJosa` 가 검사 밖으로 사라진다(실측: 그 판이 2건으로 반려됐다).
+        return alreadyLive
+            ? `취소보다 먼저 「${shown(tenant)}」 버전 ${countJosa(revisionNo, "이/가")} 만들어졌습니다. ` +
+                  `이미 게시됐습니다 — 기다리기만 그만뒀습니다.`
+            : `취소보다 먼저 「${shown(tenant)}」 버전 ${countJosa(revisionNo, "이/가")} 만들어졌습니다. ` +
+                  `기다리기만 그만뒀습니다 — 준비되면 게시됩니다.`;
     },
     /**
      * **방문자에게 닿았다** — [published] 가 「잠시 걸립니다」로 열어 둔 문장을 닫는다.

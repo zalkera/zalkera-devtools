@@ -109,6 +109,26 @@ const WIRES = [
     ],
     [
         "packages/vscode/src/extension.ts",
+        "token.onCancellationRequested(() => {\n          stop.abort();",
+        "취소 손잡이가 **신호를 안 당긴다** — 버튼도 뜨고 「멈추는 중」 문면까지 나오는데 전송은 " +
+            "끝까지 간다. 바로 윗줄의 `signal: stop.signal` 이 있어도 당기는 손이 없으면 장식이다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        'say.publishCancelledLate(tenant, result.revisionNo, result.status === "READY"),',
+        "늦은 취소 문면이 **판의 현재 상태를 안 보고** 늘 미래형으로 말한다 — `STATIC` 은 확정 즉시 " +
+            "게시라 이미 손님에게 나갔는데 「준비되면 게시됩니다」라고 하면, 사람은 안 바뀐 줄 알고 " +
+            "한 번 더 올린다. 문면 자체는 시험이 물지만 **어느 값을 넘기는지**는 여기서만 잡힌다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "rememberFolder(String(tenant), dir);\n\n  // ⚠ **취소가 늦었으면 여기서 갈린다.**",
+        "늦은 취소 갈래가 **표식·폴더기억 위로 올라가면** 화면이 아니라 **디스크에 거짓**이 남는다 — " +
+            "표식이 옛 판을 든 채라 다음 발행이 낡은 기반을 선언하고 자기가 방금 만든 판에 409 를 맞는다. " +
+            "블록의 존재만 세면 이 순서가 안 잡힌다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
         "if (result.cancelledLate) {",
         "취소가 늦었는데 **빌드 대기에 붙든다** — 그만두겠다고 한 사람을 계속 기다리게 한다. " +
             "반대로 여기서 「취소했습니다」로 접으면 판이 있는데 없다고 말하는 거짓이 된다",

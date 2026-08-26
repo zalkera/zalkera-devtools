@@ -371,3 +371,25 @@ test("기반을 선언 못 하면 발행 확인이 그 사실을 말한다", () 
     match(say.publishConfirm(t, "/w/p", null, false).detail, /확인하지 못한 채/);
     ok(!/확인하지 못한 채/.test(say.publishConfirm(t, "/w/p", null, true).detail));
 });
+
+// ── 늦은 취소는 판의 **현재 상태**를 말한다 ─────────────────────────────────
+//
+// `STATIC` 은 확정 즉시 `READY`·활성이라 기다릴 것이 없다. 그 판에 「준비되면 게시됩니다」라고
+// 하면 **이미 손님에게 나간 것을 아직 안 나갔다고** 말하는 것이고, 사람은 안 바뀐 줄 알고 한 번
+// 더 올린다 — 이 트랜치가 사냥한 병이 정확히 그 형태다.
+test("이미 게시된 판을 「준비되면 게시됩니다」로 말하지 않는다", () => {
+    const t = captureTenant("bix");
+    const live = say.publishCancelledLate(t, 12, true);
+    const building = say.publishCancelledLate(t, 12, false);
+
+    ok(live.includes("이미 게시됐습니다"), live);
+    ok(!/준비되면 게시됩니다/.test(live), `이미 나간 판을 미래형으로 말했다: ${live}`);
+    match(building, /준비되면 게시됩니다/);
+    ok(!/이미 게시됐습니다/.test(building), `아직 빌드 중인 판을 게시됐다고 말했다: ${building}`);
+
+    // 어느 갈래든 **판이 만들어졌다는 사실**은 빠지면 안 된다 — 그게 「취소했습니다」와 갈리는 지점이다.
+    for (const 말 of [live, building]) {
+        ok(말.includes("만들어졌습니다"), `판이 생긴 사실을 안 말했다: ${말}`);
+        ok(말.includes("기다리기만 그만뒀습니다"), `취소가 무엇을 했는지 안 말했다: ${말}`);
+    }
+});

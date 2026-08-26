@@ -174,3 +174,149 @@ test("취소가 없으면 종전 그대로다", async () => {
   strictEqual(result.revisionNo, 12);
   ok(!("cancelledLate" in result), "취소 안 했는데 늦었다고 말했다");
 });
+
+// ── 실 소켓 ────────────────────────────────────────────────────────────────
+//
+// ⚠ **위 시험들의 모의 `fetchImpl` 은 `init.signal` 을 안 본다.** 그래서 「전송 중 취소」가
+//    사실은 PUT 을 완주시킨 뒤 **그 뒤 검사점**에 걸려 초록이었다 — 취소 기계(`anySignal`·
+//    `fetchWithCancel`) 자체는 한 줄도 안 물렸다. 심의 실측: 아래 네 변이가 전건 초록이었다.
+//
+//      ⑴ `anySignal` 이 사용자 신호를 버림 → 눌러도 100MB 가 다 나갈 때까지 안 멈춘다
+//      ⑵ `fetchWithCancel` 을 생 `fetchImpl` 로 통과 → 생 `AbortError` 가 빨간창이 된다
+//      ⑶ 타임아웃을 무조건 취소로 접음 → 15분 상한을 「취소했습니다」로 보고한다
+//      ⑷ `addEventListener` 두 줄 삭제 → 합성 자체가 불능
+//
+//    ⑴⑵⑷ 는 **진짜 소켓이라야** 잡힌다(신호를 존중하는 fetch 가 있어야 차이가 난다). ⑶ 은
+//    상한이 15분 상수라 소켓으로는 못 만들므로, PUT 이 `TimeoutError` 로 깨지는 자리를 따로 둔다.
+//
+// 재현: `npm test -w @zalkera/devtools-core`
+
+/** 루프백 HTTP 서버. PUT 을 받는 **즉시** 취소를 눌러 응답을 붙든다 — 타이머가 없어 안 흔들린다. */
+async function socketServer(opts: { holdMs?: number } = {}) {
+  const { createServer } = await import("node:http");
+  const stop = new AbortController();
+  const seen: string[] = [];
+  let sawCut = (): void => {};
+  /** 서버가 **응답을 쓰기 전에** 연결이 죽는 것을 본 순간 참이 된다. */
+  const cut = new Promise<boolean>((resolve) => {
+    sawCut = () => resolve(true);
+  });
+  const send = (res: import("node:http").ServerResponse, body: unknown) => {
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify(body));
+  };
+  const server = createServer((req, res) => {
+    const url = req.url ?? "";
+    req.resume();
+    if (url.endsWith("/site-archive/presign")) {
+      seen.push("presign");
+      req.on("end", () =>
+        send(res, {
+          data: { uploadUrl: `${base}/put`, storageKey: "k/1.zip", expiresAt: "" },
+        }),
+      );
+      return;
+    }
+    if (url.endsWith("/put")) {
+      seen.push("put");
+      // ⚠ **끊겼다는 증거를 서버가 든다.** 「취소로 접혔다」만 보면 안 된다 — 신호가 안 닿아
+      //    전송이 완주해도 **PUT 뒤 검사점**이 받아서 똑같이 `CANCELLED` 가 나온다(실측: 이
+      //    시험의 첫 판이 `anySignal` 변이를 놓쳤다). 소켓이 응답 전에 죽는 것이 유일한 증거다.
+      res.on("close", () => {
+        if (!res.writableEnded) sawCut();
+      });
+      // 클라이언트는 지금 **응답을 기다리는 중**이다 — 여기서 누르는 것이 「전송 중 취소」다.
+      stop.abort();
+      setTimeout(() => {
+        if (!res.writableEnded) send(res, {});
+      }, opts.holdMs ?? 5000).unref();
+      return;
+    }
+    if (url.endsWith("/site-archive/confirm")) {
+      seen.push("confirm");
+      req.on("end", () => send(res, { data: { revisionNo: 12, siteType: "STATIC", status: "READY" } }));
+      return;
+    }
+    res.writeHead(404).end();
+  });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  const port = (server.address() as { port: number }).port;
+  const base = `http://127.0.0.1:${port}`;
+  return {
+    stop,
+    seen,
+    base,
+    /** 마감 안에 끊김을 못 봤으면 거짓 — 매달린 채로 시험이 안 끝나게 한다. */
+    async cutWithin(ms: number): Promise<boolean> {
+      let t: NodeJS.Timeout;
+      const deadline = new Promise<boolean>((r) => {
+        t = setTimeout(() => r(false), ms);
+      });
+      return await Promise.race([cut, deadline]).finally(() => clearTimeout(t!));
+    },
+    async close() {
+      server.closeAllConnections?.();
+      await new Promise<void>((r) => server.close(() => r()));
+    },
+  };
+}
+
+test("실 소켓 — 전송 중에 그만두면 끊기고 확인이 안 나간다", async () => {
+  const s = await socketServer();
+  try {
+    let code = "";
+    let name = "";
+    try {
+      await publish({
+        projectDir: await project(),
+        api: new ZalkeraApi({
+          apiBase: s.base,
+          accessToken: async () => "t",
+          tenantCode: () => "bix",
+          fetchImpl: fetch,
+        }),
+        tenant: "bix",
+        fetchImpl: fetch,
+        signal: s.stop.signal,
+      });
+    } catch (e) {
+      code = (e as { code?: string }).code ?? "";
+      name = (e as Error).name;
+    }
+    strictEqual(code, "CANCELLED", `취소로 안 접혔다(name=${name}) — 흐름 ${s.seen.join("→")}`);
+    ok(s.seen.includes("put"), `PUT 에 닿지도 않았다: ${s.seen.join("→")}`);
+    ok(!s.seen.includes("confirm"), `판이 만들어졌다: ${s.seen.join("→")}`);
+    // ⚠ **이 줄이 취소 기계를 무는 유일한 자리다.** 위 셋은 신호가 한 줄도 안 닿아도 참이 된다.
+    ok(await s.cutWithin(1000), "전송이 안 끊겼다 — 눌러도 바이트는 끝까지 나갔다(신호가 안 닿는다)");
+  } finally {
+    await s.close();
+  }
+});
+
+test("상한으로 끊긴 것은 취소가 아니다 — 15분을 「그만뒀습니다」로 보고하지 않는다", async () => {
+  // ⚠ 사람은 **아무것도 안 눌렀다.** 여기서 취소로 접으면 진짜 실패가 조용히 삼켜진다.
+  const s = server();
+  const fetchImpl = (async (input: URL | string, init?: RequestInit) => {
+    if (String(input).startsWith("https://s3.example.test/")) {
+      s.seen.push("put");
+      throw new DOMException("The operation was aborted due to timeout", "TimeoutError");
+    }
+    return s.fetchImpl(input as URL, init);
+  }) as typeof fetch;
+  let code = "";
+  let name = "";
+  try {
+    await publish({
+      projectDir: await project(),
+      api: api(fetchImpl),
+      tenant: "bix",
+      fetchImpl,
+    });
+  } catch (e) {
+    code = (e as { code?: string }).code ?? "";
+    name = (e as Error).name;
+  }
+  strictEqual(name, "TimeoutError", "상한 실패의 정체가 바뀌었다");
+  ok(code !== "CANCELLED", "상한으로 끊긴 것을 사람이 그만둔 것으로 보고했다");
+  ok(!s.seen.includes("confirm"), "전송이 깨졌는데 판을 만들었다");
+});
