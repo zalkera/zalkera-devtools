@@ -185,8 +185,11 @@ function isValueLessTemplate(lower: string): boolean {
 /**
  * **값 자리에 앉으면 「살아 있는 비밀」로 보는 형상.**
  *
- * 표는 정본 팩 게이트(`zalkera-storefront-examples/scripts/verify-zip.mjs` 의 `SECRET_CONTENT`)와
+ * 표는 정본 팩 게이트(`zalkera-storefront-examples/scripts/lib/secret-content.mjs` 의 `SECRET_CONTENT`)와
  * 같다. 두 자를 다르게 두면 「팩 게이트는 잡는데 여기는 흘리는」 값이 생긴다.
+ *
+ * ⚠ **표가 같아도 그 표를 쓰는 규칙이 갈리면 소용이 없다** — 실제로 그렇게 샜다(자리표시자 면제를
+ *   값 전체에 걸어 진짜 키가 그 옆에서 통과했다). 면제식은 저쪽 `verify-zip.mjs` 와 자구까지 맞춘다.
  *
  * ⚠ **완전하지 않다.** 고엔트로피 문자열 일반은 안 본다 — 그래서 이 함수가 하는 말은
  *   「알려진 형식의 살아 있는 열쇠가 값 자리에 있다」이지 「비밀이 없다」가 아니다.
@@ -201,6 +204,11 @@ const LIVE_SECRET: ReadonlyArray<readonly [string, RegExp]> = [
     ["Google API 키", /\bAIza[0-9A-Za-z_-]{35}\b/],
     ["npm 토큰", /\bnpm_[0-9A-Za-z]{36}\b/],
 ];
+
+/** AWS 가 자기 문서에 싣는 자리표시자. 어디서도 인증되지 않는다. */
+const AWS_DOC_PLACEHOLDER = /\bAKIA[0-9A-Z]{9}EXAMPLE\b/;
+/** 자리표시자가 **아닌** AKIA 토큰. 하나라도 있으면 면제하지 않는다. */
+const AWS_LIVE_KEY = /\bAKIA(?![0-9A-Z]{9}EXAMPLE\b)[0-9A-Z]{16}\b/;
 
 /**
  * 자격증명이 박힌 URL. **호스트까지 본다** — 표에 두지 않고 따로 다루는 이유가 그것이다.
@@ -294,7 +302,18 @@ export function templateHoldsSecret(text: string): string | null {
         for (const [what, pattern] of LIVE_SECRET) {
             if (!pattern.test(value)) continue;
             // AWS 가 자기 문서에서 쓰는 자리표시자. GitHub 의 스캐너도 비-비밀로 안다.
-            if (what === "AWS 액세스키" && /\bAKIA[0-9A-Z]{9}EXAMPLE\b/.test(value)) continue;
+            //
+            // ⚠ **자리표시자가 「있다」로 면제하면 안 된다.** 값 한 줄에 진짜 키와 자리표시자가
+            //   같이 있으면(`KEY=<진짜>  # 예: <자리표시자>`) 통째로 면제되어 살아 있는 키가
+            //   팩에 실린다(실증). 자리표시자가 있고 **동시에 자리표시자 아닌 키가 없을 때만**
+            //   면제한다 — 정본 팩 게이트(`storefront-examples/scripts/verify-zip.mjs`)와 같은 식이다.
+            if (
+                what === "AWS 액세스키" &&
+                AWS_DOC_PLACEHOLDER.test(value) &&
+                !AWS_LIVE_KEY.test(value)
+            ) {
+                continue;
+            }
             return what;
         }
         const url = URL_CREDENTIAL.exec(value);

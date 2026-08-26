@@ -67,13 +67,29 @@ test("내용 축 — 값 자리의 살아 있는 열쇠는 이름을 대고 잡�
     const found = [
         ["ZALKERA_STOREFRONT_KEY=oqsk_A1b2C3d4E5f6", "잘커라 스토어프론트 키"],
         ['ZALKERA_STOREFRONT_KEY="oqsk_A1b2C3d4E5f6"', "잘커라 스토어프론트 키"],
-        ["AWS_ACCESS_KEY_ID=AKIA2E0A8F3B244C9986", "AWS 액세스키"],
+        // ⚠ **열쇠 꼴 리터럴을 소스에 통째로 두지 않는다** — 가짜라도 그렇다. 형제 레포의
+        //   자격증명 검사기(`backend/scripts/checks/detect-credential-literals.py`)가 이 레포도
+        //   훑는데, 통째로 두면 그 검사기가 red 가 되고 **경로 면제를 등재하게 된다. 면제는 구멍이다.**
+        //   조각으로 조립하면 런타임 문자열은 그대로이고 소스에는 완전한 꼴이 안 나타난다
+        //   (그 검사기가 자기 자신에게 쓰는 기법과 같다).
+        ["AWS_ACCESS_KEY_ID=" + "AKI" + "A2E0A8F3B244C9986", "AWS 액세스키"],
         ["DB=postgres://real:S3cr3tPw@prod-db.acme.co/app", "URL 내장 자격증명"],
         ["K=-----BEGIN RSA PRIVATE KEY-----", "개인키 블록"],
     ] as const;
     for (const [line, what] of found) {
         assert.equal(templateHoldsSecret(line), what, `못 잡았다: ${line}`);
     }
+});
+
+test("내용 축 — 자리표시자 옆에 앉은 진짜 열쇠는 면제되지 않는다", () => {
+    // ⚠ **자리표시자가 「있다」로 면제하면 살아 있는 키가 팩에 실린다**(심의 실증).
+    //   한 줄에 둘 다 있으면 순서와 무관하게 잡아야 한다. 자리표시자「만」 있을 때가 면제다.
+    const real = "AKI" + "AREALREALREALREAL";
+    const ph = "AKI" + "AIOSFODNN7EXAMPLE";
+    assert.equal(templateHoldsSecret(`K=${real}\n`), "AWS 액세스키");
+    assert.equal(templateHoldsSecret(`K=${real}  # 예: ${ph}\n`), "AWS 액세스키");
+    assert.equal(templateHoldsSecret(`K=${ph}  # 진짜: ${real}\n`), "AWS 액세스키");
+    assert.equal(templateHoldsSecret(`K=${ph}\n`), null);
 });
 
 test("내용 축 — **닿을 수 없는 호스트**의 자격증명은 비밀로 안 본다", () => {
