@@ -65,6 +65,12 @@ const WIRES = [
     ],
     [
         "packages/vscode/src/extension.ts",
+        "reflectionOf(await api.listRevisions(REFLECT_PAGE), revisionNo)",
+        "반영 확인이 **판 전량**을 읽는다 — 판은 발행할 때마다 늘고 줄지 않으므로 그 비용이 원장 " +
+            "크기에 비례해 영원히 자란다. 관측이 없는 사이트에서는 유예까지 여섯 번 되풀이된다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
         "onBaseMoved: (serverMessage) => askBaseMoved(tenant, serverMessage),",
         "409 를 맞은 폴더가 **영구 막다른길**이 된다 — 표식은 발행 성공에서만 갱신되므로 다음 올리기도 " +
             "같은 번호를 선언해 같은 409 를 무한히 맞는다. 사람이 손으로 합쳐 넣어도 빠져나갈 수 없다",

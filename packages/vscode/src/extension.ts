@@ -2635,6 +2635,11 @@ const REFLECT_POLL_MAX = 12;
  * 「관측이 이제 막 시작될 사이트」를 구별할 수 없으므로, **못 가르는 것을 안다고 말하지 않는다.**
  */
 const UNKNOWN_GRACE_POLLS = 5;
+/**
+ * 반영 확인이 읽을 판 수. 방금 올린 판과 활성 판은 **꼬리 쪽**이라 이만큼이면 닿는다 —
+ * 그 사이에 20판이 더 올라가 밀려났다면 이미 `superseded` 라 감시가 끝날 자리다.
+ */
+const REFLECT_PAGE = 20;
 
 /**
  * 게시한 판이 방문자에게 닿으면 **한 번만** 알린다. 실패·상한·관측 없음은 전부 **침묵**이다 —
@@ -2645,7 +2650,10 @@ async function watchReflection(api: ZalkeraApi, revisionNo: number, tenant: Capt
     await new Promise((r) => setTimeout(r, REFLECT_POLL_MS));
     let state: ReflectionState;
     try {
-      state = reflectionOf(await api.listRevisions(), revisionNo);
+      // ⚠ **전량을 안 받는다.** `reflectionOf` 가 보는 것은 셋뿐이다 — 관측이 도는 사이트인가·활성
+      //    판·내 판. 그런데 이 폴링은 관측 없는 사이트에서 유예까지 여러 번 도므로, 전량을 읽으면
+      //    판이 쌓인 테넌트에서 그 비용이 폴마다 되풀이된다. 방금 올린 판과 활성 판은 꼬리 쪽이다.
+      state = reflectionOf(await api.listRevisions(REFLECT_PAGE), revisionNo);
     } catch (e) {
       // 조회 실패는 반영 실패가 아니다 — 다음 차례에 다시 묻는다. 사람에게는 말하지 않는다.
       log(`반영 확인 조회 실패(계속 시도): ${e instanceof Error ? e.message : String(e)}`);

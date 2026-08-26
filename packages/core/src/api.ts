@@ -212,8 +212,16 @@ export class ZalkeraApi {
     }
 
     /** 버전 이력(최신순). B2「현재 사이트 내려받기」와 롤백이 여기서 대상을 고른다. */
-    listRevisions(): Promise<SiteRevision[]> {
-        return this.request<SiteRevision[]>("GET", "/api/partner/site-upload/revisions");
+    /**
+     * @param limit **최근 몇 개만** 받을지. 없으면 전량이다.
+     *
+     * ⚠ **판은 발행할 때마다 늘고 줄지 않는다.** 몇 개면 되는 소비자가 전량을 받으면 그 비용이 원장
+     *   크기에 비례해 영원히 자란다 — 반영 확인 폴링이 그 자리다(판 1,000개 테넌트에서 매 폴마다
+     *   전량). 구 서버는 이 파라미터를 **조용히 무시**하고 전량을 준다 — 동작은 종전과 같다.
+     */
+    listRevisions(limit?: number): Promise<SiteRevision[]> {
+        const path = "/api/partner/site-upload/revisions";
+        return this.request<SiteRevision[]>("GET", limit == null ? path : `${path}?limit=${limit}`);
     }
 
     /** 소스 tar.gz 다운로드 URL **+ sha256**(TENANT_ADMIN+). 소스 소유의 실물이고, 해시가 그 약속의 검산이다. */
