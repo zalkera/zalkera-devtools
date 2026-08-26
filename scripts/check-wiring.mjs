@@ -263,8 +263,9 @@ const WIRES = [
     ],
     [
         "packages/vscode/src/extension.ts",
-        "say.publishConfirm(tenant, dir, currentFolderBinding())",
-        "발행 확인이 소속을 안 봐 늘 일상 갈래가 되고(반사가 삼킨다) 「이 폴더」의 지시대상도 잃는다",
+        "say.publishConfirm(tenant, dir, currentFolderBinding(), baseRevisionNo != null)",
+        "발행 확인이 소속을 안 봐 늘 일상 갈래가 되고(반사가 삼킨다) 「이 폴더」의 지시대상도 잃는다. " +
+            "넷째 인자가 빠지면 **무표식 폴더가 조용히 무보호인 채로 올라간다** — 사람은 보호를 전제하는데",
     ],
     [
         // ⚠ **맨몸 `executeCommand` 로 돌아가면 고른 사이트가 그 자리에서 버려진다.** 형제 `fetch`
@@ -499,14 +500,17 @@ const WIRES = [
     ],
     [
         "packages/core/src/publish.ts",
-        "return await options.api.confirmArchive(storageKey, true);",
-        "동의를 받아 놓고 서버에는 전하지 않는다 — 같은 409 가 반복된다",
+        "return await options.api.confirmArchive(storageKey, true, baseRevisionNo);",
+        "동의를 받아 놓고 서버에는 전하지 않는다 — 같은 409 가 반복된다. 그리고 셋째 인자가 빠지면 " +
+            "**동의 경로만 조용히 무선언**이 된다(백엔드가 동의 게이트를 기반 대조보다 먼저 지난다) — " +
+            "하필 편집이 있는 사이트에서만 방어가 없다",
     ],
     [
         "packages/vscode/src/extension.ts",
         "return answer === ask.action;",
-        "동의 창은 뜨는데 **무엇을 누르든 동의**가 된다 — 게시 대기 중인 AI 변경이 사람이 거절해도 사라진다. " +
-            "올리기·전환 두 문이 이 한 점을 공유하므로 파급이 둘이다",
+        "동의 창은 뜨는데 **무엇을 누르든 동의**가 된다 — 사람이 거절해도 사라진다. 이 형태를 쓰는 " +
+            "동의 창이 둘이다(게시 대기 AI 변경 폐기 · 남의 변경을 안 담고 그대로 올리기)",
+        2,
     ],
     [
         "packages/vscode/src/extension.ts",

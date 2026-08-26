@@ -67,6 +67,34 @@ export interface LinkedMark {
  */
 export type SourceMark = FetchedMark | PublishedMark | LinkedMark;
 
+/**
+ * 이 표식이 **선언할 기반 판**을 아는가 — 안다면 그 번호.
+ *
+ * ■ 선언의 뜻은 「폴더 내용이 판 N 과 같다」가 아니다
+ *   **「판 N 을 받아 그 위에서 작업했다」**이다. 폴더는 새 작업을 담아 판 N 과 **달라야 정상**이고,
+ *   서버가 대조하는 것도 내용이 아니라 「그 뒤에 남이 올렸는가」다. 그래서 폴더 내용을 재서 표식을
+ *   검증하려 들면 안 된다 — 의미론이 틀렸고, 파일 단위 변경 검출은 이 트랜치의 금지 목록이다.
+ *
+ * ■ 표식별 처분
+ *   · `FetchedMark`  — 받은 판을 안다. 선언한다.
+ *   · `PublishedMark`— 자기가 올린 판을 안다. 선언한다(서버가 묻는 것은 「그 뒤 남이 올렸는가」뿐이다).
+ *   · `LinkedMark`   — **판 주장을 하지 않는 표식**이다. 선언하지 않는다.
+ *   · 표식 없음      — 선언하지 않는다.
+ *
+ * ⚠ **없는 값을 지어내지 마라.** 모르는데 아무 번호나 실으면 **근거 없이 남을 막는다** — 이 트랜치가
+ *   내내 사냥한 병(모르는 것을 안다고 말하기)이 방어 쪽에서 재생산되는 자리다.
+ *
+ * ⚠ **소속이 다르면 선언하지 않는다.** 발행 게이트가 「폴더 소속 = 고른 사이트」를 이미 보장하지만,
+ *   이 읽기는 그 게이트와 **다른 시점**이라 남의 사이트 표식 번호를 이 원장에 선언하는 길이 열린다.
+ *
+ * @param tenant 지금 올리는 사이트. 표식 소속과 다르면 `null`.
+ */
+export function declaredBaseRevisionNo(mark: SourceMark | null, tenant: string): number | null {
+    if (!mark || mark.tenant !== tenant) return null;
+    if ("origin" in mark && mark.origin === "linked") return null;
+    return typeof mark.revisionNo === "number" ? mark.revisionNo : null;
+}
+
 export function buildSourceMark(input: Omit<FetchedMark, "format">): string {
     const mark: FetchedMark = {format: 1, ...input};
     return `${JSON.stringify(mark, null, 2)}\n`;

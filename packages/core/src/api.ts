@@ -253,13 +253,30 @@ export class ZalkeraApi {
     }
 
     /** 업로드 확정 — 서버가 언팩·검사하고 새 버전을 만든다. */
-    confirmArchive(storageKey: string, discardPendingChanges = false): Promise<ArchiveConfirmed> {
+    /**
+     * @param baseRevisionNo 이 올리기가 **딛는다고 선언하는 판**(동시 업로드 최소 방어). 서버가 판을
+     *   만들기 전에 원장 꼬리와 대조하고 다르면 `UPLOAD_BASE_MOVED` 409 로 멈춘다.
+     *   `null` 은 **무선언 — 현행 그대로 통과**다(모르는 것으로 막지 않는다).
+     *
+     * ⚠ **동의 재시도에서도 같은 값을 실어야 한다.** 백엔드는 `BaselineShiftGuard`(동의)를 기반
+     *   대조보다 **먼저** 지나므로, 동의 409 를 받고 재호출할 때 이 값을 빠뜨리면 **그 경로만 조용히
+     *   무선언**이 된다 — 방어가 있는 줄 알았는데 하필 편집이 있는 사이트에서만 없다.
+     */
+    confirmArchive(
+        storageKey: string,
+        discardPendingChanges = false,
+        baseRevisionNo: number | null = null,
+    ): Promise<ArchiveConfirmed> {
         // ⚠ **`discardPendingChanges` 를 실을 수 있어야 한다.** 백엔드는 재업로드(confirm)·버전
         //    전환(activate)·프리셋 재개시 **세 문이 같은 `BaselineShiftGuard` 를 지난다.**
         //    종전에는 activate 만 동의를 보낼 수 있어서, 올리기는 zip 을 다 올린 뒤 409 를 받고
         //    「계속하려면 확인해 주세요」만 반복했다 — 확인할 자리가 없는 막다른 길이었다.
         return this.request<ArchiveConfirmed>("POST", "/api/partner/site-archive/confirm", {
-            body: { storageKey, discardPendingChanges },
+            // 선언이 없으면 **필드 자체를 안 보낸다** — `null` 을 보내도 서버는 같게 다루지만, 안 보내는
+            // 쪽이 「주장하지 않는다」는 뜻에 정확하고 구 서버와도 같은 와이어다.
+            body: baseRevisionNo == null
+                ? { storageKey, discardPendingChanges }
+                : { storageKey, discardPendingChanges, baseRevisionNo },
         });
     }
 
@@ -404,6 +421,21 @@ const DISCARD_CONSENT_CODES: ReadonlySet<string> = new Set([
 /** 이 거절이 **사용자 동의 한 번으로 넘어갈 수 있는가.** */
 export function needsDiscardConsent(error: unknown): boolean {
     return error instanceof DevtoolsError && DISCARD_CONSENT_CODES.has(error.serverCode ?? "");
+}
+
+/** 기반 대조가 막은 올리기의 서버 코드. **기계 분기는 이 코드 하나로만 한다** — 문장은 안 읽는다. */
+export const UPLOAD_BASE_MOVED = "UPLOAD_BASE_MOVED";
+
+/**
+ * **내가 딛는다고 말한 판이 원장 꼬리가 아니다** — 그 사이 누가 올렸거나, 내 표식이 이 원장의 것이
+ * 아니다. 서버가 판을 만들기 **전에** 막았으므로 원장에는 아무 일도 안 일어났다.
+ *
+ * ⚠ **[needsDiscardConsent] 와 다른 문이다.** 저쪽은 「내 편집을 버리고 계속」이고 이쪽은 「남의
+ *   변경이 안 담긴 채로 계속」이다 — 사라지는 것이 다르므로 같은 동의로 뚫으면 **다른 행위에 대한
+ *   동의**를 받는 것이 된다.
+ */
+export function isUploadBaseMoved(error: unknown): boolean {
+    return error instanceof DevtoolsError && error.serverCode === UPLOAD_BASE_MOVED;
 }
 
 /**

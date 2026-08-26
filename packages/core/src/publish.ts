@@ -1,5 +1,5 @@
 import type { ArchiveConfirmed, ZalkeraApi } from "./api.ts";
-import { needsDiscardConsent } from "./api.ts";
+import { isUploadBaseMoved, needsDiscardConsent } from "./api.ts";
 import { DevtoolsError } from "./errors.ts";
 import { apiBaseUrl } from "./serverUrl.ts";
 import { packProject } from "./zip.ts";
@@ -37,6 +37,26 @@ export interface PublishOptions {
      *   그 둘을 못 갈라 **다른 행위에 대한 동의**를 받게 된다.
      */
     onConsent?: (serverMessage: string, serverCode: string | null) => Promise<boolean>;
+    /**
+     * 이 올리기가 딛는다고 **선언할 판**. `null` 은 무선언 — 서버는 현행 그대로 통과시킨다.
+     *
+     * 부르는 쪽이 폴더 표식에서 읽어 넘긴다(`declaredBaseRevisionNo`). core 가 다시 읽지 않는 이유는
+     * `tenant` 와 같다 — 판정이 두 벌이 되면 갈린다.
+     */
+    baseRevisionNo?: number | null;
+    /**
+     * 선언한 판이 원장 꼬리가 아니어서 서버가 막았을 때 사람에게 묻는다. `true` 를 돌려주면
+     * **무선언으로 같은 바이트를 다시 올린다**(그 사이 올라온 변경은 안 담긴다).
+     *
+     * ⚠ **안 주면 그대로 던진다.** 그러면 화면은 막다른 길이 된다 — 표식은 발행 성공에서만 갱신되므로
+     *   다음 올리기도 같은 번호를 선언해 **같은 409 를 무한히 맞는다.** 사람이 최신 변경을 손으로
+     *   합쳐 넣어도 표식은 옛 번호라 빠져나갈 수 없다. 화면이 없는 자리(시험)는 그 문을 안 열면 된다.
+     *
+     * ⚠ **[onConsent] 와 합치지 마라.** 사라지는 것이 다르다 — 저쪽은 내 편집, 이쪽은 남의 변경이다.
+     *
+     * @param serverMessage 서버가 보낸 문장(최신 판 번호가 들어 있다). 표시 자리에서 소독한다.
+     */
+    onBaseMoved?: (serverMessage: string) => Promise<boolean>;
 }
 
 export interface PublishResult {
@@ -64,21 +84,41 @@ export interface PublishResult {
  *   core 는 화면이 없다. `onConsent` 를 안 주면 **묻지 않고 그대로 던진다** — 조용히 동의한 것으로
  *   치면 게시 대기 중인 AI 변경이 사람 모르게 사라진다(이미 정산된 토큰이 실린 작업이다).
  */
-async function confirmWithConsent(options: PublishOptions, storageKey: string): Promise<ArchiveConfirmed> {
+async function confirmWithConsent(
+    options: PublishOptions,
+    storageKey: string,
+    baseRevisionNo: number | null,
+): Promise<ArchiveConfirmed> {
     try {
-        return await options.api.confirmArchive(storageKey);
+        return await options.api.confirmArchive(storageKey, false, baseRevisionNo);
     } catch (error) {
-        if (!needsDiscardConsent(error) || !options.onConsent) throw error;
-        const rejected = error instanceof DevtoolsError ? error : null;
-        if (
-            !(await options.onConsent(
-                rejected?.message ?? String(error),
-                rejected?.serverCode ?? null,
-            ))
-        ) {
-            throw new DevtoolsError("CANCELLED", "올리기를 그만두었습니다.");
+        if (needsDiscardConsent(error) && options.onConsent) {
+            const rejected = error instanceof DevtoolsError ? error : null;
+            if (
+                !(await options.onConsent(
+                    rejected?.message ?? String(error),
+                    rejected?.serverCode ?? null,
+                ))
+            ) {
+                throw new DevtoolsError("CANCELLED", "올리기를 그만두었습니다.");
+            }
+            // ⚠ **선언을 여기서도 실어야 한다.** 백엔드는 동의 게이트를 기반 대조보다 **먼저** 지나므로,
+            //    빠뜨리면 편집이 있는 사이트에서만 조용히 무선언이 된다.
+            return await options.api.confirmArchive(storageKey, true, baseRevisionNo);
         }
-        return await options.api.confirmArchive(storageKey, true);
+        if (isUploadBaseMoved(error) && options.onBaseMoved) {
+            const rejected = error instanceof DevtoolsError ? error : null;
+            if (!(await options.onBaseMoved(rejected?.message ?? String(error)))) {
+                throw new DevtoolsError("CANCELLED", "올리기를 그만두었습니다.");
+            }
+            // ⚠ **같은 `storageKey` 로 재전송한다 — 다시 묶지 않는다.** 사람이 동의한 것은 「지금 이
+            //    바이트를 그대로 올린다」이고, 여기서 재압축하면 **동의한 것과 다른 것**이 올라간다.
+            //
+            // ⚠ 무선언으로 보낸다. 선언을 그대로 실으면 같은 409 를 다시 맞고, 표식은 발행 성공에서만
+            //    갱신되므로 **영원히 못 빠져나온다** — 그것이 이 갈래가 존재하는 이유다.
+            return await options.api.confirmArchive(storageKey, false, null);
+        }
+        throw error;
     }
 }
 
@@ -148,7 +188,7 @@ export async function publish(options: PublishOptions): Promise<PublishResult> {
     // ⚠ **여기서 다시 묶지 않는다.** 동의 뒤 재시도는 **같은 `storageKey`** 를 쓴다 — S3 에 이미
     //    올라간 그 바이트다. 다시 묶으면 사람이 그 사이 파일을 고쳤을 때 **동의한 것과 다른 것**이
     //    올라가고, 100MB 를 한 번 더 보내게 된다.
-    const confirmed = await confirmWithConsent(options, presigned.storageKey);
+    const confirmed = await confirmWithConsent(options, presigned.storageKey, options.baseRevisionNo ?? null);
     report(`버전 ${confirmed.revisionNo} 로 올렸습니다.`);
 
     return {

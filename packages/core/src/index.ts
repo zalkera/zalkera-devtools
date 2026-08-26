@@ -193,6 +193,7 @@ export {
     buildSourceMark,
     parseSourceMark,
     holdsSameRevision,
+    declaredBaseRevisionNo,
     mergeTenantSetting,
     SOURCE_MARK_PATH,
     writeSourceMarkTo,

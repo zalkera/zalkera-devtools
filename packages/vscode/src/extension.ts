@@ -100,6 +100,7 @@ import {
   linkFolderToTenant,
   parseSourceMark,
   holdsSameRevision,
+  declaredBaseRevisionNo,
   reflectionOf,
   type ReflectionState,
   SOURCE_MARK_PATH,
@@ -2478,6 +2479,20 @@ async function askDiscardConsent(
   return answer === ask.action;
 }
 
+/**
+ * 「그대로 올리기」 동의 — [askDiscardConsent] 와 **다른 문이다.** 사라지는 것이 다르다(내 편집 vs
+ * 남의 변경)라, 같은 동의로 뚫으면 **다른 행위에 대한 동의**를 받는 것이 된다.
+ */
+async function askBaseMoved(tenant: CapturedTenant, serverMessage: string): Promise<boolean> {
+  const ask = say.baseMovedConfirm(tenant, serverMessage);
+  const answer = await vscode.window.showWarningMessage(
+    ask.message,
+    { modal: true, detail: ask.detail },
+    ask.action,
+  );
+  return answer === ask.action;
+}
+
 async function publishCommand(): Promise<void> {
   const dir = requireWorkspace();
   const { api, tenant } = await ensureApiFor();
@@ -2487,7 +2502,12 @@ async function publishCommand(): Promise<void> {
   // ⚠ **경로와 소속을 함께 넘긴다.** 경로는 `message` 의 「이 폴더」가 가리키는 것이고(모달이
   //    뜨면 사이드바는 안 보인다), 소속은 **모양을 가르는 재료**다 — 소속 없는 폴더의 발행은
   //    다른 모달을 봐야 한다(`say.publishConfirm` 의 KDoc).
-  const ask = say.publishConfirm(tenant, dir, currentFolderBinding());
+  // 이 올리기가 딛는다고 **선언할 판**. 표식이 판을 주장할 때만 값이 있다(`declaredBaseRevisionNo`) —
+  // 「사이트에 연결」로 이은 폴더와 무표식 폴더는 선언할 값이 없고, **없는 값을 지어내면 근거 없이
+  // 남을 막는다.**
+  const baseRevisionNo = declaredBaseRevisionNo(readSourceMarkAt(dir), tenant);
+  // ⚠ **무보호를 고지한다** — 문면은 core 가 만든다(변수를 모달에 이어 붙이면 소독 검사 밖으로 떨어진다).
+  const ask = say.publishConfirm(tenant, dir, currentFolderBinding(), baseRevisionNo != null);
   const confirm = await vscode.window.showWarningMessage(
     ask.message,
     { modal: true, detail: ask.detail },
@@ -2513,6 +2533,11 @@ async function publishCommand(): Promise<void> {
           // **같은 문면**을 쓴다: 두 문이 같은 가드를 지나므로 사람이 보는 말도 같아야 한다.
           onConsent: (serverMessage, serverCode) =>
             askDiscardConsent(tenant, serverMessage, serverCode),
+          baseRevisionNo,
+          // 이 문이 없으면 화면은 **막다른 길**이 된다 — 표식은 발행 성공에서만 갱신되므로 다음
+          // 올리기도 같은 번호를 선언해 같은 409 를 무한히 맞는다. 사람이 최신 변경을 손으로 합쳐
+          // 넣어도 표식은 옛 번호라 빠져나갈 수 없다.
+          onBaseMoved: (serverMessage) => askBaseMoved(tenant, serverMessage),
         }),
     );
   } catch (error) {

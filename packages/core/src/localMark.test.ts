@@ -70,7 +70,7 @@ test("못 읽으면 쓰지 않는다 — 사람 설정을 날리는 것보다 �
 // ── 실제로 파일을 쓰는 자리. 이 경로가 확장 안에 있을 때 **아무 시험도 안 물었다.** ──
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { linkFolderToTenant, writeSourceMarkTo } from "./localMark.ts";
+import { declaredBaseRevisionNo, linkFolderToTenant, writeSourceMarkTo } from "./localMark.ts";
 import { tempDirSync } from "./testing/tempDir.ts";
 
 const roots: string[] = [];
@@ -254,4 +254,25 @@ test("표식의 사이트 코드는 모양을 지켜야 읽힌다 — 폴더는 
       `정상 코드가 막혔다: ${tenant}`,
     );
   }
+});
+
+// ── 무엇이 판을 주장하는가(발주서 §B) ───────────────────────────────────────
+//
+// ⚠ 급소는 **없는 값을 지어내지 않는 것**이다. 모르는데 아무 번호나 실으면 근거 없이 남을 막는다 —
+//   이 트랜치가 내내 사냥한 병(모르는 것을 안다고 말하기)이 방어 쪽에서 재생산되는 자리다.
+test("받은 표식·올린 표식은 판을 선언하고, 연결 표식은 안 한다", () => {
+  const fetched = {format: 1, tenant: "bix", revisionNo: 7, sha256: "a", fetchedAt: ""} as const;
+  const published = {format: 2, origin: "published", tenant: "bix", revisionNo: 9, publishedAt: ""} as const;
+  const linked = {format: 2, origin: "linked", tenant: "bix", linkedAt: ""} as const;
+  assert.strictEqual(declaredBaseRevisionNo(fetched, "bix"), 7);
+  assert.strictEqual(declaredBaseRevisionNo(published, "bix"), 9, "자기가 올린 판 위의 작업도 기반이다");
+  assert.strictEqual(declaredBaseRevisionNo(linked, "bix"), null, "판 주장을 안 하는 표식이다");
+  assert.strictEqual(declaredBaseRevisionNo(null, "bix"), null);
+});
+
+test("남의 사이트 표식 번호를 이 원장에 선언하지 않는다", () => {
+  // 발행 게이트가 소속을 이미 보장하지만 이 읽기는 **다른 시점**이다. 소속이 갈리면 이 원장에
+  // 무관한 번호를 선언하게 되고, 서버는 그것을 「못 찾겠다」로 막는다 — 근거 없는 차단이다.
+  const other = {format: 1, tenant: "acme", revisionNo: 7, sha256: "a", fetchedAt: ""} as const;
+  assert.strictEqual(declaredBaseRevisionNo(other, "bix"), null);
 });
