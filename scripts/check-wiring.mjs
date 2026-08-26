@@ -83,6 +83,22 @@ const WIRES = [
     ],
     [
         "packages/vscode/src/extension.ts",
+        "{ location: vscode.ProgressLocation.Notification, title: \"올리는 중\", cancellable: true },",
+        "「올리는 중」에 취소 버튼이 사라진다 — 시작하면 끝날 때까지 못 멈춘다(실사용 요청)",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "signal: stop.signal,",
+        "버튼은 뜨는데 **아무것도 안 끊긴다** — 누른 사람은 멈춘 줄 알고 화면은 계속 돈다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "if (result.cancelledLate) {",
+        "취소가 늦었는데 **빌드 대기에 붙든다** — 그만두겠다고 한 사람을 계속 기다리게 한다. " +
+            "반대로 여기서 「취소했습니다」로 접으면 판이 있는데 없다고 말하는 거짓이 된다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
         "onBaseMoved: (serverMessage) => askBaseMoved(tenant, serverMessage),",
         "409 를 맞은 폴더가 **영구 막다른길**이 된다 — 표식은 발행 성공에서만 갱신되므로 다음 올리기도 " +
             "같은 번호를 선언해 같은 409 를 무한히 맞는다. 사람이 손으로 합쳐 넣어도 빠져나갈 수 없다",

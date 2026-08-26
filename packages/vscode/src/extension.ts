@@ -2526,9 +2526,19 @@ async function publishCommand(): Promise<void> {
   let result: PublishResult;
   try {
     result = await vscode.window.withProgress<PublishResult>(
-      { location: vscode.ProgressLocation.Notification, title: "올리는 중" },
-      () =>
-        publish({
+      // ⚠ **취소를 낼 수 있게 한다.** 종전엔 버튼이 없어 시작하면 끝날 때까지 못 멈췄다.
+      //    ⚠ 그런데 취소가 「무엇을 되돌리는가」는 구간마다 다르다 — 그 경계는 `publish()` 의
+      //      `signal` KDoc 이 든다(요지: `confirm` 에는 안 붙는다).
+      { location: vscode.ProgressLocation.Notification, title: "올리는 중", cancellable: true },
+      (progress, token) => {
+        const stop = new AbortController();
+        // ⚠ **누른 즉시 문면을 바꾼다.** `confirm` 상한이 30초라, 누른 취소가 그동안 무반응이면
+        //    「안 먹는다」로 읽혀 사람이 창을 죽인다. 이 문장은 아는 것만 말한다.
+        token.onCancellationRequested(() => {
+          stop.abort();
+          progress.report({ message: "멈추는 중 — 서버 확인이 이미 나갔으면 결과를 기다립니다" });
+        });
+        return publish({
           projectDir: dir,
           api,
           tenant,
@@ -2542,11 +2552,19 @@ async function publishCommand(): Promise<void> {
           // 올리기도 같은 번호를 선언해 같은 409 를 무한히 맞는다. 사람이 최신 변경을 손으로 합쳐
           // 넣어도 표식은 옛 번호라 빠져나갈 수 없다.
           onBaseMoved: (serverMessage) => askBaseMoved(tenant, serverMessage),
-        }),
+          signal: stop.signal,
+        });
+      },
     );
   } catch (error) {
     if (isDraftInProgress(error)) {
       await tellDraftBlocked(tenant, (error as Error).message);
+      return;
+    }
+    // 사람이 스스로 그만둔 일은 **실패가 아니다** — 빨간창을 내지 않는다. 그리고 판이 안
+    // 만들어졌다는 것만 말한다(바이트·흔적은 우리가 확실히 아는 사실이 아니다 — `say` KDoc).
+    if (isCancelled(error)) {
+      void vscode.window.showInformationMessage(say.publishCancelled(tenant));
       return;
     }
     throw error;
@@ -2558,6 +2576,11 @@ async function publishCommand(): Promise<void> {
   log(
     `버전 ${countJosa(result.revisionNo, "으로/로")} 올렸습니다 — 파일 ${count(result.fileCount)}개 · ${Math.round(result.byteSize / 1024)}KB · 유형 ${result.siteType} · 상태 ${result.status}`,
   );
+  // ⚠ **취소가 늦었어도 여기서 되돌아가지 않는다.** 판은 만들어졌으므로 아래 부수효과(표식 갱신·
+  //    폴더 기억·서버 고지)를 **그대로 해야 한다** — 건너뛰면 화면이 아니라 **디스크에 거짓**이
+  //    남는다: 표식이 옛 판을 든 채라 다음 발행이 낡은 기반을 선언하고, **자기가 방금 만든 판**에
+  //    대해 「그 사이 다른 변경이 올라왔습니다」를 맞는다(제조된 거짓말).
+  //    갈리는 것은 **마지막 문면과 기다리기**뿐이다(아래 `cancelledLate`).
   // 서버가 보낸 한계·상태 안내는 **그대로 보여 준다**(memo66 §4 거짓 성공 차단).
   //
   // ⚠ **출력 패널에만 적는 것은 차단이 아니다.** 이 문장이 「정적 사이트로 게시됐습니다 — 상품·
@@ -2593,6 +2616,16 @@ async function publishCommand(): Promise<void> {
     log(`소속 표식을 남기지 못했습니다(${marked.reason}) — 발행 자체는 끝났습니다.`);
   }
   rememberFolder(String(tenant), dir);
+
+  // ⚠ **취소가 늦었으면 여기서 갈린다.** 판은 만들어졌으니 위 부수효과는 다 했고, 남은 것은
+  //    **기다리기**뿐이다 — 그만두겠다고 한 사람을 빌드 대기에 붙들지 않는다. 다만 「취소했습니다」로
+  //    접지 않는다: 판은 있고 준비되면 게시된다(빌드 대기 취소와 같은 의미론).
+  if (result.cancelledLate) {
+    void vscode.window.showInformationMessage(
+      say.publishCancelledLate(tenant, result.revisionNo),
+    );
+    return;
+  }
 
   // `STATIC` 은 올리는 즉시 READY·활성이지만 `NEXT_SOURCE` 는 서버가 빌드를 마쳐야 게시된다.
   // 기다리는 이유가 그것이다 — 여기서 이야기를 끊으면 언제 손님에게 나가는지 알 수 없다.
