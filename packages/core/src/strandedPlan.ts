@@ -1,0 +1,123 @@
+/**
+ * **좌초한 편집을 어떻게 안내할지 정하는 순수 판정**(memo184 §2.5 · 🔴3 의 나머지 절반).
+ *
+ * ■ 왜 갈래가 둘인가
+ *
+ * 좌초(사이트 쪽 편집이 옛 판 위)는 되돌리기 말고 나갈 길이 없다. 그런데 **그 편집이 무엇인가**에
+ * 따라 잃는 것이 완전히 다르다:
+ *
+ * - **내가 이 폴더에서 올린 것**이면, 사이트 쪽에 걸린 것이 이 폴더가 보낸 것과 같다 —
+ *   **이 폴더가 유일본이 아니다.**
+ * - **여기 없는 편집**이면 그것이 **유일본**이다. 드래프트는 발행 전까지 판본이 없어 되찾을 길이 없다.
+ *
+ * ⚠ **「버려도 잃는 것이 없다」를 보증하지 않는다.** 이 판정은 **작업본을 읽지 않는다** — `mine` 은
+ *   「올릴 때 보낸 sha」이지 「지금 폴더에 있는 sha」가 아니다. 올린 뒤 그 파일을 고치거나 지웠으면
+ *   판정은 그대로 「내 것」인데 올렸던 바이트는 어디에도 없다. 그래서 문면은 **폴더 기준**으로
+ *   「이 폴더의 내용은 그대로입니다」라 쓴다 — 그것은 언제나 참이다(버리기는 폴더를 안 건드린다).
+ *
+ * 초안은 「로컬 원본이 있어 손실이 아니다」를 **무조건** 달았다. 그 문장이 사장님의 유일본을 지우게
+ * 만드는 문장이다 — 그것이 🔴3 이다.
+ *
+ * ■ 「남의 드래프트」라고 쓰지 않는다
+ *
+ * 같은 사람이 콘솔과 이 도구를 둘 다 쓰면 그 말이 거짓이 된다. 문면은 **「여기 없는 편집」** —
+ * 폴더 기준이라 언제나 참이다. 누가 고쳤는지는 서버가 답한다.
+ *
+ * ■ 모르면 안전한 쪽으로 접는다
+ *
+ * 문 조회 실패·장부 「모름」·세대 불일치는 전부 **B** 다. 「모른다」를 「내 것이다」로 바꾸지 않는다.
+ */
+import type {DraftFiles} from "./api.ts";
+import type {SyncLedger} from "./syncLedger.ts";
+
+export type StrandedVerdict =
+    /** 이 폴더에서 올린 것과 같다 — 버려도 원본이 여기 있다. */
+    | "mine"
+    /** 여기 없는 편집이 섞여 있다 — 버리면 되찾을 방법이 없다. */
+    | "elsewhere";
+
+export interface StrandedInput {
+    /** 로컬 장부. 없거나 깨졌으면 `null`. */
+    ledger: SyncLedger | null;
+    /** `GET /draft/files` 응답. **못 읽었으면 `null`.** */
+    draft: DraftFiles | null;
+}
+
+export interface StrandedPlan {
+    verdict: StrandedVerdict;
+    /**
+     * 🔴 **서버가 「편집 없음」을 확실히 말했는가.** 거짓이면 버릴 것이 없다는 뜻이다.
+     *
+     * ⚠ [paths] 가 비었다는 것만으로는 부족하다 — 서버를 **못 읽었을 때도** 비어 있고, 그때는
+     *   있는지 없는지 모른다. 둘을 뭉치면 「모른다」가 「없다」가 된다.
+     *
+     * ⚠ 이 칸이 없으면 **버릴 것이 없는데 `버립니다` 를 요구하는** 갈래가 생긴다(실측: 세대가
+     *   갈렸거나 장부가 없으면서 편집은 비었을 때). 그러면 사람이 그 문구를 **습관으로** 치게 되고,
+     *   정작 유일본이 걸린 회차에도 반사적으로 친다 — 이 레포가 이미 적어 둔 병이다
+     *   (「거짓 경보를 습관으로 누르게 하면 진짜 경보도 눌러 버린다」).
+     */
+    empty: boolean;
+    /** 사이트 쪽 편집이 담고 있는 경로들(바뀐 것 + 지운 것). 사람에게 보여 줄 목록이다. */
+    paths: string[];
+    /**
+     * 이 판정을 **어느 시점의 사이트 쪽에서** 읽었는가(`GET /draft/files` 의 세대). 못 읽었으면 `null`.
+     *
+     * ⚠ 표시용이 아니다. **사람에게 보여 준 것과 실제로 버리는 것이 같은지** 재는 자리다 —
+     *   목록을 보고 답하는 창은 상한이 없어 그 사이 사이트 쪽이 달라질 수 있다.
+     *
+     * ⚠ **불투명하다** — 같은지만 잰다. 값을 해석하거나 순서를 매기지 않는다(서버 내부 토큰이다).
+     */
+    generation: string | null;
+    /** 왜 그렇게 판정했는지 — 문면이 아니라 **기계가 읽는 사유**다. */
+    reason:
+        | "ledger-matches"
+        | "no-ledger"
+        | "server-unreadable"
+        | "generation-differs"
+        /** 세대를 **본 적이 없다**(장부에 `server` 가 없음) — 「갈렸다」와 다른 사실이다. */
+        | "generation-unknown"
+        | "path-not-mine"
+        | "sha-differs";
+}
+
+/**
+ * 좌초 안내를 정한다.
+ *
+ * 판정 A(「내 것」)의 조건은 **셋 다** 참이어야 한다(§2.5 표):
+ * ⑴ 드래프트의 모든 경로가 `mine` 에 있고 ⑵ 각 sha 가 `mine` 값과 같고 ⑶ 세대가 장부의 것과 같다.
+ *
+ * ⚠ ⑶이 빠지면 「내가 올린 뒤 남이 더 얹은」 경우가 A 로 접힌다 — 그때 남의 편집이 함께 사라진다.
+ */
+export function planStranded(input: StrandedInput): StrandedPlan {
+    const {ledger, draft} = input;
+    if (!draft) return {verdict: "elsewhere", empty: false, paths: [], generation: null, reason: "server-unreadable"};
+
+    const paths = [...draft.changed.map((row) => row.path), ...draft.deleted].sort();
+    const generation = draft.generation ?? null;
+    // 서버가 답했고 목록이 비었다 — **확실히** 편집이 없다.
+    const empty = paths.length === 0;
+    if (!ledger) return {verdict: "elsewhere", empty, paths, generation, reason: "no-ledger"};
+
+    const seen = ledger.server?.generation ?? null;
+    // ⚠ **「본 적 없다」와 「갈렸다」를 가른다.** 처분은 같지만(둘 다 B) 사유는 다른 사실이고,
+    //   이 칸은 기계가 읽는 자리다 — 뭉치면 「모른다」가 「다르다」로 보고된다.
+    if (seen === null) return {verdict: "elsewhere", empty, paths, generation, reason: "generation-unknown"};
+    if (seen !== (draft.generation ?? null)) {
+        return {verdict: "elsewhere", empty, paths, generation, reason: "generation-differs"};
+    }
+
+    for (const path of draft.deleted) {
+        if (!Object.hasOwn(ledger.mine, path)) return {verdict: "elsewhere", empty, paths, generation, reason: "path-not-mine"};
+        // 내가 올린 삭제는 `null` 로 적힌다. 값이 있으면 내가 올린 것은 **삭제가 아니었다.**
+        if (ledger.mine[path] !== null) return {verdict: "elsewhere", empty, paths, generation, reason: "sha-differs"};
+    }
+    for (const row of draft.changed) {
+        if (!Object.hasOwn(ledger.mine, row.path)) {
+            return {verdict: "elsewhere", empty, paths, generation, reason: "path-not-mine"};
+        }
+        if (ledger.mine[row.path] !== row.sha256) {
+            return {verdict: "elsewhere", empty, paths, generation, reason: "sha-differs"};
+        }
+    }
+    return {verdict: "mine", empty, paths, generation, reason: "ledger-matches"};
+}

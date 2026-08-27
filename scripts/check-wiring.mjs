@@ -31,6 +31,56 @@ const read = (p) => readFileSync(join(root, p), "utf8");
 
 /** [파일, 있어야 하는 조각, 사라지면 무슨 일이 나는가] */
 const WIRES = [
+    // ── CLI 파괴 동사 (memo184 T3) ──────────────────────────────────────────────
+    // ⚠ `packages/cli` 는 종전에 이 검사기 관할 밖이었다. 그 사이 되돌릴 수 없는 폐기를 다루는
+    //   동사 셋이 생겼고, 그 급소를 되돌리는 변이가 **전 게이트를 초록으로 통과했다**(심의 실측).
+    [
+        "packages/cli/src/main.ts",
+        'plan.verdict === "mine"',
+        "**유일본이 한 글자 동의로 사라진다.** 이 갈래가 무너지면 「이 폴더에 없는 편집」에도 " +
+            "`y` 가 먹는다 — 드래프트는 발행 전까지 판본이 없어 되찾을 길이 없다(memo184 §2.5 🔴3)",
+    ],
+    [
+        "packages/cli/src/main.ts",
+        'discardPending: flagOn(flags, "discard-pending"),',
+        "**동의받은 것과 지우는 것이 갈린다.** 이 값이 무조건 참이 되면 게시 대기 AI 변경이 " +
+            "쓴 크레딧과 함께 사라지는데, 우리가 보여 준 목록에는 그 레일이 아예 안 뜬다",
+        // `rollback` · `discard` 둘 다 이 손잡이를 쓴다 — 한쪽만 무너져도 걸려야 한다.
+        2,
+    ],
+    [
+        "packages/cli/src/main.ts",
+        "if (plan.empty) {",
+        "**버릴 것이 없는데 `버립니다` 를 요구하게 된다.** 그러면 사람이 그 문구를 습관으로 치고, " +
+            "정작 유일본이 걸린 회차에도 반사적으로 친다",
+    ],
+    [
+        "packages/core/src/draftLifecycle.ts",
+        "(now.generation ?? null) !== options.plan.generation",
+        "**보여 준 것과 버리는 것이 갈린다.** 사람이 목록을 보고 답하는 창은 상한이 없어, 그 사이 " +
+            "얹힌 편집을 방금 받은 동의가 덮는다. 이 재검은 `--discard-pending` 회차도 지나야 한다",
+    ],
+    [
+        "packages/cli/src/main.ts",
+        "result.revisionNo === null",
+        "**옮겨진 라이브를 「null판」으로 말하거나 실패로 읽히게 한다.** 번호를 모르는 것과 " +
+            "안 옮겨진 것은 다른 사실이고, 재시도하면 같은 내용의 판이 하나 더 선다",
+        // 문면 갈래와 「친 번호와 다른가」 갈래 둘이 이 판정을 쓴다.
+        2,
+    ],
+    // ── VS Code 사이트 전환 화면 ─────────────────────────────────────────────────
+    [
+        "packages/vscode/src/extension.ts",
+        "        .then((choice) => choice?.tenant);",
+        "**고른 것을 표시 문자열로 되찾으면 문면 수정이 기능을 깬다.** 종전에 그 줄에 「(작업 중)」을 " +
+            "붙이자 지금 사이트를 고르는 모든 선택이 「사이트를 고르지 않았습니다」로 죽었다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "              detail: confirmedFolderFor(t.code) ?? undefined,",
+        "**지금 쓰는 사이트만 폴더 경로가 안 보인다.** 목록에서 어느 폴더인지 확인할 수 없는 줄이 " +
+            "하필 자기가 서 있는 줄이 된다",
+    ],
     [
         "packages/vscode/src/extension.ts",
         "void watchReflection(api, revisionNo, tenant);",

@@ -71,6 +71,16 @@ test("🔴 `baseline` 도 같은 순서다 — 갈래마다 순서가 다르면 
     match(err, /판 번호가 올바르지 않습니다/, `순서가 뒤집혔다: ${err.slice(0, 60)}`);
 });
 
+test("🔴 `rollback` 의 판 번호도 **네트워크 전에** 걸러진다 — 검증기가 둘이면 한쪽만 조여진다", async () => {
+    // `--revision` 과 달리 이것은 **위치 인자**라 검증기가 따로다(`revisionArg`). 형제 셋이
+    // 물고 있는 그 규율을 이쪽만 안 따라가면, 되돌리기가 `0`·`-3`·`1.5` 를 그대로 서버로 보낸다.
+    for (const bad of ["abc", "0", "-3", "1.5"]) {
+        const {code, err} = await cli("rollback", bad, "--site", "acme", "--folder", "/tmp");
+        strictEqual(code, 1, `${bad} 이 통과했다`);
+        match(err, /버전 번호/, `${bad} 에서 다른 이유로 멈췄다: ${err.slice(0, 80)}`);
+    }
+});
+
 test("서버에 못 닿으면 그렇게 말한다 — 다른 이유로 위장하지 않는다", async () => {
     const {code, err} = await cli("status", "--site", "acme", "--folder", "/tmp");
     strictEqual(code, 1);

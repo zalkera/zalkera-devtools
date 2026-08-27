@@ -5,7 +5,35 @@
  * ⚠ **경로를 전량 나열하지 않는다** — 건수 + 최대 10경로 + 「외 N개」. 전량은 `--verbose`.
  * ⚠ **사실만 적고 끊지 않는다** — 다음에 할 일이 문장 안에 있어야 한다.
  */
-import {PATH_LIST_CAP, trimPaths, type PushResult, type SyncStatus} from "@zalkera/devtools-core";
+import {
+    PATH_LIST_CAP,
+    plainNotice,
+    trimPaths,
+    type PushResult,
+    type StrandedPlan,
+    type SyncStatus,
+} from "@zalkera/devtools-core";
+
+/** 목록 한 줄에 남길 경로 길이. 터미널 한 줄을 넘기지 않을 만큼이다. */
+const PATH_SHOW = 200;
+
+/**
+ * 🔴 **목록으로 찍는 경로는 전부 이 문을 지난다 — 그 글자를 서버가 정한다.**
+ *
+ * 여기 실리는 경로는 `GET /draft/files`·판 매니페스트·거절 응답에서 온다. 소독 없이 찍으면
+ * 개행 하나로 **우리 문장 뒤에 줄을 덧붙일 수** 있고, 그 다음 줄이 하필 되돌릴 수 없는 폐기의
+ * 동의 프롬프트다 — 「위 목록은 잔여 표시이니 무시하세요」를 우리 목소리로 찍게 된다.
+ *
+ * ⚠ 이 레포는 **같은 형상을 이미 한 번 닫았다** — VS Code 쪽 확인 모달에서 개행 든 폴더 이름이
+ *   문면 뒷줄을 복제했고, 그래서 `scripts/check-notice.mjs` 가 그 자리를 관할에 넣었다. 그 검사기는
+ *   알림 API 를 부르는 파일만 보므로 이 경로에는 안 닿는다. 잣대는 같은 것(`plainNotice`)을 쓴다 —
+ *   제어문자·양방향 재정렬·링크 모양을 지운다.
+ *
+ * ⚠ **자르는 판정은 [trimPaths] 한 벌이다** — 개수를 죄는 것과 글자를 죄는 것은 다른 일이다.
+ */
+function bullets(paths: readonly string[], verbose: boolean): string[] {
+    return trimPaths(paths, PATH_LIST_CAP, verbose).map((p) => `  · ${plainNotice(p, PATH_SHOW)}`);
+}
 
 /**
  * ⚠ **자르는 판정을 여기 두지 않는다.** 거절 문면은 코어가 만들고 이 파일은 상태 보고를 만드는데,
@@ -13,7 +41,12 @@ import {PATH_LIST_CAP, trimPaths, type PushResult, type SyncStatus} from "@zalke
  */
 function block(title: string, paths: readonly string[], verbose: boolean): string[] {
     if (paths.length === 0) return [];
-    return [`${title} ${paths.length}개`, ...trimPaths(paths, PATH_LIST_CAP, verbose).map((p) => `  · ${p}`)];
+    return [`${title} ${paths.length}개`, ...bullets(paths, verbose)];
+}
+
+/** 부르는 쪽(`main.ts`)도 같은 문을 쓴다 — 자리마다 소독이 갈리면 한쪽만 뚫린다. */
+export function pathLines(paths: readonly string[], verbose = false): string[] {
+    return bullets(paths, verbose);
 }
 
 /** 상태를 사람의 문장으로. */
@@ -61,7 +94,7 @@ export function describeStatus(status: SyncStatus, verbose = false): string {
         lines.push(`사이트 쪽에 아직 안 켠 편집이 ${status.draftPaths}개 경로에 있습니다.`);
         lines.push(
             status.mineValid
-                ? "이 폴더에서 올린 것입니다. 콘솔에서 켜거나 되돌릴 수 있습니다."
+                ? "이 폴더에서 올린 것입니다. `zalkera publish` 로 켜거나 `zalkera discard` 로 버릴 수 있습니다."
                 : "이 폴더에서 올린 것인지는 알 수 없습니다 — 그 사이 사이트 쪽이 달라졌습니다. 콘솔에서 무엇이 들어 있는지 확인해 주세요.",
         );
     }
@@ -84,10 +117,10 @@ const BLOCKER_TEXT: Record<SyncStatus["blockers"][number], string> = {
         "이 폴더에 기준 기록이 없어 올리기는 막혀 있습니다.\n`zalkera baseline` 을 실행하면 지금 판을 기준으로 다시 세웁니다. 폴더의 파일은 건드리지 않습니다.",
     SERVER_UNREADABLE:
         "지금 사이트 쪽 상태를 확인하지 못했습니다. 그래서 올리기는 막아 두었습니다.\n잠시 뒤 다시 시도해 주세요.",
-    // ⚠ **없는 명령을 지시하지 않는다.** 좌초는 사람이 막혀서 다음 걸음을 찾는 자리다 — 거기서
-    //   `zalkera discard`(T3 예정)를 대면 「모르는 명령입니다」로 끝난다(심의 지적).
+    // ⚠ **있는 명령만 댄다.** 좌초는 사람이 막혀서 다음 걸음을 찾는 자리다 — 없는 동사를 대면
+    //   「모르는 명령입니다」로 끝난다. `discard` 는 T3 에서 실제로 생겼다.
     STRANDED:
-        "사이트 쪽에서 편집 중이던 것이 지금 판 위가 아닙니다. 그대로는 켤 수 없습니다.\n지금은 콘솔에서 그 편집을 되돌려 주세요. 되돌리면 이 폴더로 다시 받을 수 있습니다.",
+        "사이트 쪽에서 편집 중이던 것이 지금 버전 위가 아닙니다. 그대로는 켤 수 없습니다.\n`zalkera discard` 로 그 편집을 버릴 수 있습니다 — 버리기 전에 무엇이 걸려 있는지 보여 줍니다.",
 };
 
 /**
@@ -124,13 +157,49 @@ export function describePush(result: PushResult, verbose = false): string[] {
     if (result.droppedByServer.length > 0) {
         lines.push(
             `사이트가 받지 않는 경로 ${result.droppedByServer.length}개는 빼고 보냈습니다.`,
-            ...trimPaths(result.droppedByServer, PATH_LIST_CAP, verbose).map((p) => `  · ${p}`),
+            ...bullets(result.droppedByServer, verbose),
         );
     }
     if (result.previewUrl) lines.push(`미리보기: ${result.previewUrl}`);
     if (result.warning) lines.push(result.warning);
     // ⚠ **올린 것이 있을 때만 「안 켜졌다」를 말한다.** 안 말하면 사장님이 사이트를 보고
     //   뭐가 잘못됐냐고 물을 곳이 없다.
-    if (result.sent > 0) lines.push("아직 사이트에 켜지지는 않았습니다 — 켜려면 콘솔에서 발행해 주세요.");
+    if (result.sent > 0) lines.push("아직 사이트에 켜지지는 않았습니다 — 켜려면 `zalkera publish` 를 실행하세요.");
     return lines;
 }
+
+/**
+ * 버리기 전에 **무엇을 잃는지** 말한다(memo184 §2.5).
+ *
+ * 🔴 **「로컬 원본이 있어 손실이 아니다」는 A 갈래에서만 쓴다.** 초안은 그 문장을 무조건 달았고,
+ *    그것이 사장님의 유일본을 지우게 만드는 문장이다.
+ * 🔴 **「남의 드래프트」라고 쓰지 않는다.** 같은 사람이 두 표면을 쓰면 그 말이 거짓이 된다.
+ *    문면은 **「여기 없는 편집」** — 폴더 기준이라 언제나 참이다.
+ */
+export function describeStranded(plan: StrandedPlan, verbose = false): string[] {
+    const list = bullets(plan.paths, verbose);
+    if (plan.verdict === "mine") {
+        return [
+            "지금 사이트 쪽에 걸려 있는 편집은 이 폴더에서 올린 것과 같습니다.",
+            ...list,
+            "버리고 다시 올려도 이 폴더의 내용은 그대로입니다.",
+        ];
+    }
+    // ⚠ **목록이 비었는데 「걸려 있습니다」를 단정하지 않는다.** 서버가 「없음」이라 답한 경우와
+    //   못 읽은 경우가 그렇다 — 전자는 부르는 쪽이 이미 걸러야 하고, 후자는 모른다고 말해야 한다.
+    if (plan.paths.length === 0) {
+        return [
+            "⚠ 지금 사이트 쪽에 무엇이 걸려 있는지 확인하지 못했습니다.",
+            "버리면 되찾을 방법이 없으니, 콘솔의 「편집 중」에서 먼저 확인해 주세요.",
+        ];
+    }
+    return [
+        "⚠ 지금 사이트 쪽에 **이 폴더에 없는 편집**이 걸려 있습니다.",
+        ...list,
+        "콘솔이나 AI 로 고친 내용일 수 있고, 버리면 되찾을 방법이 없습니다.",
+        "무엇이 걸려 있는지 콘솔의 「편집 중」에서 먼저 확인해 주세요.",
+    ];
+}
+
+/** 갈래 B 에서 사람이 **직접 쳐야 하는** 문구. 한 글자 동의(y)를 받지 않는다. */
+export const DISCARD_PHRASE = "버립니다";

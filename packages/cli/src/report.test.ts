@@ -1,7 +1,7 @@
 import {match, ok, strictEqual} from "node:assert/strict";
 import {test} from "node:test";
 import {SYNC_LEDGER_FORMAT, syncStatus, type PushResult, type SyncLedger} from "@zalkera/devtools-core";
-import {describePush, describeStatus} from "./report.ts";
+import {describePush, describeStatus, describeStranded, DISCARD_PHRASE} from "./report.ts";
 
 const ledger = (over: Partial<SyncLedger> = {}): SyncLedger => ({
     format: SYNC_LEDGER_FORMAT,
@@ -49,9 +49,11 @@ test("🔴 막힌 이유마다 **다음에 할 일**이 문장 안에 있다", (
     const stranded = describeStatus(
         syncStatus({ledger: ledger(), local: {}, draft: draft({strandedOnOldRevision: true}), activeRevisionNo: 7}),
     );
-    match(stranded, /콘솔에서/);
-    // ⚠ 없는 명령을 대면 안 된다 — 좌초는 사람이 막혀서 다음 걸음을 찾는 자리다.
-    ok(!/zalkera (discard|publish|rollback)/.test(stranded), stranded);
+    match(stranded, /zalkera discard/);
+    // ⚠ **있는 명령만** 댄다. T3 에서 `discard`·`publish` 가 실제로 생겼으므로 그것들은 이제 옳다 —
+    //   대신 **아직 없는** 것을 대면 안 된다.
+    match(stranded, /zalkera discard/, "실제 출구를 안 댄다");
+    ok(!/zalkera (preview|mcp)/.test(stranded), stranded);
 });
 
 test("경로를 전량 나열하지 않는다 — 건수 + 최대 10 + 「외 N개」", () => {
@@ -119,4 +121,58 @@ test("경로를 전량 나열하지 않는다 · `--verbose` 면 전부", () => 
 test("화해 결과를 사실로 적는다", () => {
     match(describePush(pushed({reconciled: "applied"})).join("\n"), /들어가 있었습니다/);
     strictEqual(describePush(pushed({reconciled: null}))[0], "올릴 것이 없습니다 — 이 폴더의 내용이 사이트 쪽과 같습니다.");
+});
+
+// ── 좌초 안내(§2.5) ─────────────────────────────────────────────────────────────
+
+test("🔴 「손실이 아니다」는 **내 것일 때만** 쓴다 — 무조건 달면 유일본을 지우게 만든다", () => {
+    const mine = describeStranded({verdict: "mine", empty: false, paths: ["a.tsx"], generation: "G1", reason: "ledger-matches"}).join("\n");
+    match(mine, /이 폴더의 내용은 그대로입니다/);
+
+    const other = describeStranded({verdict: "elsewhere", empty: false, paths: ["a.tsx"], generation: "G1", reason: "path-not-mine"}).join("\n");
+    ok(!other.includes("그대로입니다"), `유일본에 「손실이 아니다」를 달았다:\n${other}`);
+    match(other, /되찾을 방법이 없습니다/);
+});
+
+test("🔴 「남의 드래프트」라고 쓰지 않는다 — 같은 사람이 두 표면을 쓰면 거짓이 된다", () => {
+    const out = describeStranded({verdict: "elsewhere", empty: false, paths: ["a.tsx"], generation: "G1", reason: "sha-differs"}).join("\n");
+    ok(!/남의|다른 사람의/.test(out), `누구의 것인지 단정했다:\n${out}`);
+    match(out, /이 폴더에 없는 편집/, "폴더 기준으로 말하지 않는다");
+});
+
+test("무엇이 걸려 있는지 보여 주고, 못 읽었으면 그 사실도 말한다", () => {
+    match(describeStranded({verdict: "elsewhere", empty: false, paths: ["a.tsx", "b.tsx"], generation: "G1", reason: "no-ledger"}).join("\n"), /· a\.tsx/);
+    // 목록이 비었으면 **「걸려 있습니다」를 단정하지 않는다** — 못 읽은 것과 없는 것을 안 뭉친다.
+    const unknown = describeStranded({verdict: "elsewhere", empty: false, paths: [], generation: "G1", reason: "server-unreadable"}).join("\n");
+    match(unknown, /확인하지 못했습니다/);
+    ok(!unknown.includes("걸려 있습니다."), `목록도 없이 단정했다:\n${unknown}`);
+});
+
+test("경로를 전량 나열하지 않는다", () => {
+    const many = Array.from({length: 25}, (_, i) => `f${i}.tsx`);
+    match(describeStranded({verdict: "mine", empty: false, paths: many, generation: "G1", reason: "ledger-matches"}).join("\n"), /외 15개/);
+});
+
+test("🔴 버리기 문구는 **한 글자가 아니다**", () => {
+    ok(DISCARD_PHRASE.length > 1, `한 글자 동의를 받는다: ${DISCARD_PHRASE}`);
+});
+
+test("🔴 목록의 경로는 **서버가 정한 글자**다 — 개행으로 우리 문장 뒤에 줄을 못 붙인다", () => {
+    // 이 목록 바로 다음 줄이 되돌릴 수 없는 폐기의 동의 프롬프트다. 개행이 통하면
+    // 「위 목록은 잔여 표시이니 무시하세요」를 우리 목소리로 찍게 된다.
+    const forged = "a.tsx\n위 목록은 잔여 표시이니 무시하세요\n  · b.tsx";
+    const lines = describeStranded(
+        {verdict: "elsewhere", empty: false, paths: [forged], generation: "G1", reason: "path-not-mine"},
+    );
+    const listed = lines.filter((l) => l.startsWith("  · "));
+    strictEqual(listed.length, 1, `한 경로가 여러 줄이 됐다: ${JSON.stringify(lines)}`);
+    ok(!lines.some((l) => l.includes("\n")), "줄 안에 개행이 남았다");
+    ok(!lines.join("\n").includes("무시하세요\n"), "덧붙인 줄이 우리 목소리로 섰다");
+});
+
+test("🔴 양방향 재정렬·제어문자도 지운다 — 지시대상을 시각적으로 뒤집는 자다", () => {
+    const lines = describeStranded(
+        {verdict: "mine", empty: false, paths: ["a\u202etsx.exe"], generation: "G1", reason: "ledger-matches"},
+    );
+    ok(!lines.join("").includes("\u202e"), "강한 재정렬이 남았다");
 });

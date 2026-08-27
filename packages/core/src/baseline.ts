@@ -36,6 +36,7 @@ import {
     parseSyncLedger,
     type SyncLedger,
 } from "./syncLedger.ts";
+import {writeSourceMarkTo} from "./localMark.ts";
 import {readTarGzManifest} from "./untar.ts";
 import {hashWorkdir} from "./workdir.ts";
 
@@ -116,6 +117,13 @@ export async function rebuildBaseline(options: BaselineOptions): Promise<Baselin
     // ⚠ 장부 쓰기는 **한 문**을 지난다([writeLedger]) — 여기만 맨 `writeFile` 이면 심링크 방어와
     //   git 배제가 이 동사에서만 빠진다. `baseline` 은 장부를 **처음 세우는 복구 동사**라 그 둘이
     //   특히 필요하다(심의 지적).
+    // 형제 `pull` 과 같은 이유로 소속 표식도 남긴다 — 이 동사는 **복구** 동사라 특히 그렇다.
+    await writeSourceMarkTo(root, {
+        tenant: options.api.tenantCode(),
+        revisionNo: tar.revisionNo,
+        sha256: tar.sha256,
+        fetchedAt: ledger.pulledAt,
+    }).catch(() => undefined);
     const written = await writeLedger(root, ledger);
     if (!written) {
         throw new DevtoolsError(

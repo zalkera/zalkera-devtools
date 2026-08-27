@@ -35,7 +35,7 @@
  */
 import {readFile, stat} from "node:fs/promises";
 import {basename, join, resolve} from "node:path";
-import type {DraftEdit, DraftFiles, ZalkeraApi} from "./api.ts";
+import type {DraftEdit, DraftFiles, SiteRevision, ZalkeraApi} from "./api.ts";
 import {DevtoolsError} from "./errors.ts";
 import {plainNotice} from "./notice.ts";
 import {readLedger, writeLedger} from "./pull.ts";
@@ -163,7 +163,8 @@ export async function pushSiteSource(options: PushOptions): Promise<PushResult> 
     // ⚠ **못 읽으면 올리지 않는다.** 기준 판은 모든 선행조건의 바탕이라, 그것이 지금 것인지
     //   모르는 채 보내면 낡은 매니페스트 위에서 계산한 값을 보내게 된다. 「모른다」가 「같다」로
     //   변하는 자리를 하나도 남기지 않는다.
-    const active = await activeRevisionNo(options.api);
+    const rows = await revisionRows(options.api);
+    const active = activeOf(rows);
     const reconciled = reconcile(ledger, draft);
 
     const local = await hashWorkdir(root);
@@ -173,6 +174,40 @@ export async function pushSiteSource(options: PushOptions): Promise<PushResult> 
     // ⚠ **`>` 가 아니라 `!==` 다.** 되돌리기도 움직임이다 — 콘솔에서 5판으로 되돌리면 이 폴더는
     //    7판인데 가드가 안 서고 「사이트 쪽과 같습니다」가 나갔다(심의 실측).
     if (active !== ledger.base.revisionNo) {
+        // 🔴 **「움직였다」가 아니라 「아직 안 켜졌다」인 창이 있다.** NEXT_SOURCE 는 발행이 곧 활성
+        //    전환이 아니다(서버의 `activateWithThisRevision = siteType == STATIC`) — 빌드가 끝나야
+        //    라이브가 새 판으로 간다. 그 사이 장부는 새 판을, 활성은 옛 판을 가리킨다.
+        //
+        //    이 갈래를 안 가르면 **방금 발행한 사람에게** 「기준이 12판에서 11판으로 움직였다」는
+        //    거꾸로 된 문장이 나가고, 그 안내(`zalkera pull`)를 따르면 옛 판을 받아 방금 발행한
+        //    내용이 폴더에서 사라진다(판에는 남지만 사람은 「발행이 날아갔다」를 본다).
+        // ⚠ **방향을 본다.** 「아직 안 켜졌다」가 참인 것은 활성이 내 기준보다 **뒤에** 있을 때뿐이다.
+        //   활성이 앞서 갔는데(남이 발행했거나 되돌리기가 새 판을 세웠다) 내 기준 판이 마침 빌드
+        //   중이면, 「빌드가 끝나면 그 버전이 켜집니다」는 **거짓**이다 — 서버는 되돌린 시점에 빌드
+        //   중이던 판을 완료돼도 안 켠다(`activateByPointer` KDoc: READY 로 원장에 남는다).
+        //   라이브는 남의 내용인데 사람은 「기다리면 내 것이 켜진다」를 듣게 된다.
+        //
+        //   `FAILED` 쪽이 더 날카롭다 — 그 힌트가 `zalkera baseline` 을 대는데, 활성이 앞서 간
+        //   경우 그것은 장부만 새 판으로 바꾸고 작업본은 옛 내용 그대로라 뒤이은 `push` 가 **남의
+        //   판을 통째로 덮는다.** 형제 [baseMoved] 가 KDoc 으로 금지해 둔 바로 그 행동이다.
+        const notYetLive = active < ledger.base.revisionNo;
+        const mineRow = notYetLive
+            ? rows.find((row) => row.revisionNo === ledger.base.revisionNo)
+            : undefined;
+        if (mineRow?.status === "BUILDING") {
+            throw new DevtoolsError(
+                "PUSH_BASE_BUILDING",
+                `${ledger.base.revisionNo}판을 짓는 중이라 아직 올릴 수 없습니다.`,
+                "빌드가 끝나면 그 버전이 켜집니다 — `zalkera status` 로 확인한 뒤 다시 올려 주세요. 이 폴더는 그대로 두셔도 됩니다.",
+            );
+        }
+        if (mineRow?.status === "FAILED") {
+            throw new DevtoolsError(
+                "PUSH_BASE_BUILD_FAILED",
+                `${ledger.base.revisionNo}판은 짓다가 실패해 켜지지 못했습니다 — 지금 켜져 있는 것은 ${active}판입니다.`,
+                "`zalkera status` 로 실패 사유를 확인해 주세요. 고쳐서 다시 올리려면 `zalkera baseline` 으로 기준을 지금 켜진 버전으로 맞춘 뒤 작업해 주세요.",
+            );
+        }
         // ⚠ **작업본을 본 뒤에 던진다.** 「`pull` 을 먼저」라고만 말하면 그 `pull` 이 로컬 변경 때문에
         //   또 거절하고, 그 거절은 「`push` 를 먼저」라고 답한다 — **두 문이 서로를 가리켜 사람이
         //   갇힌다**(실측). 출구를 대려면 이 폴더에 고친 것이 있는지 알아야 한다.
@@ -353,8 +388,11 @@ function ownedBy(ledger: SyncLedger, draft: DraftFiles): Record<string, string |
     return seen !== null && seen === (draft.generation ?? null) ? ledger.mine : {};
 }
 
-/** 지금 켜진 판. **못 읽으면 던진다** — 「모른다」를 「같다」로 바꾸지 않는다. */
-async function activeRevisionNo(api: ZalkeraApi): Promise<number> {
+/**
+ * 판 목록. **활성 번호만이 아니라 행을 돌려준다** — 기준 판이 안 켜진 이유(빌드 중·실패)를
+ * 가르려면 그 판의 `status` 가 있어야 한다.
+ */
+async function revisionRows(api: ZalkeraApi): Promise<SiteRevision[]> {
     // ⚠ **상한을 걸지 않는다.** 형제 `fetchSource` 도 안 건다. 걸면 되돌리기 뒤에 새 판이 여럿
     //   쌓였을 때 **활성이 창 밖으로 밀려** 영구히 못 올리게 된다(심의 실측).
     const rows = await api.listRevisions().catch(() => null);
@@ -365,6 +403,11 @@ async function activeRevisionNo(api: ZalkeraApi): Promise<number> {
             "잠시 뒤 다시 시도해 주세요. 계속 그러면 이 계정에 버전 목록을 볼 권한이 있는지 확인해 주세요.",
         );
     }
+    return rows;
+}
+
+/** 지금 켜진 판. **없으면 던진다** — 「모른다」를 「같다」로 바꾸지 않는다. */
+function activeOf(rows: SiteRevision[]): number {
     const active = rows.find((row) => row.isActive)?.revisionNo;
     if (active === undefined) {
         // 서버는 답했는데 켜진 판이 없다 — 「잠시 뒤 다시」가 거짓인 상태다.
