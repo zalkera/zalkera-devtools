@@ -155,8 +155,14 @@ export function decideSiteChoice(input: ChoiceInput): SiteChoice {
  * **배열 순서가 곧 화면 순서이자 권고다** — 첫 항목이 기본 포커스를 받는다.
  */
 export type ElsewhereOption =
-    /** 확증된 로컬본을 연다. */
-    | {kind: "open"; dir: string}
+    /**
+     * 확증된 로컬본을 연다.
+     *
+     * `drift` 는 **둘 다 알고 서로 다를 때만** 값이 있다 — 하나라도 모르면 `null` 이고 화면은
+     * 아무 말도 안 한다. ⚠ **이름이 방향을 안 싣는다**(`stale` 이 아니다): 되돌린 사이트에서는
+     * 로컬이 서버보다 **앞**이라 「낡았다」가 거짓이 된다.
+     */
+    | {kind: "open"; dir: string; drift: {held: number; server: number} | null}
     /** 새 빈 폴더로 받는다. */
     | {kind: "fetch"}
     /** 로컬본 폴더를 사람이 직접 고른다. */
@@ -182,6 +188,22 @@ export interface ElsewhereInput {
      * 정상 경로가 사라진다.
      */
     fetchable: "yes" | "no-revision" | "no-ready" | "unknown";
+    /**
+     * `confirmedDir` 이 **선언하는 기반 판**(`declaredBaseRevisionNo`). 모르면 `null` — 침묵한다.
+     *
+     * ⚠ **`holdsSameRevision` 이 아니다.** 그 술어는 불리언이라 「모른다」가 「다르다」로 접히고,
+     *   무엇보다 **「이 폴더가 그 판의 사본이다」**를 주장하는 자리라 발행 표식을 일부러 뺀다.
+     *   여기서 말하려는 것은 사본이 아니라 **기반**이고, 오너 시나리오(내가 올린 뒤 남이 또 올림)의
+     *   폴더는 받기 표식이 아니라 **발행 표식**을 든다.
+     */
+    heldRevisionNo?: number | null;
+    /**
+     * 서버 정본 판(`pickRevision` 결과). 모르면 `null` — 침묵한다.
+     *
+     * ⚠ **받기 문 셋·「서버 판으로 교체」와 같은 판정이어야 한다.** 여기서 갈리면 「화면이 말한
+     *   번호와 교체가 받는 번호가 다른」 날이 온다.
+     */
+    serverRevisionNo?: number | null;
 }
 
 /**
@@ -200,7 +222,15 @@ export function elsewhereOptions(input: ElsewhereInput): {
 } {
     const blocked = input.fetchable === "no-revision" || input.fetchable === "no-ready" ? input.fetchable : null;
     const options: ElsewhereOption[] = [];
-    if (input.confirmedDir !== null) options.push({kind: "open", dir: input.confirmedDir});
+    if (input.confirmedDir !== null) {
+        // ⚠ **둘 다 알고 다를 때만 말한다.** 하나라도 모르면 침묵 — 없는 소식을 지어내지 않는다.
+        //    같을 때도 침묵이다: 「서버와 같습니다」는 **사본 주장**으로 읽히는데 우리가 아는 것은
+        //    기반뿐이고, 그건 없는 소식이다.
+        const held = input.heldRevisionNo ?? null;
+        const server = input.serverRevisionNo ?? null;
+        const drift = held !== null && server !== null && held !== server ? {held, server} : null;
+        options.push({kind: "open", dir: input.confirmedDir, drift});
+    }
     if (blocked === null) options.push({kind: "fetch"});
     // 판이 아예 없는 사이트로 옮기는 사람의 흔한 형상은 zip 입고(신규 테넌트 온보딩)다.
     // **빌드 대기(`no-ready`)에서는 안 올린다** — 그 사람은 잠시 뒤 받으면 되지 새로 시작할 일이 아니다.

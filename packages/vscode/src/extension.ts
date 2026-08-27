@@ -3556,12 +3556,31 @@ async function offerElsewhere(picked: string, binding: string): Promise<void> {
     quick.items = optionItems(elsewhereOptions({ confirmedDir, fetchable: "unknown" }).options);
     quick.show();
 
-    void probeFetchable(pinned).then((fetchable) => {
+    // ⚠ **이 폴더가 선언하는 판은 «로컬»이라 지금 읽는다.** 네트워크가 아니므로 화면을 안 붙든다.
+    //    `holdsSameRevision` 이 아니라 `declaredBaseRevisionNo` 다 — 우리가 말하려는 것은 「이
+    //    폴더가 그 판의 사본이다」가 아니라 **「이 판을 딛고 작업했다」**이고, 그 폴더는 받기 표식이
+    //    아니라 **발행 표식**을 들고 있을 수 있다(내가 올린 뒤 남이 또 올린 흔한 형상).
+    const heldRevisionNo =
+      confirmedDir === null ? null : declaredBaseRevisionNo(readSourceMarkAt(confirmedDir), String(picked));
+
+    void probeFetchable(pinned).then(({ fetchable, serverRevisionNo }) => {
       // 사람이 이미 고르거나 닫았으면 손대지 않는다 — 버려진 위젯을 만지면 던진다.
-      if (settled || fetchable === "unknown" || fetchable === "yes") return;
-      const { options, note } = elsewhereOptions({ confirmedDir, fetchable });
-      quick.placeholder =
-        note === "no-ready" ? say.noReadySourceYet(picked) : say.noSourceYet(picked);
+      if (settled) return;
+      const { options, note } = elsewhereOptions({
+        confirmedDir,
+        fetchable,
+        heldRevisionNo,
+        serverRevisionNo,
+      });
+      // ⚠ **「말할 것이 생겼을 때」만 다시 그린다.** 종전에는 `yes` 를 통째로 건너뛰었는데, 판이
+      //    **있는** 사이트가 바로 이 고지가 설 자리다. 반대로 말할 것이 없으면 안 그린다 — 다시
+      //    그리면 포커스가 첫 칸으로 돌아가므로, 흔한 칸에서 공짜로 그럴 이유가 없다.
+      const drift = options.some((o) => o.kind === "open" && o.drift !== null);
+      if (note === null && !drift) return;
+      if (note !== null) {
+        quick.placeholder =
+          note === "no-ready" ? say.noReadySourceYet(picked) : say.noSourceYet(picked);
+      }
       quick.items = optionItems(options);
     });
 
@@ -3605,9 +3624,20 @@ function optionItems(
  */
 const FETCHABLE_PROBE_MS = 4_000;
 
+/**
+ * 조회 하나로 **둘**을 안다 — 받을 판이 있는가, 그리고 그 판이 몇 번인가.
+ *
+ * ⚠ **번호를 버리지 않는다.** 종전에는 `pickRevision` 까지 돌리고 결과를 세 값짜리 enum 으로
+ *   접어 버렸다. 그래서 화면이 「이 폴더는 버전 3, 서버는 9」를 말하려면 **같은 조회를 한 번 더**
+ *   해야 했고, 그것은 이 화면에 새 인증 호출을 얹는 일이라 안 하기로 한 축이다
+ *   (`DESIGN-server-replace.md` §9 「원격 새 판 감시」). 이미 손에 든 답을 그대로 내보낸다.
+ */
 async function probeFetchable(
   pinned: CapturedTenant,
-): Promise<"yes" | "no-revision" | "no-ready" | "unknown"> {
+): Promise<{
+  fetchable: "yes" | "no-revision" | "no-ready" | "unknown";
+  serverRevisionNo: number | null;
+}> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     const { api } = await ensureApiFor(pinned);
@@ -3619,15 +3649,17 @@ async function probeFetchable(
     ]);
     if (revisions === null) {
       log("사이트의 판 목록을 제때 받지 못해 받기 항목을 그대로 둡니다.");
-      return "unknown";
+      return { fetchable: "unknown", serverRevisionNo: null };
     }
-    if (revisions.length === 0) return "no-revision";
-    return pickRevision(revisions) === null ? "no-ready" : "yes";
+    if (revisions.length === 0) return { fetchable: "no-revision", serverRevisionNo: null };
+    const picked = pickRevision(revisions);
+    if (picked === null) return { fetchable: "no-ready", serverRevisionNo: null };
+    return { fetchable: "yes", serverRevisionNo: picked.revisionNo };
   } catch (error) {
     log(
       `사이트의 판 목록을 확인하지 못했습니다 — ${error instanceof Error ? error.message : String(error)}`,
     );
-    return "unknown";
+    return { fetchable: "unknown", serverRevisionNo: null };
   } finally {
     if (timer !== undefined) clearTimeout(timer);
   }
@@ -3645,6 +3677,17 @@ function describeOption(option: ElsewhereOption): vscode.QuickPickItem {
     case "open":
       return {
         label: "$(folder-opened) 폴더 열기",
+        // ⚠ **`detail`(경로)은 건드리지 않는다.** 「보인 것과 여는 것이 같아야 한다」는 계약이
+        //    그 줄에 걸려 있다(`folderStillShown`). 새 사실은 `description` 으로 간다.
+        //
+        // ⚠ **방향을 단정하지 않는다.** 되돌린 사이트에서는 로컬이 서버보다 앞이라 「낡았다」가
+        //    거짓이 된다 — 번호 둘만 말하고 판단은 사람이 한다.
+        // ⚠ **정수만 싣는다.** 서버 문자열이 이 줄에 오면 QuickPick 라벨 소독 구멍
+        //    (`DECISIONS.md` 열린 쟁점)을 넓히게 된다.
+        description:
+          option.drift === null
+            ? undefined
+            : `버전 ${option.drift.held} · 서버는 버전 ${option.drift.server} — 「서버 판으로 교체」로 맞출 수 있습니다`,
         detail: plainNotice(option.dir, 120),
       };
     case "fetch":

@@ -274,8 +274,29 @@ const WIRES = [
         //    전적으로 이 조회와 다시 그리는 줄이 한다 — 그 둘이 리팩터링에서 떨어지면 첫 배선은
         //    그대로라 전건 초록인 채 P0 받기 항목이 **상시로** 되살아난다.
         "packages/vscode/src/extension.ts",
-        "void probeFetchable(pinned).then((fetchable) => {",
-        "조회가 없어져 판 없는 사이트에서도 받기 항목이 그대로 남는다",
+        "void probeFetchable(pinned).then(({ fetchable, serverRevisionNo }) => {",
+        "조회가 없어져 판 없는 사이트에서도 받기 항목이 그대로 남는다. 그리고 서버 판 번호를 " +
+            "안 받으면 로컬본이 서버와 갈렸다는 사실을 화면이 **말할 재료가 없다**",
+    ],
+    // ⚠ **이 셋이 빠지면 기능이 통째로 죽는데 순수 시험은 전건 초록이다.** 판정은 core 에 있고
+    //    (`elsewhereOptions`) 그쪽 시험은 인자를 손으로 넣으므로, **확장이 그 인자를 실어 보내는가**는
+    //    여기서만 잡힌다. 이 레포에 확장 시험이 0벌인 것이 그 이유다.
+    [
+        "packages/vscode/src/extension.ts",
+        "        heldRevisionNo,\n        serverRevisionNo,",
+        "판정에 재료를 안 실으면 `drift` 가 영원히 null 이라 **아무 말도 안 한다** — 기능이 조용히 죽는다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "declaredBaseRevisionNo(readSourceMarkAt(confirmedDir), String(picked))",
+        "이 폴더가 선언하는 기반 판을 안 읽으면 로컬 쪽이 늘 null 이다. `holdsSameRevision` 으로 " +
+            "바꾸면 **발행 표식을 뺀 사본 판정**이 되어 흔한 형상(내가 올린 뒤 남이 또 올림)에서 침묵한다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "      if (note === null && !drift) return;",
+        "「말할 것이 생겼을 때만 다시 그린다」가 빠지면 두 방향으로 깨진다 — 조건을 좁히면 판이 " +
+            "있는 사이트(이 고지가 설 자리)를 통째로 건너뛰고, 없애면 흔한 칸에서 포커스가 첫 칸으로 튄다",
     ],
     [
         "packages/vscode/src/extension.ts",
