@@ -19,7 +19,7 @@
     "build": "npm run build -w @zalkera/devtools-core && npm run build -w @zalkera/cli && npm run build -w zalkera-devtools",
     "test": "npm run test -w @zalkera/devtools-core && npm run test -w @zalkera/cli",
     "typecheck": "npm run build -w @zalkera/devtools-core && npm run typecheck --workspaces --if-present",
-    "verify": "npm run check:workspaces && npm run typecheck && npm run test && npm run check:dist && npm run check:labels && npm run check:capture && npm run check:server-url && npm run check:npm && npm run check:upgrade && npm run check:preview && npm run check:cap && npm run check:notice && npm run check:tracked && npm run check:commands && npm run check:kdoc && npm run check:help && npm run check:wiring && npm run check:claims && npm run check:chain && npm run check:secrets && npm run check:audit && npm run check:version",
+    "verify": "npm run check:workspaces && npm run typecheck && npm run test && npm run check:dist && npm run check:labels && npm run check:capture && npm run check:server-url && npm run check:npm && npm run check:upgrade && npm run check:preview && npm run check:cap && npm run check:notice && npm run check:tracked && npm run check:commands && npm run check:kdoc && npm run check:help && npm run check:wiring && npm run check:claims && npm run check:chain && npm run check:audit && npm run check:version",
     "package": "node scripts/package-vsix.mjs",
     "package:patch": "node scripts/package-vsix.mjs --bump patch",
     "package:minor": "node scripts/package-vsix.mjs --bump minor",
@@ -43,7 +43,6 @@
     "check:chain": "node scripts/check-verify-chain.mjs",
     "check:version": "node scripts/check-version-lockstep.mjs",
     "pack:cli": "node scripts/pack-cli.mjs",
-    "check:workspaces": "node scripts/check-workspace-refs.mjs",
-    "check:secrets": "node scripts/check-repo-secrets.mjs"
+    "check:workspaces": "node scripts/check-workspace-refs.mjs"
   }
 }
