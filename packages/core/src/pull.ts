@@ -444,8 +444,8 @@ function conflictRefusal(plan: PullPlan, all: boolean): DevtoolsError {
     return new DevtoolsError(
         "PULL_WOULD_OVERWRITE",
         `이 폴더에서 고친 것이 ${paths.length}개 있어 아무것도 받지 않았습니다.\n${list}`,
-        // ⚠ **없는 명령을 대지 않는다.** 올리기(`push`)는 아직 없다(T2) — 그것을 대면 작업을
+        // ⚠ **없는 명령을 대지 않는다.** 여기 적힌 둘은 실제로 있는 동사다 — 없는 것을 대면 작업을
         //   지키는 쪽이 죽은 문이 되고, 남는 유일한 길이 「내 작업을 밖으로 옮기는 것」이 된다.
-        "고친 내용을 지키려면 그 파일들을 다른 곳에 복사해 두고 다시 실행해 주세요. 서버 것으로 받되 고친 것을 옆 폴더에 남기려면 `zalkera pull --discard-local` 을 실행하세요.",
+        "고친 내용을 먼저 사이트 쪽에 올리려면 `zalkera push`, 버리고 사이트 것으로 받으려면 `zalkera pull --discard-local` 을 실행하세요. 버리는 쪽을 골라도 고친 파일은 옆 폴더에 옮겨 둡니다.",
     );
 }

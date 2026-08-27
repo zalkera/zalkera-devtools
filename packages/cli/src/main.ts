@@ -11,6 +11,7 @@
 import {
     DevtoolsError,
     pullSiteSource,
+    pushSiteSource,
     rebuildBaseline,
     readLedger,
     hashWorkdir,
@@ -35,6 +36,7 @@ const HELP = `잘커라 — 사이트 소스를 로컬에서 다루는 도구 (v
   zalkera logout                로그인 정보를 지운다
   zalkera status                이 폴더와 사이트가 어떻게 다른지 본다
   zalkera pull                  사이트의 지금 판을 이 폴더에 받는다
+  zalkera push                  이 폴더에서 고친 것을 사이트 쪽에 올린다(켜지지는 않는다)
   zalkera baseline              기준 기록만 지금 판으로 다시 세운다(파일은 안 건드린다)
 
 옵션
@@ -42,6 +44,7 @@ const HELP = `잘커라 — 사이트 소스를 로컬에서 다루는 도구 (v
   --folder <경로>                이 폴더 대신 다른 폴더를 다룬다
   --revision <판번호>            받을 판을 지정한다(pull · baseline)
   --discard-local                pull 이 막힐 때 고친 것을 옆 폴더로 옮기고 진행한다
+  --overwrite-unseen             push 가 막힐 때 사이트 쪽 편집을 덮어쓰고 진행한다(그 편집은 사라진다)
   --verbose                      경로를 전부 보여 준다
 
 로그인 정보는 ${tokenPath()} 에 **평문**으로 저장됩니다.
@@ -152,6 +155,43 @@ async function main(argv: readonly string[]): Promise<number> {
             }
             process.stdout.write(`${parts.join("\n")}\n`);
             return result.ledgerWritten ? 0 : 1;
+        }
+        case "push": {
+            const context = await openContext(common);
+            const result = await pushSiteSource({
+                api: context.api,
+                folder: context.folder,
+                // ⚠ **명시 동의다.** 이 손잡이가 없으면 사이트 쪽에 걸려 있던 남의 편집이 조용히
+                //    사라진다 — 선행조건은 그것을 못 막는다.
+                overwriteUnseen: flagOn(flags, "overwrite-unseen"),
+                listAll: verbose,
+                onProgress: (message: string) => process.stderr.write(`${message}\n`),
+            });
+            const parts: string[] = [];
+            if (result.reconciled === "applied") {
+                parts.push("지난번에 올린 것이 사이트 쪽에 들어가 있었습니다. 그것으로 정리했습니다.");
+            } else if (result.reconciled === "not-applied") {
+                parts.push("지난번에 올린 것이 사이트 쪽에 없어 이번에 다시 보냈습니다.");
+            }
+            parts.push(
+                result.sent === 0
+                    ? "올릴 것이 없습니다 — 이 폴더의 내용이 사이트 쪽과 같습니다."
+                    : `${result.sent}개를 올렸습니다(그중 지운 것 ${result.removed}개).`,
+            );
+            if (result.retriedAfterConflict) {
+                parts.push("올리는 사이에 사이트 쪽이 달라져 다시 읽고 한 번 더 보냈습니다.");
+            }
+            if (result.droppedByServer.length > 0) {
+                parts.push(
+                    `사이트가 받지 않는 경로 ${result.droppedByServer.length}개는 빼고 보냈습니다.`,
+                    ...trimPaths(result.droppedByServer, PATH_LIST_CAP, verbose).map((p) => `  · ${p}`),
+                );
+            }
+            if (result.previewUrl) parts.push(`미리보기: ${result.previewUrl}`);
+            if (result.warning) parts.push(result.warning);
+            if (result.sent > 0) parts.push("아직 사이트에 켜지지는 않았습니다 — 켜려면 콘솔에서 발행해 주세요.");
+            process.stdout.write(`${parts.join("\n")}\n`);
+            return 0;
         }
         case "baseline": {
             const context = await openContext(common);

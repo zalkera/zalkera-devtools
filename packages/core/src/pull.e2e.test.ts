@@ -384,7 +384,9 @@ test("🔴 거절 문면이 **없는 명령**을 다음 걸음으로 대지 않�
     const dir = await site({"a.tsx": "내가-고침"}, {"a.tsx": "가"});
     await rejects(() => run(dir, tarGz({"a.tsx": "서버것"})), (e: unknown) => {
         ok(e instanceof DevtoolsError);
-        ok(!/zalkera (push|publish|discard|rollback)/.test(e.humanMessage), `없는 명령을 댔다: ${e.humanMessage}`);
+        // 있는 동사만 댄다. `publish`·`discard`·`rollback` 은 아직 없다(T3).
+        ok(!/zalkera (publish|discard|rollback)/.test(e.humanMessage), `없는 명령을 댔다: ${e.humanMessage}`);
+        ok(/zalkera push/.test(e.humanMessage), "작업을 지키는 길을 안 알려 준다");
         ok(/--discard-local/.test(e.humanMessage), "탈출구를 안 알려 준다");
         return true;
     });

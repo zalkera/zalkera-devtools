@@ -76,3 +76,17 @@ test("서버에 못 닿으면 그렇게 말한다 — 다른 이유로 위장하
     strictEqual(code, 1);
     match(err, /연결하지 못했습니다/);
 });
+
+test("🔴 `push` 도 인자 검증이 네트워크보다 앞이다", async () => {
+    const {code, err} = await cli("push", "--site", "acme", "--folder", "/tmp", "--revision", "abc");
+    strictEqual(code, 1);
+    match(err, /판 번호가 올바르지 않습니다/, `순서가 뒤집혔다: ${err.slice(0, 60)}`);
+});
+
+test("도움말이 `push` 와 그 동의 손잡이를 말한다", async () => {
+    const {out} = await cli("--help");
+    match(out, /zalkera push/);
+    match(out, /--overwrite-unseen/);
+    // ⚠ 그 손잡이가 **무엇을 잃는지** 말해야 한다. 안 말하면 사람은 막힐 때 그냥 붙인다.
+    match(out, /그 편집은 사라진다/);
+});

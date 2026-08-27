@@ -267,3 +267,21 @@ export {
     type TarManifestEntry,
     type TarManifestOptions,
 } from "./untar.ts";
+export {
+    MAX_PUSH_BYTES,
+    MAX_PUSH_ENTRIES,
+    MAX_PUSH_FILE_BYTES,
+    pushSiteSource,
+    reconcile,
+    type PushOptions,
+    type PushResult,
+} from "./push.ts";
+export {
+    effectiveSha,
+    planPush,
+    type DraftView,
+    type PushEdit,
+    type PushInput,
+    type PushPlan,
+} from "./pushPlan.ts";
+export type {DraftEdit, DraftEditsResult} from "./api.ts";
