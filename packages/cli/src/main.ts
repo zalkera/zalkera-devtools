@@ -248,7 +248,10 @@ async function main(argv: readonly string[]): Promise<number> {
             // 🔴 **무엇을 잃는지 먼저 보여 준다.** 판정이 「여기 없는 편집」이면 한 글자 동의를 안 받는다.
             const draft = await context.api.draftFiles().catch(() => null);
             const plan = planStranded({ledger: await readLedger(context.folder), draft});
-            if (plan.paths.length === 0 && plan.reason === "ledger-matches") {
+            // 🔴 **버릴 것이 없으면 묻지 않는다.** 서버가 「편집 없음」이라 답한 경우가 그것이다.
+            //    안 가르면 세대가 갈렸거나 장부가 없을 때 **버릴 것이 없는데 `버립니다` 를 요구**하고,
+            //    사람은 그 문구를 습관으로 치게 된다 — 그러면 진짜 경보도 반사적으로 친다.
+            if (plan.empty) {
                 process.stdout.write("사이트 쪽에 편집 중인 것이 없습니다 — 버릴 것이 없습니다.\n");
                 return 0;
             }
@@ -273,6 +276,8 @@ async function main(argv: readonly string[]): Promise<number> {
             const result = await discardDraft({
                 api: context.api,
                 folder: context.folder,
+                // 사람에게 보여 준 **그 판정**을 넘긴다 — 다시 조회하면 확인한 것과 버리는 것이 갈린다.
+                plan,
                 onProgress: (message: string) => process.stderr.write(`${message}\n`),
             });
             const lines = [result.hadDraft ? "편집 중이던 것을 버렸습니다." : "버릴 편집이 없었습니다."];

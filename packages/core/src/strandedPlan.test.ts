@@ -98,3 +98,33 @@ test("보여 줄 목록은 바뀐 것과 지운 것을 **둘 다** 담는다", (
     });
     deepEqual(plan.paths, ["a.tsx", "b.tsx"]);
 });
+
+test("🔴 서버가 「편집 없음」이라 답하면 `empty` 다 — 버릴 것이 없는데 문구를 요구하면 안 된다", () => {
+    // 실측으로 잡힌 결함: 세대가 갈렸거나 장부가 없으면서 편집은 비었을 때 `버립니다` 를 요구했다.
+    // 그러면 사람이 그 문구를 습관으로 치게 되고, 정작 유일본이 걸린 회차에도 반사적으로 친다.
+    strictEqual(planStranded({ledger: ledger(), draft: draft()}).empty, true);
+    strictEqual(planStranded({ledger: ledger({server: {generation: "G1"}}), draft: draft({generation: "G2"})}).empty, true);
+    strictEqual(planStranded({ledger: null, draft: draft()}).empty, true);
+});
+
+test("🔴 서버를 **못 읽었으면** `empty` 가 아니다 — 「모른다」를 「없다」로 바꾸지 않는다", () => {
+    strictEqual(planStranded({ledger: ledger(), draft: null}).empty, false);
+});
+
+test("편집이 있으면 `empty` 가 아니다", () => {
+    strictEqual(planStranded({ledger: ledger(), draft: draft({deleted: ["a.tsx"]})}).empty, false);
+    strictEqual(
+        planStranded({ledger: ledger(), draft: draft({changed: [{path: "a.tsx", sha256: "x"}]})}).empty,
+        false,
+    );
+});
+
+test("🔴 경로 이름이 `__proto__` 여도 소유로 안 샌다", () => {
+    for (const evil of ["__proto__", "constructor", "toString", "hasOwnProperty"]) {
+        const plan = planStranded({
+            ledger: ledger({mine: {}}),
+            draft: draft({changed: [{path: evil, sha256: "x"}]}),
+        });
+        strictEqual(plan.verdict, "elsewhere", `${evil} 가 소유로 샜다`);
+    }
+});

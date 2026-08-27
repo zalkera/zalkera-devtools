@@ -26,7 +26,7 @@ import type {DraftPublishResult, ZalkeraApi} from "./api.ts";
 import {DevtoolsError} from "./errors.ts";
 import {rebuildBaseline} from "./baseline.ts";
 import {readLedger, writeLedger} from "./pull.ts";
-import {planStranded, type StrandedPlan} from "./strandedPlan.ts";
+import type {StrandedPlan} from "./strandedPlan.ts";
 
 export interface PublishDraftOptions {
     api: ZalkeraApi;
@@ -151,6 +151,14 @@ export async function rollbackRevision(options: RollbackOptions): Promise<Rollba
 export interface DiscardOptions {
     api: ZalkeraApi;
     folder: string;
+    /**
+     * 🔴 **사람에게 보여 준 그 판정**을 그대로 넘긴다.
+     *
+     * 안 넘기면 여기서 다시 조회하는데, 그 사이 서버 쪽이 바뀔 수 있다 — 그러면 **사람이 확인한
+     * 것과 우리가 버리는 것이 다른 것**이 된다. 특히 「내 것」이라 보고 y 를 누른 뒤 남의 편집이
+     * 끼어들면, 동의 없이 그것을 지운다. 왕복도 하나 준다.
+     */
+    plan: StrandedPlan;
     onProgress?: (message: string) => void;
 }
 
@@ -171,8 +179,6 @@ export async function discardDraft(options: DiscardOptions): Promise<DiscardOutc
     const report = options.onProgress ?? (() => {});
     const root = resolve(options.folder);
 
-    const draft = await options.api.draftFiles().catch(() => null);
-    const plan = planStranded({ledger: await readLedger(root), draft});
     const active = await activeRevisionNo(options.api);
 
     report("편집 중인 것을 버리는 중입니다…");
@@ -183,9 +189,9 @@ export async function discardDraft(options: DiscardOptions): Promise<DiscardOutc
     if (ledger) await writeLedger(root, {...ledger, server: null, mine: {}});
 
     return {
-        plan,
+        plan: options.plan,
         discardedPendingChanges: result.discardedPendingChanges ?? 0,
-        hadDraft: result.discardedDraft ?? plan.paths.length > 0,
+        hadDraft: result.discardedDraft ?? options.plan.paths.length > 0,
     };
 }
 

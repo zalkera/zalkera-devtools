@@ -39,6 +39,18 @@ export interface StrandedInput {
 
 export interface StrandedPlan {
     verdict: StrandedVerdict;
+    /**
+     * 🔴 **서버가 「편집 없음」을 확실히 말했는가.** 거짓이면 버릴 것이 없다는 뜻이다.
+     *
+     * ⚠ [paths] 가 비었다는 것만으로는 부족하다 — 서버를 **못 읽었을 때도** 비어 있고, 그때는
+     *   있는지 없는지 모른다. 둘을 뭉치면 「모른다」가 「없다」가 된다.
+     *
+     * ⚠ 이 칸이 없으면 **버릴 것이 없는데 `버립니다` 를 요구하는** 갈래가 생긴다(실측: 세대가
+     *   갈렸거나 장부가 없으면서 편집은 비었을 때). 그러면 사람이 그 문구를 **습관으로** 치게 되고,
+     *   정작 유일본이 걸린 회차에도 반사적으로 친다 — 이 레포가 이미 적어 둔 병이다
+     *   (「거짓 경보를 습관으로 누르게 하면 진짜 경보도 눌러 버린다」).
+     */
+    empty: boolean;
     /** 사이트 쪽 편집이 담고 있는 경로들(바뀐 것 + 지운 것). 사람에게 보여 줄 목록이다. */
     paths: string[];
     /** 왜 그렇게 판정했는지 — 문면이 아니라 **기계가 읽는 사유**다. */
@@ -61,28 +73,30 @@ export interface StrandedPlan {
  */
 export function planStranded(input: StrandedInput): StrandedPlan {
     const {ledger, draft} = input;
-    if (!draft) return {verdict: "elsewhere", paths: [], reason: "server-unreadable"};
+    if (!draft) return {verdict: "elsewhere", empty: false, paths: [], reason: "server-unreadable"};
 
     const paths = [...draft.changed.map((row) => row.path), ...draft.deleted].sort();
-    if (!ledger) return {verdict: "elsewhere", paths, reason: "no-ledger"};
+    // 서버가 답했고 목록이 비었다 — **확실히** 편집이 없다.
+    const empty = paths.length === 0;
+    if (!ledger) return {verdict: "elsewhere", empty, paths, reason: "no-ledger"};
 
     const seen = ledger.server?.generation ?? null;
     if (seen === null || seen !== (draft.generation ?? null)) {
-        return {verdict: "elsewhere", paths, reason: "generation-differs"};
+        return {verdict: "elsewhere", empty, paths, reason: "generation-differs"};
     }
 
     for (const path of draft.deleted) {
-        if (!Object.hasOwn(ledger.mine, path)) return {verdict: "elsewhere", paths, reason: "path-not-mine"};
+        if (!Object.hasOwn(ledger.mine, path)) return {verdict: "elsewhere", empty, paths, reason: "path-not-mine"};
         // 내가 올린 삭제는 `null` 로 적힌다. 값이 있으면 내가 올린 것은 **삭제가 아니었다.**
-        if (ledger.mine[path] !== null) return {verdict: "elsewhere", paths, reason: "sha-differs"};
+        if (ledger.mine[path] !== null) return {verdict: "elsewhere", empty, paths, reason: "sha-differs"};
     }
     for (const row of draft.changed) {
         if (!Object.hasOwn(ledger.mine, row.path)) {
-            return {verdict: "elsewhere", paths, reason: "path-not-mine"};
+            return {verdict: "elsewhere", empty, paths, reason: "path-not-mine"};
         }
         if (ledger.mine[row.path] !== row.sha256) {
-            return {verdict: "elsewhere", paths, reason: "sha-differs"};
+            return {verdict: "elsewhere", empty, paths, reason: "sha-differs"};
         }
     }
-    return {verdict: "mine", paths, reason: "ledger-matches"};
+    return {verdict: "mine", empty, paths, reason: "ledger-matches"};
 }

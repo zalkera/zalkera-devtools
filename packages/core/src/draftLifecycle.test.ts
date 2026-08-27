@@ -5,6 +5,7 @@ import {join} from "node:path";
 import {test} from "node:test";
 import {gzipSync} from "node:zlib";
 import {discardDraft, publishDraft, rollbackRevision} from "./draftLifecycle.ts";
+import type {StrandedPlan} from "./strandedPlan.ts";
 import {DevtoolsError} from "./errors.ts";
 import {readLedger} from "./pull.ts";
 import {SYNC_LEDGER_FORMAT, SYNC_LEDGER_PATH, serializeSyncLedger, type SyncLedger} from "./syncLedger.ts";
@@ -185,27 +186,27 @@ test("🔴 편집 폐기는 명시 동의가 있을 때만 참으로 나간다",
 test("🔴 버리기는 **판을 안 옮긴다** — 지금 켜진 판을 대상으로 부른다", async () => {
     const s = server({active: 9});
     const dir = await site({"a.tsx": "가"});
-    await discardDraft({api: s.api, folder: dir});
+    await discardDraft({api: s.api, folder: dir, plan: {verdict: "mine", empty: false, paths: ["a.tsx"], reason: "ledger-matches"}});
     ok(s.calls.includes("activate:9:true"), `엉뚱한 판을 켰다: ${s.calls}`);
 });
 
 test("버린 뒤 세대와 `mine` 을 비운다 · 판 기록은 그대로다", async () => {
     const s = server({active: 9});
     const dir = await site({"a.tsx": "가"}, {mine: {"a.tsx": sha("올린것")}, base: {revisionNo: 9, tarSha256: "a".repeat(64)}});
-    await discardDraft({api: s.api, folder: dir});
+    await discardDraft({api: s.api, folder: dir, plan: {verdict: "mine", empty: false, paths: ["a.tsx"], reason: "ledger-matches"}});
     const ledger = await readLedger(dir);
     strictEqual(ledger?.server, null);
     deepEqual(ledger?.mine, {});
     strictEqual(ledger?.base.revisionNo, 9, "판 기록을 건드렸다");
 });
 
-test("🔴 버리기가 **무엇을 버리는지** 판정을 함께 돌려준다 — 부르는 쪽이 그것으로 확인을 가른다", async () => {
-    const s = server({
-        active: 9,
-        draft: {generation: "G1", changed: [{path: "남이-고침.tsx", sha256: "x"}], deleted: [], baseRevisionNo: 8, strandedOnOldRevision: true},
-    });
-    const dir = await site({"a.tsx": "가"}, {mine: {}});
-    const out = await discardDraft({api: s.api, folder: dir});
-    strictEqual(out.plan.verdict, "elsewhere");
-    deepEqual(out.plan.paths, ["남이-고침.tsx"]);
+test("🔴 버리기는 **사람에게 보여 준 그 판정**을 그대로 쓴다 — 다시 조회하면 확인한 것과 갈린다", async () => {
+    // 다시 조회하면 그 사이 남의 편집이 끼어들 수 있고, 그러면 동의 없이 그것을 지운다.
+    const s = server({active: 9});
+    const shown: StrandedPlan = {
+        verdict: "elsewhere", empty: false, paths: ["남이-고침.tsx"], reason: "path-not-mine",
+    };
+    const out = await discardDraft({api: s.api, folder: await site({"a.tsx": "가"}), plan: shown});
+    deepEqual(out.plan, shown, "보여 준 판정과 다른 것을 기록했다");
+    ok(!s.calls.some((c) => c.startsWith("draftFiles")), "확인 뒤에 다시 조회했다");
 });
