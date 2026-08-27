@@ -67,7 +67,7 @@ export function describeStatus(status: SyncStatus, verbose = false): string {
         lines.push(`사이트 쪽에 아직 안 켠 편집이 ${status.draftPaths}개 경로에 있습니다.`);
         lines.push(
             status.mineValid
-                ? "이 폴더에서 올린 것입니다. 콘솔에서 켜거나 되돌릴 수 있습니다."
+                ? "이 폴더에서 올린 것입니다. `zalkera publish` 로 켜거나 `zalkera discard` 로 버릴 수 있습니다."
                 : "이 폴더에서 올린 것인지는 알 수 없습니다 — 그 사이 사이트 쪽이 달라졌습니다. 콘솔에서 무엇이 들어 있는지 확인해 주세요.",
         );
     }
@@ -90,10 +90,10 @@ const BLOCKER_TEXT: Record<SyncStatus["blockers"][number], string> = {
         "이 폴더에 기준 기록이 없어 올리기는 막혀 있습니다.\n`zalkera baseline` 을 실행하면 지금 판을 기준으로 다시 세웁니다. 폴더의 파일은 건드리지 않습니다.",
     SERVER_UNREADABLE:
         "지금 사이트 쪽 상태를 확인하지 못했습니다. 그래서 올리기는 막아 두었습니다.\n잠시 뒤 다시 시도해 주세요.",
-    // ⚠ **없는 명령을 지시하지 않는다.** 좌초는 사람이 막혀서 다음 걸음을 찾는 자리다 — 거기서
-    //   `zalkera discard`(T3 예정)를 대면 「모르는 명령입니다」로 끝난다(심의 지적).
+    // ⚠ **있는 명령만 댄다.** 좌초는 사람이 막혀서 다음 걸음을 찾는 자리다 — 없는 동사를 대면
+    //   「모르는 명령입니다」로 끝난다. `discard` 는 T3 에서 실제로 생겼다.
     STRANDED:
-        "사이트 쪽에서 편집 중이던 것이 지금 판 위가 아닙니다. 그대로는 켤 수 없습니다.\n지금은 콘솔에서 그 편집을 되돌려 주세요. 되돌리면 이 폴더로 다시 받을 수 있습니다.",
+        "사이트 쪽에서 편집 중이던 것이 지금 버전 위가 아닙니다. 그대로는 켤 수 없습니다.\n`zalkera discard` 로 그 편집을 버릴 수 있습니다 — 버리기 전에 무엇이 걸려 있는지 보여 줍니다.",
 };
 
 /**
@@ -137,7 +137,7 @@ export function describePush(result: PushResult, verbose = false): string[] {
     if (result.warning) lines.push(result.warning);
     // ⚠ **올린 것이 있을 때만 「안 켜졌다」를 말한다.** 안 말하면 사장님이 사이트를 보고
     //   뭐가 잘못됐냐고 물을 곳이 없다.
-    if (result.sent > 0) lines.push("아직 사이트에 켜지지는 않았습니다 — 켜려면 콘솔에서 발행해 주세요.");
+    if (result.sent > 0) lines.push("아직 사이트에 켜지지는 않았습니다 — 켜려면 `zalkera publish` 를 실행하세요.");
     return lines;
 }
 
@@ -158,14 +158,19 @@ export function describeStranded(plan: StrandedPlan, verbose = false): string[] 
             "버리고 다시 올려도 이 폴더의 내용은 그대로입니다.",
         ];
     }
+    // ⚠ **목록이 비었는데 「걸려 있습니다」를 단정하지 않는다.** 서버가 「없음」이라 답한 경우와
+    //   못 읽은 경우가 그렇다 — 전자는 부르는 쪽이 이미 걸러야 하고, 후자는 모른다고 말해야 한다.
+    if (plan.paths.length === 0) {
+        return [
+            "⚠ 지금 사이트 쪽에 무엇이 걸려 있는지 확인하지 못했습니다.",
+            "버리면 되찾을 방법이 없으니, 콘솔의 「편집 중」에서 먼저 확인해 주세요.",
+        ];
+    }
     return [
         "⚠ 지금 사이트 쪽에 **이 폴더에 없는 편집**이 걸려 있습니다.",
         ...list,
         "콘솔이나 AI 로 고친 내용일 수 있고, 버리면 되찾을 방법이 없습니다.",
         "무엇이 걸려 있는지 콘솔의 「편집 중」에서 먼저 확인해 주세요.",
-        ...(plan.reason === "server-unreadable"
-            ? ["(지금 사이트 쪽 상태를 확인하지 못해 무엇이 걸려 있는지도 못 읽었습니다.)"]
-            : []),
     ];
 }
 

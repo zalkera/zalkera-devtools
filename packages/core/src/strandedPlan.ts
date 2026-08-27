@@ -6,8 +6,14 @@
  * 좌초(사이트 쪽 편집이 옛 판 위)는 되돌리기 말고 나갈 길이 없다. 그런데 **그 편집이 무엇인가**에
  * 따라 잃는 것이 완전히 다르다:
  *
- * - **내가 이 폴더에서 올린 것**이면 원본이 여기 그대로 있다 — 버려도 잃는 것이 없다.
+ * - **내가 이 폴더에서 올린 것**이면, 사이트 쪽에 걸린 것이 이 폴더가 보낸 것과 같다 —
+ *   **이 폴더가 유일본이 아니다.**
  * - **여기 없는 편집**이면 그것이 **유일본**이다. 드래프트는 발행 전까지 판본이 없어 되찾을 길이 없다.
+ *
+ * ⚠ **「버려도 잃는 것이 없다」를 보증하지 않는다.** 이 판정은 **작업본을 읽지 않는다** — `mine` 은
+ *   「올릴 때 보낸 sha」이지 「지금 폴더에 있는 sha」가 아니다. 올린 뒤 그 파일을 고치거나 지웠으면
+ *   판정은 그대로 「내 것」인데 올렸던 바이트는 어디에도 없다. 그래서 문면은 **폴더 기준**으로
+ *   「이 폴더의 내용은 그대로입니다」라 쓴다 — 그것은 언제나 참이다(버리기는 폴더를 안 건드린다).
  *
  * 초안은 「로컬 원본이 있어 손실이 아니다」를 **무조건** 달았다. 그 문장이 사장님의 유일본을 지우게
  * 만드는 문장이다 — 그것이 🔴3 이다.
@@ -59,6 +65,8 @@ export interface StrandedPlan {
         | "no-ledger"
         | "server-unreadable"
         | "generation-differs"
+        /** 세대를 **본 적이 없다**(장부에 `server` 가 없음) — 「갈렸다」와 다른 사실이다. */
+        | "generation-unknown"
         | "path-not-mine"
         | "sha-differs";
 }
@@ -81,7 +89,10 @@ export function planStranded(input: StrandedInput): StrandedPlan {
     if (!ledger) return {verdict: "elsewhere", empty, paths, reason: "no-ledger"};
 
     const seen = ledger.server?.generation ?? null;
-    if (seen === null || seen !== (draft.generation ?? null)) {
+    // ⚠ **「본 적 없다」와 「갈렸다」를 가른다.** 처분은 같지만(둘 다 B) 사유는 다른 사실이고,
+    //   이 칸은 기계가 읽는 자리다 — 뭉치면 「모른다」가 「다르다」로 보고된다.
+    if (seen === null) return {verdict: "elsewhere", empty, paths, reason: "generation-unknown"};
+    if (seen !== (draft.generation ?? null)) {
         return {verdict: "elsewhere", empty, paths, reason: "generation-differs"};
     }
 

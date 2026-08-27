@@ -59,7 +59,7 @@ test("🔴 세대를 모르면 B — 「모른다」를 「내 것」으로 바�
         draft: draft({changed: [{path: "a.tsx", sha256: "sha-a"}]}),
     });
     strictEqual(plan.verdict, "elsewhere");
-    strictEqual(plan.reason, "generation-differs");
+    strictEqual(plan.reason, "generation-unknown", "「본 적 없다」를 「갈렸다」로 적었다");
 });
 
 test("🔴 장부가 없으면 B", () => {

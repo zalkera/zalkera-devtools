@@ -49,9 +49,11 @@ test("🔴 막힌 이유마다 **다음에 할 일**이 문장 안에 있다", (
     const stranded = describeStatus(
         syncStatus({ledger: ledger(), local: {}, draft: draft({strandedOnOldRevision: true}), activeRevisionNo: 7}),
     );
-    match(stranded, /콘솔에서/);
-    // ⚠ 없는 명령을 대면 안 된다 — 좌초는 사람이 막혀서 다음 걸음을 찾는 자리다.
-    ok(!/zalkera (discard|publish|rollback)/.test(stranded), stranded);
+    match(stranded, /zalkera discard/);
+    // ⚠ **있는 명령만** 댄다. T3 에서 `discard`·`publish` 가 실제로 생겼으므로 그것들은 이제 옳다 —
+    //   대신 **아직 없는** 것을 대면 안 된다.
+    match(stranded, /zalkera discard/, "실제 출구를 안 댄다");
+    ok(!/zalkera (preview|mcp)/.test(stranded), stranded);
 });
 
 test("경로를 전량 나열하지 않는다 — 건수 + 최대 10 + 「외 N개」", () => {
@@ -140,10 +142,10 @@ test("🔴 「남의 드래프트」라고 쓰지 않는다 — 같은 사람이
 
 test("무엇이 걸려 있는지 보여 주고, 못 읽었으면 그 사실도 말한다", () => {
     match(describeStranded({verdict: "elsewhere", empty: false, paths: ["a.tsx", "b.tsx"], reason: "no-ledger"}).join("\n"), /· a\.tsx/);
-    match(
-        describeStranded({verdict: "elsewhere", empty: false, paths: [], reason: "server-unreadable"}).join("\n"),
-        /무엇이 걸려 있는지도 못 읽었습니다/,
-    );
+    // 목록이 비었으면 **「걸려 있습니다」를 단정하지 않는다** — 못 읽은 것과 없는 것을 안 뭉친다.
+    const unknown = describeStranded({verdict: "elsewhere", empty: false, paths: [], reason: "server-unreadable"}).join("\n");
+    match(unknown, /확인하지 못했습니다/);
+    ok(!unknown.includes("걸려 있습니다."), `목록도 없이 단정했다:\n${unknown}`);
 });
 
 test("경로를 전량 나열하지 않는다", () => {

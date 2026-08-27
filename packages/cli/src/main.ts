@@ -54,9 +54,10 @@ const HELP = `잘커라 — 사이트 소스를 로컬에서 다루는 도구 (v
   --discard-local                pull 이 막힐 때 고친 것을 옆 폴더로 옮기고 진행한다
   --overwrite-unseen             push 가 막힐 때 사이트 쪽 편집을 덮어쓰고 진행한다(그 편집은 사라진다)
   --label <이름>                 publish 가 붙일 버전 이름
-  --discard-pending              publish 가 게시 대기 AI 변경을 함께 버린다
-  --discard-draft                rollback 이 편집 중인 것을 함께 버린다
-  --yes                          버리기 확인을 미리 준다(터미널이 아닐 때)
+  --discard-pending              게시 대기 AI 변경을 함께 버린다(publish·rollback·discard)
+                                 ⚠ 쓴 크레딧은 돌아오지 않는다
+  --yes                          discard 확인을 미리 준다 — **내가 올린 것과 같을 때만** 먹는다
+  --confirm 버립니다               여기 없는 편집을 버릴 때 필요한 문구(터미널이 아닐 때)
   --verbose                      경로를 전부 보여 준다
 
 로그인 정보는 ${tokenPath()} 에 **평문**으로 저장됩니다.
@@ -217,7 +218,9 @@ async function main(argv: readonly string[]): Promise<number> {
                 api: context.api,
                 folder: context.folder,
                 revisionNo: target,
-                discardDraft: flagOn(flags, "discard-draft"),
+                // ⚠ 이 손잡이는 **게시 대기 AI 변경** 폐기 동의다 — 「편집 중인 것」이 아니다.
+                //    편집이 있으면 서버가 플래그와 무관하게 되돌리기를 거절한다.
+                discardPending: flagOn(flags, "discard-pending"),
                 onProgress: (message: string) => process.stderr.write(`${message}\n`),
             });
             const lines = [
@@ -225,7 +228,13 @@ async function main(argv: readonly string[]): Promise<number> {
                     ? `${result.revisionNo}판으로 되돌렸습니다.`
                     : `이미 ${result.revisionNo}판이었습니다.`,
             ];
-            if (result.discardedDraft) lines.push("편집 중이던 것은 함께 버렸습니다.");
+            // ⚠ **서버가 새 판을 세울 수 있다.** 되돌릴 대상이 꼬리가 아니면 그 내용으로 새 판을
+            //    만들어 켠다 — 친 번호와 켜진 번호가 다르다. 안 말하면 `status` 와 어긋나 보인다.
+            if (result.revisionNo !== result.requested) {
+                lines.push(
+                    `(${result.requested}판의 내용으로 **새 ${result.revisionNo}판**을 세워 켰습니다 — 원장은 되감지 않습니다.)`,
+                );
+            }
             if (result.discardedPendingChanges > 0) {
                 lines.push(`게시 대기 변경 ${result.discardedPendingChanges}건도 함께 버렸습니다.`);
             }
@@ -276,6 +285,7 @@ async function main(argv: readonly string[]): Promise<number> {
             const result = await discardDraft({
                 api: context.api,
                 folder: context.folder,
+                discardPending: flagOn(flags, "discard-pending"),
                 // 사람에게 보여 준 **그 판정**을 넘긴다 — 다시 조회하면 확인한 것과 버리는 것이 갈린다.
                 plan,
                 onProgress: (message: string) => process.stderr.write(`${message}\n`),
@@ -283,6 +293,11 @@ async function main(argv: readonly string[]): Promise<number> {
             const lines = [result.hadDraft ? "편집 중이던 것을 버렸습니다." : "버릴 편집이 없었습니다."];
             if (result.discardedPendingChanges > 0) {
                 lines.push(`게시 대기 변경 ${result.discardedPendingChanges}건도 함께 버렸습니다.`);
+            }
+            // 🔴 **배포 사건이면 말한다.** 버리기는 판을 안 옮기는 동사인데, 우리가 읽은 활성 판이
+            //    그 사이 낡았으면 서버가 이 호출을 되돌리기로 처리한다.
+            if (result.pointerMoved) {
+                lines.push("⚠ 그 사이 사이트 쪽이 달라져 **라이브 버전도 함께 움직였습니다** — `zalkera status` 로 확인해 주세요.");
             }
             lines.push("이 폴더의 파일은 건드리지 않았습니다.");
             process.stdout.write(`${lines.join("\n")}\n`);
