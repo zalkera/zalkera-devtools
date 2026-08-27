@@ -17,7 +17,7 @@
  *   면 충돌 아님)로 이어받는다. 장부를 먼저 쓰면 그 재실행이 **자기 잔해를 순수 로컬로 착각**해
  *   영영 안 고친다.
  */
-import {lstat, mkdir, readFile, rename, rmdir, unlink, writeFile} from "node:fs/promises";
+import {lstat, mkdir, readFile, realpath, rename, rmdir, stat, unlink, writeFile} from "node:fs/promises";
 import {dirname, join, basename, resolve} from "node:path";
 import type {ZalkeraApi} from "./api.ts";
 import {DevtoolsError} from "./errors.ts";
@@ -272,15 +272,34 @@ export async function writeLedger(root: string, ledger: SyncLedger): Promise<boo
 }
 
 /**
- * `.gitignore` 에 장부를 적는다(memo184 §2.1).
+ * git 이 장부를 안 나르게 한다(memo184 §2.1).
  *
- * ⚠ 목적은 **유출 방지가 아니라 거짓 상태 방지**다. 장부에는 비밀이 없다. 다른 기계의 `mine` 이
- *   커밋을 타고 넘어오면 이 폴더는 자기가 안 올린 것을 올렸다고 믿는다.
+ * ■ 목적은 **유출 방지가 아니라 거짓 상태 방지**다
+ *   장부에는 비밀이 없다. 다른 기계의 `mine` 이 커밋을 타고 넘어오면 이 폴더는 자기가 안 올린 것을
+ *   올렸다고 믿는다.
+ *
+ * ■ 🔴 왜 `.gitignore` 가 아니라 `.git/info/exclude` 인가 — 실측으로 갈렸다
+ *   `.gitignore` 는 **판이 싣고 오는 파일**이다(고객이 올린 zip 에 대개 들어 있다). 거기 한 줄을
+ *   붙이면 그 파일은 곧바로 「판과 다른」 상태가 되고, **두 번째 받기부터 영구히 충돌한다** —
+ *   고객이 만진 적도 없는 파일 이름을 대면서. 거짓 경보를 습관으로 누르게 하면 진짜 경보도 눌러
+ *   버린다는 것이 이 레포가 이미 적어 둔 문장이다.
+ *
+ *   `.git/info/exclude` 는 같은 효과를 내면서 **커밋되지 않고 판에도 안 실린다**(`.git` 은 배제
+ *   목록에 있다). 도구가 자기 파일을 감추는 표준 자리가 여기다.
+ *
+ * ■ git 폴더가 없으면 **아무것도 안 한다**
+ *   막으려는 것이 「커밋을 타고 넘어오는 것」이므로, git 이 없으면 막을 것도 없다. 없는 자리에
+ *   파일을 만들어 두면 그 파일이 다음 판에 실려 나간다.
  */
 async function ignoreLedger(root: string): Promise<void> {
-    const path = join(root, ".gitignore");
+    const info = join(root, ".git", "info");
+    // `.git` 이 파일인 경우(워크트리·서브모듈)도 있다 — 그때 `mkdir` 은 실패하고, 실패하면 안 한다.
+    const exists = await stat(join(root, ".git")).then((s) => s.isDirectory()).catch(() => false);
+    if (!exists) return;
+    const path = join(info, "exclude");
     const current = await readFile(path, "utf8").catch(() => "");
     if (current.split(/\r?\n/).some((line) => line.trim() === SYNC_LEDGER_PATH)) return;
+    await mkdir(info, {recursive: true});
     const prefix = current === "" || current.endsWith("\n") ? "" : "\n";
     await writeFile(path, `${current}${prefix}${SYNC_LEDGER_PATH}\n`);
 }
@@ -328,7 +347,11 @@ async function applyDeletes(root: string, paths: readonly string[]): Promise<num
  */
 async function setAside(root: string, plan: PullPlan): Promise<string> {
     const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-    const saved = join(dirname(root), `${basename(root)}${SAVED_SUFFIX}`, stamp);
+    // ⚠ **실경로로 편 뒤** 형제를 잡는다. 심링크로 열린 폴더는 `dirname` 이 **링크의 부모**라,
+    //   그 부모가 다른 파일시스템이면 `rename` 이 `EXDEV` 로 죽고 「치워 뒀습니다」가 거짓이 된다.
+    //   `replaceDir.ts` 가 이미 겪고 KDoc 에 적어 둔 함정이다.
+    const real = await realpath(root).catch(() => root);
+    const saved = join(dirname(real), `${basename(real)}${SAVED_SUFFIX}`, stamp);
     for (const conflict of plan.conflicts) {
         const from = await resolveExisting(root, conflict.path);
         if (!from) continue;

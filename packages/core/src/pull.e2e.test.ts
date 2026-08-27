@@ -1,7 +1,7 @@
 import {deepEqual, match, ok, rejects, strictEqual} from "node:assert/strict";
 import {createHash} from "node:crypto";
 import {mkdir, readFile, readdir, symlink, writeFile} from "node:fs/promises";
-import {join} from "node:path";
+import {basename, join} from "node:path";
 import {test} from "node:test";
 import {gzipSync} from "node:zlib";
 import {DevtoolsError} from "./errors.ts";
@@ -151,12 +151,41 @@ test("서버 세대를 읽었으면 장부가 적는다", async () => {
     strictEqual((await readLedger(dir))?.server?.generation, "G1");
 });
 
-test("장부는 `.gitignore` 에 오른다 — 남의 기계 `mine` 이 넘어오면 거짓 상태가 된다", async () => {
+test("git 이 장부를 안 나르게 한다 — 남의 기계 `mine` 이 넘어오면 거짓 상태가 된다", async () => {
+    const dir = await site({});
+    await mkdir(join(dir, ".git"), {recursive: true});
+    await run(dir, tarGz({"a.tsx": "가"}));
+    const exclude = join(dir, ".git", "info", "exclude");
+    match(await readFile(exclude, "utf8"), /^\.zalkera\/sync\.json$/m);
+    await run(dir, tarGz({"a.tsx": "가"}));
+    strictEqual((await readFile(exclude, "utf8")).match(/sync\.json/g)?.length, 1, "두 번 적혔다");
+});
+
+test("🔴 `.gitignore` 를 안 건드린다 — 판이 싣고 오는 파일이라 손대면 다음 받기가 영구 충돌한다", async () => {
+    // 실측으로 잡힌 결함: 서버가 `.gitignore` 를 실어 오는데 우리가 한 줄 붙여, 두 번째 받기가
+    // **고객이 만진 적 없는 파일** 이름을 대며 거절했다.
+    const dir = await site({});
+    await mkdir(join(dir, ".git"), {recursive: true});
+    const payload = tarGz({"a.tsx": "가", ".gitignore": "node_modules\n"});
+    await run(dir, payload);
+    strictEqual(await readFile(join(dir, ".gitignore"), "utf8"), "node_modules\n", "판의 파일에 손댔다");
+    const again = await run(dir, payload);
+    strictEqual(again.unchanged, 2, "같은 판을 다시 받는데 뭔가가 달라져 있었다");
+});
+
+test("git 폴더가 없으면 아무 파일도 안 만든다 — 없는 자리에 만들면 다음 판에 실려 나간다", async () => {
     const dir = await site({});
     await run(dir, tarGz({"a.tsx": "가"}));
-    match(await readFile(join(dir, ".gitignore"), "utf8"), /^\.zalkera\/sync\.json$/m);
-    await run(dir, tarGz({"a.tsx": "가"}));
-    strictEqual((await readFile(join(dir, ".gitignore"), "utf8")).match(/sync\.json/g)?.length, 1, "두 번 적혔다");
+    deepEqual((await readdir(dir)).sort(), [".zalkera", "a.tsx"], "안 만들기로 한 파일이 생겼다");
+});
+
+test("🔴 치워 두는 자리는 **실경로**의 형제다 — 링크로 열린 폴더는 부모가 다른 파일시스템일 수 있다", async () => {
+    const dir = await site({"a.tsx": "내가-고침"}, {"a.tsx": "가"});
+    const link = join(dir, "..", `${basename(dir)}-링크`);
+    await symlink(dir, link);
+    const result = await run(link, tarGz({"a.tsx": "서버것"}), {discardLocal: true});
+    ok(result.savedTo!.startsWith(`${dir}${SAVED_SUFFIX}`), `링크 이름으로 잡았다: ${result.savedTo}`);
+    strictEqual(await readFile(join(result.savedTo!, "a.tsx"), "utf8"), "내가-고침");
 });
 
 test("`baseline` 은 장부만 고치고 **작업본을 안 건드린다**", async () => {
