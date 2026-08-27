@@ -55,15 +55,30 @@ interface Envelope<T> {
 const HANDSHAKE_TIMEOUT_MS = 15 * 1000;
 
 /**
+ * 판 문자열을 문장에 실을 때의 상한.
+ *
+ * ⚠ **판 번호는 짧다.** 이 값이 넉넉해 보이는 것은 서버가 `1.2.3-rc.4+build.5` 같은 것을 보낼 수
+ *   있어서이고, 그보다 긴 것은 판 번호가 아니라 **문장을 밀어내려는 값**이다.
+ */
+const MAX_VERSION_SHOWN = 40;
+
+/**
  * 핸드셰이크를 받아 온다. **판정은 서버가 한다** — 우리는 그 답을 옮길 뿐이다(구버전일수록 자기 판정
  * 코드도 낡았으므로, 판정을 클라이언트에 두면 정작 고쳐야 할 버전이 자기가 낡은 줄 모른다).
  *
  * `UPGRADE_REQUIRED` 면 여기서 던진다 — 호출부가 판정을 다시 해석하지 않게 하려는 것이다.
+ *
+ * ⚠ **「업데이트하세요」의 방법은 문마다 다르다.** 확장은 편집기가 알아서 갱신하지만, CLI 는
+ *   사람이 명령을 쳐야 한다. 그 한 줄이 없으면 게이트에 걸린 사람은 **나갈 길이 없다** —
+ *   「업데이트한 뒤 다시 시도해 주세요」만 읽고 무엇을 할지 모른다. 부르는 쪽이 방법을 준다
+ *   ([upgradeHow]). 판정은 서버가, 방법은 문이 안다.
  */
 export async function fetchHandshake(
     apiBase: string,
     extensionVersion: string,
     fetchImpl: typeof fetch = fetch,
+    /** 이 문에서 **어떻게** 업데이트하는가. 안 주면 방법을 말하지 않는다(거짓 안내보다 낫다). */
+    upgradeHow?: string,
 ): Promise<Handshake> {
     const url = new URL("/api/devtools/handshake", withTrailingSlash(apiBase));
     url.searchParams.set("extensionVersion", extensionVersion);
@@ -150,12 +165,21 @@ export async function fetchHandshake(
     // **서버가 준 문장도 경계에서 소독한다.** 알림 본문은 평문이 아니라 `[글자](스킴:...)` 를 링크로
     // 렌더하고, 그 링크는 명령을 실행할 수 있다. 소비처마다 소독하면 새 소비처가 맨몸으로 들어온다.
     handshake.message = handshake.message == null ? null : plainNotice(handshake.message);
+    // ⚠ **판 문자열도 서버가 정한다.** 종전에는 이 둘만 경계를 안 지났다 — 문장에 실려 같은 알림으로
+    //   나가는데 소독이 없었다. `MAX_VERSION_SHOWN` 으로 죄는 이유는 아래 hint 조립에 있다.
+    handshake.minExtensionVersion = plainNotice(handshake.minExtensionVersion, MAX_VERSION_SHOWN);
+    handshake.recommendedExtensionVersion = plainNotice(handshake.recommendedExtensionVersion, MAX_VERSION_SHOWN);
 
     if (handshake.verdict === "UPGRADE_REQUIRED") {
         throw new DevtoolsError(
             "EXTENSION_OUTDATED",
             handshake.message ?? "이 버전은 더 이상 서버와 맞지 않습니다.",
-            `${handshake.minExtensionVersion} 이상으로 업데이트한 뒤 다시 시도해 주세요.`,
+            // 🔴 **나가는 길을 맨 앞에 둔다.** `humanMessage` 가 다시 300자로 죄므로, 서버가 정하는
+            //    글자가 앞에 오면 **긴 값 하나로 우리 안내를 통째로 밀어낼 수** 있다(심의 실측:
+            //    191자면 `npx zalkera@latest` 가 사라진다). 그러면 「업데이트하세요」만 남고
+            //    방법이 없는, 이 인자가 막으려던 그 교착이 서버 문자열 하나로 되살아난다.
+            (upgradeHow === undefined ? "" : `${upgradeHow} `) +
+                `서버가 요구하는 최소 버전은 ${handshake.minExtensionVersion} 입니다.`,
         );
     }
     return handshake;

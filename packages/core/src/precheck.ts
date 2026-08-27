@@ -56,6 +56,18 @@ export async function precheck(options: PrecheckOptions): Promise<PrecheckFindin
         });
     }
 
+    // ⚠ **이 도구 자신이 사이트 의존에 들어와 있는가.** 형제 `@zalkera/client` 와 스코프가 같아
+    //   에이전트가 형제 패키지로 보고 프로젝트에 설치하는 일이 있다. 그러면 그 `package.json` 이
+    //   업로드돼 **서버 빌드가 CLI 를 설치한다** — 쓰지도 않는 것을 짓느라 시간과 용량을 쓴다.
+    //   `warn` 이다: 빌드가 죽지는 않으므로 막지 않고 말한다.
+    if (project.toolInDeps.length > 0) {
+        findings.push({
+            level: "warn",
+            message: `${project.toolInDeps.join(" · ")} 가 이 사이트의 의존으로 들어 있습니다.`,
+            hint: "이것은 소스가 `import` 하는 패키지가 아니라 터미널에서 치는 명령입니다. `package.json` 에서 빼 주세요 — 그대로 두면 사이트를 지을 때 함께 설치됩니다.",
+        });
+    }
+
     if (!existsSync(join(options.projectDir, ".gitignore"))) {
         findings.push({
             level: "info",

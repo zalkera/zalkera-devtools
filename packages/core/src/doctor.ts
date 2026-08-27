@@ -87,6 +87,17 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorCheck[]> 
                 detail: `${project.name} · Next ${project.hasNext ? "있음" : "없음"} · @zalkera/client ${project.clientVersion ?? "선언 없음"}`,
                 ...(project.hasNext ? {} : { hint: "개발 서버(next)가 의존성에 없습니다. 소스가 맞는지 확인해 주세요." }),
             });
+            // ⚠ **이 도구가 사이트 의존에 들어와 있으면 말한다.** 형제 `@zalkera/client` 와 스코프가
+            //   같아 형제 패키지로 오인되고, 그러면 업로드된 `package.json` 을 보고 **서버 빌드가
+            //   CLI 를 설치한다.** 이름 관례로는 못 막아서 여기서 잰다.
+            if (project.toolInDeps.length > 0) {
+                checks.push({
+                    name: "잘못 들어온 의존",
+                    ok: false,
+                    detail: project.toolInDeps.join(" · "),
+                    hint: "이것은 `import` 하는 패키지가 아니라 터미널에서 치는 명령입니다. `package.json` 에서 빼 주세요 — 그대로 두면 사이트를 지을 때 함께 설치됩니다.",
+                });
+            }
             checks.push({
                 name: "의존성",
                 ok: project.hasNodeModules,

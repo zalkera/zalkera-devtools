@@ -4,12 +4,13 @@ import {fileURLToPath} from "node:url";
 import {promisify} from "node:util";
 import {test} from "node:test";
 
+/** 실제 프로세스로 부른다 — 배선(인자 → 갈래 → 종료 코드)이 여기 살기 때문이다. */
 const run = promisify(execFile);
 const ENTRY = fileURLToPath(new URL("./main.ts", import.meta.url));
 
-/** 실제 프로세스로 부른다 — 배선(인자 → 갈래 → 종료 코드)이 여기 살기 때문이다. */
 /**
- * ⚠ **서버를 닿지 않는 주소로 못박는다.** 안 그러면 이 시험이 상용을 두드린다 — 실제로 그랬다
+ * 시험이 쓰는 환경. **서버를 닿지 않는 주소로 못박는다.**
+ * 안 그러면 이 시험이 상용을 두드린다 — 실제로 그랬다
  *   (`--revision abc` 갈래가 핸드셰이크를 먼저 치르고 있었다). 시험이 초록인 이유가 「인자 검증이
  *   먼저라서」인지 「서버가 마침 답해서」인지 갈리면 그 시험은 아무것도 안 재는 것이다.
  */

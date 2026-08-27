@@ -75,6 +75,13 @@ export class DevtoolsError extends Error {
 export type DevtoolsErrorCode =
     /** 서버가 이 버전을 더 이상 받지 않는다(핸드셰이크 UPGRADE_REQUIRED). */
     | "EXTENSION_OUTDATED"
+    /**
+     * 이 도구의 **설치가 깨졌다** — 자기 판을 못 읽었다.
+     *
+     * ⚠ 「판이 낡았다」와 다른 사실이다. 못 읽은 것을 `0.0.0` 으로 접으면 서버가 최소판 게이트로
+     *   거절하고, 그 안내(「업데이트하세요」)를 따라도 **안 고쳐진다** — 낡은 것이 아니기 때문이다.
+     */
+    | "INSTALL_BROKEN"
     /** 서버에 닿지 못했다(네트워크·프록시·주소 오설정). */
     | "SERVER_UNREACHABLE"
     /** 로그인이 필요하거나 만료됐다. */
