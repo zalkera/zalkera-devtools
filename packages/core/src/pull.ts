@@ -38,7 +38,7 @@ import {
     serializeSyncLedger,
     type SyncLedger,
 } from "./syncLedger.ts";
-import {extractTarGz, readTarGzManifest} from "./untar.ts";
+import {extractTar, gunzipTar, readTarManifest} from "./untar.ts";
 import {hashWorkdir, resolveExisting} from "./workdir.ts";
 import {isExcludedEntry} from "./zip.ts";
 
@@ -132,10 +132,10 @@ export async function pullSiteSource(options: PullOptions): Promise<PullResult> 
 
     report("무엇이 달라졌는지 견주는 중입니다…");
     // `rejectVendored` 를 **읽기 훑기에** 건다 — 거절이 쓰기보다 앞이어야 폴더가 그대로 남는다.
-    const declared = await readTarGzManifest(tar.buffer, {
-        maxBytes: MAX_EXTRACT_BYTES,
-        rejectVendored: true,
-    });
+    // ⚠ **gz 는 한 번만 푼다.** 같은 아카이브를 두 번 보는데(판정 → 쓰기) 각자 풀면 산출물만큼을
+    //   두 번 램에 올린다 — 상한(450MB)에서 실측 peak RSS 1,071MB 였다(심의).
+    const untarred = await gunzipTar(tar.buffer, MAX_EXTRACT_BYTES);
+    const declared = await readTarManifest(untarred, {rejectVendored: true});
     const {incoming, dropped} = withoutExcluded(declared);
     const local = await hashWorkdir(root);
     requireNoFoldedCollision(incoming, local);
@@ -177,8 +177,7 @@ export async function pullSiteSource(options: PullOptions): Promise<PullResult> 
     const deleted =
         (await applyDeletes(root, todo.deletes)) + todo.deletes.filter((path) => moved.has(path)).length;
     const writes = new Set(todo.writes);
-    await extractTarGz(tar.buffer, root, {
-        maxBytes: MAX_EXTRACT_BYTES,
+    await extractTar(untarred, root, {
         // 여기도 켠다 — 읽기 훑기가 이미 걸렀지만, 이 함수는 공개 API 라 두 경로가 같은 판정을
         // 지나야 한다. 실제로 걸리는 자리는 위쪽이다.
         rejectVendored: true,

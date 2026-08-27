@@ -88,7 +88,28 @@ export async function extractTarGz(gzipped: Buffer, targetDir: string, options: 
     // ⚠ `maxBytes` 를 **여기서도 쓴다**(심의 실측 · 2026-08-10). 종전에는 스트리밍 경로만 이 값을 보고
     // 버퍼 경로는 통짜 상한만 봐서, `maxBytes: 1024` 로 불러도 20,000 파일이 기록됐다. 호출부가 건 상한이
     // 경로에 따라 있다 없다 하면 그건 상한이 아니다.
-    const tar = await gunzipBuffer(gzipped, options.maxBytes);
+    return extractTar(await gunzipBuffer(gzipped, options.maxBytes), targetDir, options);
+}
+
+/**
+ * 이미 푼 tar 를 해제한다.
+ *
+ * ⚠ **한 번만 풀기 위한 문이다.** `pull` 은 같은 아카이브를 두 번 본다(판정용 읽기 → 쓰기). 각자
+ *   `gunzip` 하면 산출물 크기만큼을 **두 번** 램에 올린다.
+ *
+ * ■ 실측 (300MB 로 부푸는 tar.gz · 파일 30개)
+ *   · 두 번 풀 때 — peak RSS **1,071MB**(심의 실측)
+ *   · 한 번 풀 때 — peak RSS **934MB**
+ *   · 대조군: 이 문을 안 쓰는 기존 경로 `extractTarGz` 단독 — **934MB**(같다)
+ *
+ *   즉 **두 번 푸는 대가만** 없앴다. 남은 산출물 3배는 [extractTarGz] 가 통짜 Buffer 로 도는 성질이고
+ *   이 트랜치 이전부터 있던 것이다 — 줄이려면 스트리밍이어야 하는데, 그러면 「무엇을 할지 정한 뒤에
+ *   쓴다」(`pull.ts` 의 순서 계약)가 성립하지 않는다. **여기서 해결했다고 적지 않는다.**
+ *
+ *   재현: `node scratchpad/실전/mem.mjs` · `node scratchpad/실전/mem2.mjs`
+ *   (`VmHWM` 을 읽는다. 두 스크립트가 같은 300MB 픽스처를 쓴다.)
+ */
+export async function extractTar(tar: Buffer, targetDir: string, options: UntarOptions = {}): Promise<number> {
     const sink = await createSink(targetDir, options);
     await forEachBufferedEntry(tar, (meta, data) => sink.consume(meta, data));
     return sink.fileCount();
@@ -147,9 +168,22 @@ export interface TarManifestEntry {
  */
 export async function readTarGzManifest(
     gzipped: Buffer,
-    options: {maxBytes?: number; maxEntries?: number; rejectVendored?: boolean} = {},
+    options: TarManifestOptions = {},
 ): Promise<Record<string, TarManifestEntry>> {
-    const tar = await gunzipBuffer(gzipped, options.maxBytes);
+    return readTarManifest(await gunzipBuffer(gzipped, options.maxBytes), options);
+}
+
+export interface TarManifestOptions {
+    maxBytes?: number;
+    maxEntries?: number;
+    rejectVendored?: boolean;
+}
+
+/** 이미 푼 tar 의 매니페스트. gz 를 한 번만 풀려는 부르는 쪽을 위한 문이다([extractTar] 와 같은 이유). */
+export async function readTarManifest(
+    tar: Buffer,
+    options: TarManifestOptions = {},
+): Promise<Record<string, TarManifestEntry>> {
     const manifest: Record<string, TarManifestEntry> = {};
     // 디스크를 안 만지므로 뿌리는 **가상**이다. [safeSegments] 는 순수 문자열 계산이고, 파일시스템
     // 뿌리(`/`)를 그대로 쓰면 `root + sep` 가 `//` 가 되어 **정상 경로가 전부 거절된다.**
@@ -170,6 +204,10 @@ export async function readTarGzManifest(
         const resolved = names.resolve(meta, data);
         if (!resolved) return;
         const {name} = resolved;
+        // 🔴 **모르는 형식은 여기서 끊는다.** 종전에는 읽기가 조용히 건너뛰고 해제기만 던졌다 —
+        //    그러면 그런 항목을 **뒤에 단** 아카이브가 앞부분을 디스크에 내려놓은 뒤에 죽는다.
+        //    「거절이 쓰기보다 앞」이 불변식이 되려면 두 훑기가 **같은 것을 거절**해야 한다(심의 지적).
+        assertKnownEntryType(meta.type, name);
         // 디렉터리(`5`)·심볼릭 링크(`2`)·하드링크(`1`)는 매니페스트에 없다 — **파일의 목록**이다.
         if (meta.type !== "0" && meta.type !== "\0") return;
         const segments = safeSegments(root, name);
@@ -340,6 +378,19 @@ function createNameResolver() {
 }
 
 /**
+ * 다룰 수 있는 항목 형식인가. **두 훑기가 같은 문을 지난다** — 한쪽만 거절하면 「거절이 쓰기보다
+ * 앞」이 술어별로만 서고, 거절되는 항목을 아카이브 **뒤쪽에** 두는 것만으로 반쯤 적용이 난다.
+ */
+function assertKnownEntryType(type: string, name: string): void {
+    if (type === "0" || type === "\0" || type === "5" || type === "2" || type === "1") return;
+    throw new DevtoolsError(
+        "SERVER_REJECTED",
+        `받은 파일에 다룰 수 없는 항목이 있습니다(형식 ${type}): ${name}`,
+        "잘커라에 문의해 주세요. 잘못 받은 상태로 진행하지 않았습니다.",
+    );
+}
+
+/**
  * 항목을 디스크에 반영하는 쪽. 버퍼·스트리밍 두 경로가 **같은 판정**을 쓰게 묶어 둔다.
  *
  * 🔴 **경로 판정은 물리(physical)여야 한다**(심의 차단 · 2026-08-03 · 실제로 뚫렸다).
@@ -434,13 +485,7 @@ async function createSink(targetDir: string, options: UntarOptions) {
             // 순서 의존이 붙는데, 정작 쓰이지 않는다.
             if (entry.type === "1") return;
 
-            if (entry.type !== "0" && entry.type !== "\0") {
-                throw new DevtoolsError(
-                    "SERVER_REJECTED",
-                    `받은 파일에 다룰 수 없는 항목이 있습니다(형식 ${entry.type}).`,
-                    "잘커라에 문의해 주세요. 잘못 받은 상태로 진행하지 않았습니다.",
-                );
-            }
+            assertKnownEntryType(entry.type, name);
 
             const leaf = segments[segments.length - 1];
             if (!leaf) throw new DevtoolsError("SERVER_REJECTED", `받은 파일에 이상한 경로가 있습니다: ${name}`);
@@ -574,6 +619,14 @@ export function resolveCap(maxBytes?: number): number {
 }
 
 /** 압축 폭탄 방어 — 무제한 해제는 확장 호스트를 OOM 으로 죽이고, 그러면 다른 확장까지 함께 죽는다. */
+/**
+ * gz 를 푼다. **부르는 쪽이 한 번만 풀 수 있게** 내보낸다 — 같은 아카이브를 두 번 보는 길
+ * (`pull` 의 판정 → 쓰기)이 각자 풀면 산출물만큼을 두 번 램에 올린다([extractTar] 참조).
+ */
+export async function gunzipTar(input: Buffer, maxBytes?: number): Promise<Buffer> {
+    return gunzipBuffer(input, maxBytes);
+}
+
 async function gunzipBuffer(input: Buffer, maxBytes?: number): Promise<Buffer> {
     const { gunzip: gunzipCb } = await import("node:zlib");
     const { promisify } = await import("node:util");

@@ -1,6 +1,6 @@
 import {deepEqual, match, ok, rejects, strictEqual} from "node:assert/strict";
 import {createHash} from "node:crypto";
-import {link, mkdir, readFile, readdir, symlink, writeFile} from "node:fs/promises";
+import {link, mkdir, readFile, readdir, rm, symlink, writeFile} from "node:fs/promises";
 import {basename, join} from "node:path";
 import {test} from "node:test";
 import {gzipSync} from "node:zlib";
@@ -403,12 +403,24 @@ test("`--verbose` 가 거절 목록에도 닿는다 — 사람이 잘림을 가�
 
 test("🔴 쓰기가 도중에 죽어도 장부는 **옛것 그대로**다 — 이 순서가 재실행의 전제다", async () => {
     // 심의 실측: 종전 시험은 관용 1 만 재고 있었고, `writeLedger` 를 앞으로 옮겨도 전부 초록이었다.
-    // 여기서는 해제를 실제로 중간에 죽인다 — tar 마지막 항목을 다룰 수 없는 형식으로.
-    const dir = await site({"a.tsx": "가"}, {"a.tsx": "가"});
+    //
+    // ⚠ 죽이는 벡터는 **읽기 훑기가 미리 못 잡는 것**이어야 한다. 아카이브 형상(모르는 형식·벤더·
+    //   대소문자 접힘)은 이제 전부 쓰기 전에 걸리므로 그것으로는 이 순서를 못 잰다. 남는 것은
+    //   **로컬 상태**에 달린 실패다: 판이 폴더로 쓰려는 자리에 «장부가 모르는» 파일이 이미 있는 경우.
+    const dir = await site({"먼저.tsx": "가"}, {"먼저.tsx": "가"});
+    await writeFile(join(dir, "app"), "장부가 모르는 파일");
     const before = await readFile(join(dir, SYNC_LEDGER_PATH), "utf8");
-    const broken = tarGz({"a.tsx": "새것"}, [["나쁜것", "3", ""]]);
-    await rejects(() => run(dir, broken), DevtoolsError);
+    await rejects(() => run(dir, tarGz({"먼저.tsx": "새것", "app/page.tsx": "가"})), DevtoolsError);
     strictEqual(await readFile(join(dir, SYNC_LEDGER_PATH), "utf8"), before, "죽었는데 장부가 새 판을 선언했다");
-    // 그리고 재실행이 이어받는다 — 이미 옮겨진 파일이 자기 잔해로 스스로를 막지 않는다.
-    strictEqual((await run(dir, tarGz({"a.tsx": "새것"}))).written, 1);
+    // 그리고 사람이 그 파일을 치우면 재실행이 이어받는다 — 이미 옮겨진 것이 스스로를 막지 않는다.
+    await rm(join(dir, "app"));
+    strictEqual((await run(dir, tarGz({"먼저.tsx": "새것", "app/page.tsx": "가"}))).written, 2);
+});
+
+test("🔴 모르는 형식은 **뒤에 달려 있어도** 파일 하나 쓰기 전에 거절한다", async () => {
+    // 종전에는 읽기 훑기가 조용히 건너뛰고 해제기만 던져, 그런 항목을 뒤에 단 아카이브가
+    // 앞부분을 디스크에 내려놓은 뒤에 죽었다(심의 지적).
+    const dir = await site({});
+    await rejects(() => run(dir, tarGz({"먼저.tsx": "이것이 남으면 안 된다"}, [["나쁜것", "3", ""]])), DevtoolsError);
+    deepEqual(await readdir(dir), [], "거절인데 파일이 남았다");
 });

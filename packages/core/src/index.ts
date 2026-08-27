@@ -259,4 +259,11 @@ export {
 export {rebuildBaseline, type BaselineOptions, type BaselineResult} from "./baseline.ts";
 export {ledgerCorrection, syncStatus, type SyncBlocker, type SyncStatus, type SyncStatusInput} from "./syncStatus.ts";
 export {hashFile, hashWorkdir, resolveExisting, type WorkdirManifest} from "./workdir.ts";
-export {readTarGzManifest, type TarManifestEntry} from "./untar.ts";
+export {
+    extractTar,
+    gunzipTar,
+    readTarGzManifest,
+    readTarManifest,
+    type TarManifestEntry,
+    type TarManifestOptions,
+} from "./untar.ts";

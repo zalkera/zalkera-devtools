@@ -110,3 +110,20 @@ test("`decide` 없이는 종전과 같다", async () => {
     const dir = await tempDir("zalkera-default-");
     strictEqual(await extractTarGz(tarGz(entry("a.tsx", "가"), entry("b/c.tsx", "나")), dir), 2);
 });
+
+test("🔴 해제기도 모르는 형식을 거절한다 — 공개 API 라 읽기 훑기 없이 들어올 수 있다", async () => {
+    // `pull` 은 읽기 훑기에서 먼저 거절하므로 이 자리가 안 밟힌다. 그래도 남기는 이유는
+    // [extractTarGz] 가 공개 API 이기 때문이다 — 그 입구로 재지 않으면 이 가드는 아무도 안 잰다.
+    const dir = await tempDir("zalkera-badtype-");
+    await rejects(() => extractTarGz(tarGz(entry("나쁜것", "", "3")), dir), DevtoolsError);
+    await rejects(() => extractTarGz(tarGz(entry("나쁜것", "", "7")), dir), DevtoolsError);
+});
+
+test("다룰 수 있는 형식은 그대로 지난다 — 조임 실수로 정상 아카이브를 세우지 않는다", async () => {
+    const dir = await tempDir("zalkera-goodtype-");
+    const count = await extractTarGz(
+        tarGz(entry("d/", "", "5"), entry("d/a.tsx", "가"), entry("d/hard", "", "1", "d/a.tsx")),
+        dir,
+    );
+    strictEqual(count, 1);
+});

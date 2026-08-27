@@ -8,12 +8,15 @@
 ## 지금 되는 것
 
 ```
-zalkera login                  # 브라우저로 로그인
+zalkera login                  # 브라우저로 로그인 (사이트를 안 물어본다)
+zalkera pull --site <사이트코드>  # 빈 폴더에 처음 받을 때
 zalkera status                 # 이 폴더와 사이트가 어떻게 다른지
-zalkera pull                   # 사이트의 지금 판을 이 폴더에 받는다
+zalkera pull                   # 이미 받은 폴더를 지금 판에 맞춘다
 zalkera baseline               # 기준 기록만 다시 세운다(파일은 안 건드린다)
 zalkera logout
 ```
+
+`--site` 는 **폴더가 소속을 모를 때만** 필요하다. 한 번 받으면 폴더가 그것을 기억한다.
 
 옵션: `--site <사이트코드>` · `--folder <경로>` · `--revision <판번호>` · `--discard-local` · `--verbose`
 
