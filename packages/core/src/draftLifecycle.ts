@@ -32,7 +32,12 @@
  * 「MCP 확인 코드와 동급」이라 적지 않는다. 그래서 파괴적 동사는 로컬 MCP 카탈로그 밖에 둔다(§2.6).
  */
 import {resolve} from "node:path";
-import {isDraftInProgress, type DraftPublishResult, type ZalkeraApi} from "./api.ts";
+import {
+    isDraftInProgress,
+    needsDiscardConsent,
+    type DraftPublishResult,
+    type ZalkeraApi,
+} from "./api.ts";
 import {DevtoolsError} from "./errors.ts";
 import {rebuildBaseline} from "./baseline.ts";
 import {rm} from "node:fs/promises";
@@ -77,7 +82,23 @@ export async function publishDraft(options: PublishDraftOptions): Promise<Publis
     report("편집을 새 버전으로 올리는 중입니다…");
     const published = await requireConsent(() =>
         options.api.publishDraft(options.label, options.discardPendingChanges === true),
-    );
+    ).catch((error: unknown) => {
+        // 🔴 **서버 문면의 「되돌린 뒤」가 CLI 어휘에서 다른 명령을 가리킨다.** 좌초한 편집은
+        //    이 문에서 `DRAFT_BASE_MOVED` 로 막히고 서버는 「되돌린 뒤 지금 버전에서 다시 고쳐
+        //    주세요」라 답하는데, CLI 의 `rollback` 은 **편집이 걸려 있으면 그 자체가 막힌다.**
+        //    그대로 내보내면 두 거절이 서로를 가리켜 사람이 갇힌다 — 형제 `rollback` 쪽에서
+        //    같은 충돌을 고쳤는데 이쪽이 무매핑으로 남아 있었다(심의 실측).
+        //    참인 출구는 **버리기**다. 그리고 그것은 무엇을 잃는지 먼저 보여 준다.
+        if (error instanceof DevtoolsError && error.serverCode === "DRAFT_BASE_MOVED") {
+            throw new DevtoolsError(
+                "PUBLISH_BASE_MOVED",
+                "편집을 시작한 뒤 사이트 버전이 바뀌어 이 편집을 올릴 수 없습니다.",
+                "`zalkera discard` 로 그 편집을 버린 뒤, `zalkera pull` 로 지금 버전을 받아 다시 고쳐 주세요. 버리기는 무엇이 걸려 있는지 먼저 보여 줍니다.",
+                error,
+            );
+        }
+        throw error;
+    });
 
     // ⚠ **`files` 를 「직전 작업본」으로 추정하지 않는다**(§2.1). 서버가 경로 정규화·제외 목록을
     //   적용하므로 추정은 조용히 어긋난다. 새 판 매니페스트를 **다시 읽는다.**
@@ -121,8 +142,11 @@ export interface RollbackOutcome {
     /**
      * 🔴 **서버가 실제로 켠 판.** 사람이 친 번호와 **다를 수 있다** — 되돌리기 대상이 꼬리가 아니면
      * 서버가 새 판(`ROLLBACK`)을 세우고 그것을 켠다. 장부·문면은 **이 값**을 써야 한다.
+     *
+     * ⚠ **`null` 은 「안 옮겨졌다」가 아니라 「번호를 모른다」다.** 판은 옮겨졌다 — 그 사실은
+     *   [pointerMoved] 가 말한다. 문면은 번호 없이 「옮겼습니다」라고 해야 한다.
      */
-    revisionNo: number;
+    revisionNo: number | null;
     /** 사람이 친 번호. 위와 다르면 부르는 쪽이 그 사실을 말한다. */
     requested: number;
     /** 판을 실제로 옮겼는가. 서버가 안 주면 참으로 본다(구서버의 뜻). */
@@ -172,12 +196,30 @@ export async function rollbackRevision(options: RollbackOptions): Promise<Rollba
         throw error;
     });
 
-    // 🔴 **서버가 실제로 켠 판을 다시 읽는다 — 사람이 친 번호가 아니다.**
+    // 🔴 **서버가 실제로 켠 판을 쓴다 — 사람이 친 번호가 아니다.**
     //    되돌리기 대상이 꼬리가 아니면 서버는 **새 판(`ROLLBACK`)을 세우고 그것을 켠다**
     //    (`activateByPointer`). 즉 `rollback 3` 의 결과는 3판이 아니라 10판일 수 있다.
     //    친 번호를 장부에 적으면 바로 다음 `push` 가 「기준이 3판에서 10판으로 움직였다」로 죽는다
     //    (심의 실측). 그리고 「3판으로 되돌렸습니다」와 `status` 의 「켜진 판: 10판」이 어긋난다.
-    const landed = await activeRevisionNo(options.api);
+    //
+    // 🔴 **응답이 이미 그 번호를 싣는다 — 다시 조회하지 않는다.** 조회로 읽으면 그 조회가
+    //    실패할 때 **이미 옮겨진 라이브**를 「확인 못 했습니다 · 잠시 뒤 다시 시도해 주세요」로
+    //    보고하고, 그 안내를 따른 재시도가 같은 내용의 판을 하나 더 세운다(심의 실측).
+    //    형제 `publishDraft` 는 판이 선 뒤로는 아무것도 안 던진다 — 규율을 맞춘다.
+    const landed = result.revisionNo ?? (await activeRevisionNo(options.api).catch(() => null));
+    if (landed === null) {
+        // 구서버(번호 미탑재) + 조회 실패. **판은 이미 옮겨졌다** — 던지면 거짓말이다.
+        await forgetLedger(root);
+        return {
+            revisionNo: null,
+            requested: options.revisionNo,
+            pointerMoved: result.pointerMoved ?? true,
+            discardedDraft: result.discardedDraft ?? false,
+            discardedPendingChanges: result.discardedPendingChanges ?? 0,
+            ledgerRebuilt: false,
+            differing: [],
+        };
+    }
 
     // 전이표: 대상 판으로 **교체** · 세대 null · `mine` 비움 · **작업본은 안 건드린다**.
     const rebuilt = await rebuildBaseline({
@@ -254,10 +296,38 @@ export async function discardDraft(options: DiscardOptions): Promise<DiscardOutc
     //    서버가 **게시 대기 AI 변경 전량**을 크레딧과 함께 지운다 — 그런데 우리가 사람에게 보여
     //    준 목록(`GET /draft/files`)에는 그 레일이 **아예 안 뜬다.** 갈래 A 의 마지막 문장이
     //    「버려도 이 폴더의 내용은 그대로입니다」인데 그 `y` 한 글자가 다른 자산군을 지웠다.
-    //    → 거짓으로 먼저 보내고, 서버가 동의를 요구하면 **그 문면 그대로** 부르는 쪽에 올린다.
-    const result = await requireConsent(() =>
-        options.api.activateRevision(active, options.discardPending === true),
-    );
+    //    → 거짓으로 먼저 보내고, 서버가 무엇이 걸렸는지 답하게 한다.
+    const result = await options.api
+        .activateRevision(active, options.discardPending === true)
+        .catch(async (error: unknown) => {
+            // 🔴 **여기서 끝내면 이 동사는 한 번에 성공하지 못한다.** 서버는 게시 대기 AI 변경이
+            //    **0건이어도** 드래프트만 있으면 이 동의를 요구한다(`discardToCurrent` 의
+            //    `(draft != null || pending > 0) && !consented`). 즉 버릴 편집이 실제로 있는
+            //    **모든** 버리기가 방금 받은 `y`/`버립니다` 직후 거절로 끝났고, 사람은 크레딧
+            //    자산의 동의 플래그(`--discard-pending`)를 **습관으로** 붙이게 됐다(심의 실측).
+            //
+            //    갈래는 서버가 짚어 준 항목으로 가른다 — 문면을 파싱하지 않는다:
+            //    ⑴ 크레딧이 걸렸으면 **여기서 멈춘다.** 그 자산은 사람에게 보여 준 적이 없다.
+            //    ⑵ 편집만 걸렸으면 그것은 **방금 확인받은 바로 그 목록**이므로 동의를 실어 잇는다.
+            if (!needsDiscardConsent(error) || !(error instanceof DevtoolsError)) throw error;
+            if (creditsAtStake(error)) throw asConsentRequired(error);
+            // ⚠ **확인한 것과 버리는 것이 같은지 다시 잰다.** 사람이 목록을 보고 답하는 창은
+            //   상한이 없다(분 단위일 수 있다). 그 사이 콘솔·AI 레인이 편집을 얹으면, 이어지는
+            //   동의는 **보여 준 적 없는 것**을 태운다 — §2.5 🔴3 이 막으려던 그 얼굴이다.
+            //   창을 사람-시간에서 망-시간으로 줄인다(없앨 수는 없다 — 서버가 원자 조건부
+            //   폐기를 안 받는다. 그 비대칭은 §2.5 에 적혀 있다).
+            const now = await options.api.draftFiles().catch(() => null);
+            if (now === null || (now.generation ?? null) !== options.plan.generation) {
+                throw new DevtoolsError(
+                    "DRAFT_MOVED_WHILE_CONFIRMING",
+                    "확인하시는 사이 사이트 쪽 편집이 달라져 아무것도 버리지 않았습니다.",
+                    "`zalkera discard` 를 다시 실행하면 지금 걸려 있는 것을 보여 드립니다.",
+                    error,
+                );
+            }
+            report("서버가 확인을 한 번 더 요구해 방금 주신 동의를 그대로 잇습니다…");
+            return options.api.activateRevision(active, true);
+        });
 
     // 전이표 `discard`: `base`/`files` 무변경 · 세대 **null** · `mine` **비움** · 작업본 안 건드림.
     const ledger = await readLedger(root);
@@ -333,19 +403,54 @@ async function activeRevisionNo(api: ZalkeraApi): Promise<number> {
  *
  * ⚠ **여기서 자동으로 참으로 바꾸지 않는다.** 서버 문면은 편집 N개와 AI M건을 **나눠 세므로**,
  *   그것을 사람에게 보여 주고 다시 묻는 것이 정석이다. 우리가 만든 문장으로 대신하지 않는다.
+ *
+ * 🔴 **코드 하나로 재지 않는다 — [needsDiscardConsent] 집합으로 잰다.** 문마다 코드가 다르다:
+ *    발행·되돌리기는 `PENDING_AI_CHANGES_CONFIRM_REQUIRED`(베이스라인 이동 가드), 버리기는
+ *    `DRAFT_DISCARD_CONFIRM_REQUIRED`(`discardToCurrent`). 하나만 보면 **나머지 두 동사에서
+ *    이 레일이 통째로 죽고**, 사람은 「계속하려면 확인해 주세요」를 받고도 확인할 자리를 못 찾는다.
+ *    형제 `publish.ts` 가 이미 그 집합을 쓰고, 백엔드 `ConsentRetryableErrorCodes` KDoc 도
+ *    「술어를 늘리지 말고 집합을 넓혀라」라고 못박아 두었다.
+ *
+ * ⚠ **크레딧 문장을 우리가 만들지 않는다.** 버리기 갈래는 게시 대기 AI 변경이 **0건이어도**
+ *   드래프트만 있으면 이 거절을 낸다 — 그때 「쓴 크레딧은 돌아오지 않습니다」는 우리가 지어낸
+ *   거짓 겁주기다. 크레딧이 실제로 걸렸는지는 서버가 [PENDING_MARK] 로 답한다.
  */
 async function requireConsent<T>(call: () => Promise<T>): Promise<T> {
     try {
         return await call();
     } catch (error) {
-        if (error instanceof DevtoolsError && error.serverCode === "DRAFT_DISCARD_CONFIRM_REQUIRED") {
-            throw new DevtoolsError(
-                "DISCARD_CONSENT_REQUIRED",
-                error.message,
-                "그래도 계속하려면 `--discard-pending` 을 붙여 주세요. 쓴 크레딧은 돌아오지 않습니다.",
-                error,
-            );
-        }
+        if (needsDiscardConsent(error) && error instanceof DevtoolsError) throw asConsentRequired(error);
         throw error;
     }
+}
+
+/** 서버의 동의 요구를 **그 문면 그대로** 올리고, 확인하는 자리를 덧댄다. */
+function asConsentRequired(error: DevtoolsError): DevtoolsError {
+    return new DevtoolsError(
+        "DISCARD_CONSENT_REQUIRED",
+        error.message,
+        creditsAtStake(error)
+            ? "그래도 계속하려면 `--discard-pending` 을 붙여 주세요. 쓴 크레딧은 돌아오지 않습니다."
+            : "그래도 계속하려면 `--discard-pending` 을 붙여 주세요.",
+        error,
+    );
+}
+
+/**
+ * 서버가 **어느 항목이 걸렸는지** 짚어 줄 때 「게시 대기 AI 변경」을 가리키는 표식
+ * (백엔드 `BusinessException.Detail.key` → 응답 `errors[].field` → [DevtoolsError.paths]).
+ *
+ * ⚠ **문면을 파싱하지 않는다.** 서버의 한국어 문구를 뜯어 쓰면 그 문구가 계약이 되고, 백엔드가
+ *   문장을 다듬는 날 이 분기가 조용히 뒤집힌다.
+ */
+const PENDING_MARK = "pendingAiChanges";
+
+/**
+ * 이 거절에 **쓴 크레딧이 걸려 있는가.**
+ *
+ * ⚠ **결여는 「걸렸다」로 접는다.** 표식을 안 보내는 서버(이 표식보다 먼저 배포된 판)에서는
+ *   걸렸는지 알 수 없고, 그때 「안 걸렸다」로 접으면 크레딧이 걸린 회차를 **경고 없이** 태운다.
+ */
+function creditsAtStake(error: DevtoolsError): boolean {
+    return error.paths.length === 0 || error.paths.includes(PENDING_MARK);
 }

@@ -17,6 +17,11 @@ function server(opts: {
     replies?: Array<{generation?: string | null; throw?: DevtoolsError}>;
     /** 지금 켜진 판. 장부 픽스처의 기본 기준 판과 같은 값이 기본이다. */
     activeRevisionNo?: number | "unreadable";
+    /**
+     * 판 목록에 함께 실릴 **안 켜진 판**. NEXT_SOURCE 는 발행이 곧 활성 전환이 아니라
+     * (서버의 `activateWithThisRevision = siteType == STATIC`) 빌드 창 동안 이 상태가 실재한다.
+     */
+    otherRevisions?: Array<{revisionNo: number; status: string}>;
 } = {}) {
     const seen: unknown[][] = [];
     let round = 0;
@@ -29,7 +34,10 @@ function server(opts: {
             tenantCode: () => "acme",
             listRevisions: async () => {
                 if (opts.activeRevisionNo === "unreadable") throw new Error("서버 안 됨");
-                return [{revisionNo: opts.activeRevisionNo ?? 7, status: "READY", isActive: true}];
+                return [
+                    {revisionNo: opts.activeRevisionNo ?? 7, status: "READY", isActive: true},
+                    ...(opts.otherRevisions ?? []).map((r) => ({...r, isActive: false})),
+                ];
             },
             draftFiles: async () => {
                 draftReads += 1;
@@ -599,6 +607,39 @@ test("🔴 판이 움직였으면 «같습니다»라고 말하지 않고 멈춘
         return true;
     });
     strictEqual(s.seen.length, 0);
+});
+
+test("🔴 **짓는 중**을 「움직였다」로 말하지 않는다 — 그 안내를 따르면 방금 발행한 것이 사라진다", async () => {
+    // NEXT_SOURCE 는 빌드가 끝나야 켜진다. 그 창에서 장부는 새 판(8), 활성은 옛 판(7)이다.
+    // 뭉치면 방금 발행한 사람에게 「기준이 8판에서 7판으로 움직였다」는 **거꾸로 된** 문장이 나가고,
+    // 그 안내(`zalkera pull`)를 따르면 7판을 받아 방금 발행한 내용이 폴더에서 사라진다.
+    const s = server({activeRevisionNo: 7, otherRevisions: [{revisionNo: 8, status: "BUILDING"}]});
+    const dir = await site({"a.tsx": "가"}, {
+        files: {"a.tsx": {sha256: sha("가"), bytes: 1}},
+        base: {revisionNo: 8, tarSha256: "b".repeat(64)},
+    });
+    await rejects(() => pushSiteSource({api: s.api, folder: dir}), (e: unknown) => {
+        ok(e instanceof DevtoolsError);
+        strictEqual(e.code, "PUSH_BASE_BUILDING", "짓는 중을 「움직였다」로 말한다");
+        ok(!/8판에서 7판으로/.test(e.message), `번호가 거꾸로 나간다: ${e.message}`);
+        ok(!/zalkera pull/.test(e.humanMessage), `방금 발행한 것을 덮는 안내를 댄다: ${e.humanMessage}`);
+        return true;
+    });
+    strictEqual(s.seen.length, 0);
+});
+
+test("🔴 **짓다가 실패해** 안 켜진 것도 「움직였다」가 아니다", async () => {
+    const s = server({activeRevisionNo: 7, otherRevisions: [{revisionNo: 8, status: "FAILED"}]});
+    const dir = await site({"a.tsx": "가"}, {
+        files: {"a.tsx": {sha256: sha("가"), bytes: 1}},
+        base: {revisionNo: 8, tarSha256: "b".repeat(64)},
+    });
+    await rejects(() => pushSiteSource({api: s.api, folder: dir}), (e: unknown) => {
+        ok(e instanceof DevtoolsError);
+        strictEqual(e.code, "PUSH_BASE_BUILD_FAILED");
+        match(e.humanMessage, /zalkera baseline/, "기준을 맞추는 출구를 안 댄다");
+        return true;
+    });
 });
 
 test("🔴 판이 움직였으면 **보낼 것이 있어도** 멈춘다 — 낡은 기준 위에서 계산한 값이다", async () => {

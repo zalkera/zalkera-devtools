@@ -55,7 +55,7 @@ const HELP = `잘커라 — 사이트 소스를 로컬에서 다루는 도구 (v
   --overwrite-unseen             push 가 막힐 때 사이트 쪽 편집을 덮어쓰고 진행한다(그 편집은 사라진다)
   --label <이름>                 publish 가 붙일 버전 이름
   --discard-pending              게시 대기 AI 변경을 함께 버린다(publish·rollback·discard)
-                                 ⚠ 쓴 크레딧은 돌아오지 않는다
+                                 ⚠ 쓴 크레딧은 돌아오지 않는다 — 편집만 버릴 때는 필요 없다
   --yes                          discard 확인을 미리 준다 — **내가 올린 것과 같을 때만** 먹는다
   --confirm 버립니다               여기 없는 편집을 버릴 때 필요한 문구(터미널이 아닐 때)
   --verbose                      경로를 전부 보여 준다
@@ -219,18 +219,25 @@ async function main(argv: readonly string[]): Promise<number> {
                 folder: context.folder,
                 revisionNo: target,
                 // ⚠ 이 손잡이는 **게시 대기 AI 변경** 폐기 동의다 — 「편집 중인 것」이 아니다.
-                //    편집이 있으면 서버가 플래그와 무관하게 되돌리기를 거절한다.
+                //    편집이 있으면 서버가 플래그와 무관하게 되돌리기를 거절한다(가드 5층).
                 discardPending: flagOn(flags, "discard-pending"),
                 onProgress: (message: string) => process.stderr.write(`${message}\n`),
             });
+            // ⚠ **번호를 모르는 갈래가 있다.** 판은 옮겨졌는데 그 번호를 못 읽은 경우다 — 그때
+            //    「null판으로 되돌렸습니다」를 찍으면 안 되고, **일어난 일은 말해야** 한다.
             const lines = [
-                result.pointerMoved
-                    ? `${result.revisionNo}판으로 되돌렸습니다.`
-                    : `이미 ${result.revisionNo}판이었습니다.`,
+                result.revisionNo === null
+                    ? "되돌렸습니다 — 다만 지금 켜진 버전의 번호를 확인하지 못했습니다."
+                    : result.pointerMoved
+                      ? `${result.revisionNo}판으로 되돌렸습니다.`
+                      : `이미 ${result.revisionNo}판이었습니다.`,
             ];
+            if (result.revisionNo === null) {
+                lines.push("`zalkera status` 로 확인해 주세요. **다시 되돌리지 마세요** — 같은 내용의 버전이 하나 더 생깁니다.");
+            }
             // ⚠ **서버가 새 판을 세울 수 있다.** 되돌릴 대상이 꼬리가 아니면 그 내용으로 새 판을
             //    만들어 켠다 — 친 번호와 켜진 번호가 다르다. 안 말하면 `status` 와 어긋나 보인다.
-            if (result.revisionNo !== result.requested) {
+            if (result.revisionNo !== null && result.revisionNo !== result.requested) {
                 lines.push(
                     `(${result.requested}판의 내용으로 **새 ${result.revisionNo}판**을 세워 켰습니다 — 원장은 되감지 않습니다.)`,
                 );

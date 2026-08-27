@@ -59,6 +59,15 @@ export interface StrandedPlan {
     empty: boolean;
     /** 사이트 쪽 편집이 담고 있는 경로들(바뀐 것 + 지운 것). 사람에게 보여 줄 목록이다. */
     paths: string[];
+    /**
+     * 이 판정을 **어느 시점의 사이트 쪽에서** 읽었는가(`GET /draft/files` 의 세대). 못 읽었으면 `null`.
+     *
+     * ⚠ 표시용이 아니다. **사람에게 보여 준 것과 실제로 버리는 것이 같은지** 재는 자리다 —
+     *   목록을 보고 답하는 창은 상한이 없어 그 사이 사이트 쪽이 달라질 수 있다.
+     *
+     * ⚠ **불투명하다** — 같은지만 잰다. 값을 해석하거나 순서를 매기지 않는다(서버 내부 토큰이다).
+     */
+    generation: string | null;
     /** 왜 그렇게 판정했는지 — 문면이 아니라 **기계가 읽는 사유**다. */
     reason:
         | "ledger-matches"
@@ -81,33 +90,34 @@ export interface StrandedPlan {
  */
 export function planStranded(input: StrandedInput): StrandedPlan {
     const {ledger, draft} = input;
-    if (!draft) return {verdict: "elsewhere", empty: false, paths: [], reason: "server-unreadable"};
+    if (!draft) return {verdict: "elsewhere", empty: false, paths: [], generation: null, reason: "server-unreadable"};
 
     const paths = [...draft.changed.map((row) => row.path), ...draft.deleted].sort();
+    const generation = draft.generation ?? null;
     // 서버가 답했고 목록이 비었다 — **확실히** 편집이 없다.
     const empty = paths.length === 0;
-    if (!ledger) return {verdict: "elsewhere", empty, paths, reason: "no-ledger"};
+    if (!ledger) return {verdict: "elsewhere", empty, paths, generation, reason: "no-ledger"};
 
     const seen = ledger.server?.generation ?? null;
     // ⚠ **「본 적 없다」와 「갈렸다」를 가른다.** 처분은 같지만(둘 다 B) 사유는 다른 사실이고,
     //   이 칸은 기계가 읽는 자리다 — 뭉치면 「모른다」가 「다르다」로 보고된다.
-    if (seen === null) return {verdict: "elsewhere", empty, paths, reason: "generation-unknown"};
+    if (seen === null) return {verdict: "elsewhere", empty, paths, generation, reason: "generation-unknown"};
     if (seen !== (draft.generation ?? null)) {
-        return {verdict: "elsewhere", empty, paths, reason: "generation-differs"};
+        return {verdict: "elsewhere", empty, paths, generation, reason: "generation-differs"};
     }
 
     for (const path of draft.deleted) {
-        if (!Object.hasOwn(ledger.mine, path)) return {verdict: "elsewhere", empty, paths, reason: "path-not-mine"};
+        if (!Object.hasOwn(ledger.mine, path)) return {verdict: "elsewhere", empty, paths, generation, reason: "path-not-mine"};
         // 내가 올린 삭제는 `null` 로 적힌다. 값이 있으면 내가 올린 것은 **삭제가 아니었다.**
-        if (ledger.mine[path] !== null) return {verdict: "elsewhere", empty, paths, reason: "sha-differs"};
+        if (ledger.mine[path] !== null) return {verdict: "elsewhere", empty, paths, generation, reason: "sha-differs"};
     }
     for (const row of draft.changed) {
         if (!Object.hasOwn(ledger.mine, row.path)) {
-            return {verdict: "elsewhere", empty, paths, reason: "path-not-mine"};
+            return {verdict: "elsewhere", empty, paths, generation, reason: "path-not-mine"};
         }
         if (ledger.mine[row.path] !== row.sha256) {
-            return {verdict: "elsewhere", empty, paths, reason: "sha-differs"};
+            return {verdict: "elsewhere", empty, paths, generation, reason: "sha-differs"};
         }
     }
-    return {verdict: "mine", empty, paths, reason: "ledger-matches"};
+    return {verdict: "mine", empty, paths, generation, reason: "ledger-matches"};
 }

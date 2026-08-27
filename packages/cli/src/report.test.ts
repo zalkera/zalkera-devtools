@@ -126,31 +126,31 @@ test("화해 결과를 사실로 적는다", () => {
 // ── 좌초 안내(§2.5) ─────────────────────────────────────────────────────────────
 
 test("🔴 「손실이 아니다」는 **내 것일 때만** 쓴다 — 무조건 달면 유일본을 지우게 만든다", () => {
-    const mine = describeStranded({verdict: "mine", empty: false, paths: ["a.tsx"], reason: "ledger-matches"}).join("\n");
+    const mine = describeStranded({verdict: "mine", empty: false, paths: ["a.tsx"], generation: "G1", reason: "ledger-matches"}).join("\n");
     match(mine, /이 폴더의 내용은 그대로입니다/);
 
-    const other = describeStranded({verdict: "elsewhere", empty: false, paths: ["a.tsx"], reason: "path-not-mine"}).join("\n");
+    const other = describeStranded({verdict: "elsewhere", empty: false, paths: ["a.tsx"], generation: "G1", reason: "path-not-mine"}).join("\n");
     ok(!other.includes("그대로입니다"), `유일본에 「손실이 아니다」를 달았다:\n${other}`);
     match(other, /되찾을 방법이 없습니다/);
 });
 
 test("🔴 「남의 드래프트」라고 쓰지 않는다 — 같은 사람이 두 표면을 쓰면 거짓이 된다", () => {
-    const out = describeStranded({verdict: "elsewhere", empty: false, paths: ["a.tsx"], reason: "sha-differs"}).join("\n");
+    const out = describeStranded({verdict: "elsewhere", empty: false, paths: ["a.tsx"], generation: "G1", reason: "sha-differs"}).join("\n");
     ok(!/남의|다른 사람의/.test(out), `누구의 것인지 단정했다:\n${out}`);
     match(out, /이 폴더에 없는 편집/, "폴더 기준으로 말하지 않는다");
 });
 
 test("무엇이 걸려 있는지 보여 주고, 못 읽었으면 그 사실도 말한다", () => {
-    match(describeStranded({verdict: "elsewhere", empty: false, paths: ["a.tsx", "b.tsx"], reason: "no-ledger"}).join("\n"), /· a\.tsx/);
+    match(describeStranded({verdict: "elsewhere", empty: false, paths: ["a.tsx", "b.tsx"], generation: "G1", reason: "no-ledger"}).join("\n"), /· a\.tsx/);
     // 목록이 비었으면 **「걸려 있습니다」를 단정하지 않는다** — 못 읽은 것과 없는 것을 안 뭉친다.
-    const unknown = describeStranded({verdict: "elsewhere", empty: false, paths: [], reason: "server-unreadable"}).join("\n");
+    const unknown = describeStranded({verdict: "elsewhere", empty: false, paths: [], generation: "G1", reason: "server-unreadable"}).join("\n");
     match(unknown, /확인하지 못했습니다/);
     ok(!unknown.includes("걸려 있습니다."), `목록도 없이 단정했다:\n${unknown}`);
 });
 
 test("경로를 전량 나열하지 않는다", () => {
     const many = Array.from({length: 25}, (_, i) => `f${i}.tsx`);
-    match(describeStranded({verdict: "mine", empty: false, paths: many, reason: "ledger-matches"}).join("\n"), /외 15개/);
+    match(describeStranded({verdict: "mine", empty: false, paths: many, generation: "G1", reason: "ledger-matches"}).join("\n"), /외 15개/);
 });
 
 test("🔴 버리기 문구는 **한 글자가 아니다**", () => {
