@@ -442,3 +442,18 @@ test("그 판에 있는 폴더는 아무것도 신고하지 않는다 — 조임
     const result = await rebuildBaseline({api: fakeApi(payload), folder: dir, fetchImpl: serve(payload)} as never);
     deepEqual(result.differing, []);
 });
+
+test("🔴 `baseline` 도 배제 목록을 지난다 — 안 지나면 다음 push 가 그것들을 **삭제로** 내보낸다", async () => {
+    // 심의 실측: 만진 것 0개인데 `removed: 2`. 우리가 안 보는 경로가 장부에만 실려, 작업본에
+    // 없으니 「내가 지웠다」로 판정됐다. 같은 비대칭을 `pull` 에서 🔴 로 고쳤는데 이 동사에만 남았다.
+    const dir = await site({"a.tsx": "가"});
+    const payload = tarGz({
+        "a.tsx": "가",
+        ".env.example/keys.txt": "AWS=x",
+        "apps/web/node_modules/left-pad/index.js": "x",
+    });
+    const result = await rebuildBaseline({api: fakeApi(payload), folder: dir, fetchImpl: serve(payload)} as never);
+    strictEqual(result.files, 1, "배제 경로가 장부에 실렸다");
+    deepEqual(result.serverExcluded, [".env.example/keys.txt", "apps/web/node_modules/left-pad/index.js"]);
+    deepEqual(Object.keys((await readLedger(dir))?.files ?? {}), ["a.tsx"]);
+});

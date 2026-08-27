@@ -5,7 +5,7 @@
  * ⚠ **경로를 전량 나열하지 않는다** — 건수 + 최대 10경로 + 「외 N개」. 전량은 `--verbose`.
  * ⚠ **사실만 적고 끊지 않는다** — 다음에 할 일이 문장 안에 있어야 한다.
  */
-import {PATH_LIST_CAP, trimPaths, type SyncStatus} from "@zalkera/devtools-core";
+import {PATH_LIST_CAP, trimPaths, type PushResult, type SyncStatus} from "@zalkera/devtools-core";
 
 /**
  * ⚠ **자르는 판정을 여기 두지 않는다.** 거절 문면은 코어가 만들고 이 파일은 상태 보고를 만드는데,
@@ -89,3 +89,48 @@ const BLOCKER_TEXT: Record<SyncStatus["blockers"][number], string> = {
     STRANDED:
         "사이트 쪽에서 편집 중이던 것이 지금 판 위가 아닙니다. 그대로는 켤 수 없습니다.\n지금은 콘솔에서 그 편집을 되돌려 주세요. 되돌리면 이 폴더로 다시 받을 수 있습니다.",
 };
+
+/**
+ * 올리기 결과를 사람의 문장으로.
+ *
+ * 🔴 **이 조립에 시험이 없던 것이 결함의 원인이었다**(심의 지적). `main.ts` 안에 인라인으로 있어
+ *    프로세스를 띄우지 않으면 못 쟀고, 그래서 「다시 보냈습니다」가 요청 0회에 찍히고 「같습니다」
+ *    밑에 「빼고 보냈습니다」가 붙는 모순이 두 회전을 살아남았다. 순수 함수로 뽑아 잰다.
+ *
+ * ⚠ **판정을 행동으로 옮겨 적지 않는다.** 화해 판정과 실제 전송은 별개다 — 요청이 0번 나가는
+ *   갈래가 둘 있다.
+ */
+export function describePush(result: PushResult, verbose = false): string[] {
+    const lines: string[] = [];
+    if (result.reconciled === "applied") {
+        lines.push("지난번에 올린 것이 사이트 쪽에 들어가 있었습니다. 그것으로 정리했습니다.");
+    } else if (result.reconciled === "not-applied") {
+        lines.push("지난번에 올린 것이 사이트 쪽에 없었습니다.");
+    }
+
+    // ⚠ **「같습니다」는 뺀 것이 없을 때만 말한다.** 뺀 것이 있으면 폴더와 사이트는 다르다 —
+    //    따로 찍으면 「같습니다」 바로 밑에 「N개를 빼고 보냈습니다」가 온다.
+    lines.push(
+        result.sent > 0
+            ? `${result.sent}개를 올렸습니다(그중 지운 것 ${result.removed}개).`
+            : result.droppedByServer.length > 0
+              ? "올린 것이 없습니다 — 달라진 것이 모두 사이트가 받지 않는 경로였습니다."
+              : "올릴 것이 없습니다 — 이 폴더의 내용이 사이트 쪽과 같습니다.",
+    );
+
+    if (result.retriedAfterConflict) {
+        lines.push("올리는 사이에 사이트 쪽이 달라져 다시 읽고 한 번 더 보냈습니다.");
+    }
+    if (result.droppedByServer.length > 0) {
+        lines.push(
+            `사이트가 받지 않는 경로 ${result.droppedByServer.length}개는 빼고 보냈습니다.`,
+            ...trimPaths(result.droppedByServer, PATH_LIST_CAP, verbose).map((p) => `  · ${p}`),
+        );
+    }
+    if (result.previewUrl) lines.push(`미리보기: ${result.previewUrl}`);
+    if (result.warning) lines.push(result.warning);
+    // ⚠ **올린 것이 있을 때만 「안 켜졌다」를 말한다.** 안 말하면 사장님이 사이트를 보고
+    //   뭐가 잘못됐냐고 물을 곳이 없다.
+    if (result.sent > 0) lines.push("아직 사이트에 켜지지는 않았습니다 — 켜려면 콘솔에서 발행해 주세요.");
+    return lines;
+}

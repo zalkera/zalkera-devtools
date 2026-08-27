@@ -1,7 +1,7 @@
 import {match, ok, strictEqual} from "node:assert/strict";
 import {test} from "node:test";
-import {SYNC_LEDGER_FORMAT, syncStatus, type SyncLedger} from "@zalkera/devtools-core";
-import {describeStatus} from "./report.ts";
+import {SYNC_LEDGER_FORMAT, syncStatus, type PushResult, type SyncLedger} from "@zalkera/devtools-core";
+import {describePush, describeStatus} from "./report.ts";
 
 const ledger = (over: Partial<SyncLedger> = {}): SyncLedger => ({
     format: SYNC_LEDGER_FORMAT,
@@ -71,4 +71,52 @@ test("`--verbose` 면 전부 보여 준다", () => {
     );
     ok(!out.includes("외 "), out);
     strictEqual(out.split("\n").filter((line) => line.startsWith("  · ")).length, 25);
+});
+
+// ── 올리기 보고 ─────────────────────────────────────────────────────────────────
+
+const pushed = (over: Partial<PushResult> = {}): PushResult => ({
+    sent: 0,
+    removed: 0,
+    generation: null,
+    droppedByServer: [],
+    retriedAfterConflict: false,
+    reconciled: null,
+    previewUrl: null,
+    warning: null,
+    ...over,
+});
+
+test("🔴 「같습니다」와 「빼고 보냈습니다」가 함께 찍히지 않는다", () => {
+    const out = describePush(pushed({sent: 0, droppedByServer: ["dist/x.js"]})).join("\n");
+    ok(!out.includes("사이트 쪽과 같습니다"), `모순된 두 줄이 함께 찍혔다:\n${out}`);
+    match(out, /빼고 보냈습니다/);
+});
+
+test("🔴 「다시 보냈습니다」라고 **행동으로** 적지 않는다 — 요청이 0번 나가는 갈래가 있다", () => {
+    const out = describePush(pushed({reconciled: "not-applied", sent: 0})).join("\n");
+    ok(!/다시 보냈습니다/.test(out), `안 보냈는데 보냈다고 적었다:\n${out}`);
+    match(out, /사이트 쪽에 없었습니다/);
+});
+
+test("🔴 올린 것이 있을 때만 «아직 안 켜졌다»를 말한다", () => {
+    match(describePush(pushed({sent: 2, removed: 1})).join("\n"), /켜지지는 않았습니다/);
+    ok(!describePush(pushed({sent: 0})).join("\n").includes("켜지지는"), "안 올렸는데 발행하라고 한다");
+});
+
+test("🔴 두 번째 요청이 안 나간 갈래에서 「다시 보냈습니다」라고 안 한다", () => {
+    // `retriedAfterConflict` 는 **보낸 뒤에만** 참이 된다 — 그 계약을 문면 쪽에서도 못박는다.
+    const out = describePush(pushed({sent: 0, retriedAfterConflict: false})).join("\n");
+    ok(!out.includes("한 번 더 보냈습니다"), out);
+});
+
+test("경로를 전량 나열하지 않는다 · `--verbose` 면 전부", () => {
+    const many = Array.from({length: 25}, (_, i) => `f${i}.tsx`);
+    match(describePush(pushed({sent: 1, droppedByServer: many})).join("\n"), /외 15개/);
+    ok(!describePush(pushed({sent: 1, droppedByServer: many}), true).join("\n").includes("외 "));
+});
+
+test("화해 결과를 사실로 적는다", () => {
+    match(describePush(pushed({reconciled: "applied"})).join("\n"), /들어가 있었습니다/);
+    strictEqual(describePush(pushed({reconciled: null}))[0], "올릴 것이 없습니다 — 이 폴더의 내용이 사이트 쪽과 같습니다.");
 });

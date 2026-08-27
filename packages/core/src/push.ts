@@ -3,8 +3,11 @@
  *
  * ■ 순서가 계약이다
  *
- * ⑴ 장부를 읽는다 → ⑵ **서버 편집을 조회한다** → ⑶ 작업본을 해시한다 → ⑷ 무엇을 보낼지 정한다 →
- * ⑸ **한 번의 배치 요청** → ⑹ 장부를 갱신한다.
+ * ⑴ 장부를 읽는다 → ⑵ **서버 편집을 조회한다** → ⑶ **켜진 판을 조회한다** → ⑷ 작업본을 해시한다 →
+ * ⑸ 무엇을 보낼지 정한다 → ⑹ **한 번의 배치 요청** → ⑺ 장부를 갱신한다.
+ *
+ * ⚠ ⑶도 **못 하면 올리지 않는다.** 기준 판은 모든 선행조건의 바탕이라, 그것이 지금 것인지 모르는
+ *   채 보내면 낡은 매니페스트 위에서 계산한 값을 보내게 된다.
  *
  * ⚠ **⑵를 못 하면 올리지 않는다.** 장부로 폴백하는 순간 🔴1 이 되살아난다 — 남이 콘솔에서 되돌린
  *   뒤에도 「이미 반영됨」이라 답하는 거짓 성공이다. 선행조건의 정본은 **서버 조회**다.
@@ -70,6 +73,16 @@ export const MAX_PUSH_ENTRIES = 500;
  *   거짓이 된다(실측: 배제 + 선행조건이 겹쳐 세 번 나갔다).
  */
 export const MAX_PUSH_ATTEMPTS = 3;
+
+/**
+ * 서버가 「이 경로는 담기지 않는다」고 답할 때의 코드. 그 경로만 빼고 다시 보내면 된다.
+ *
+ * ⚠ 값을 옮겨 적은 것이다 — 정본은 백엔드 `SourcePathQuery.RejectedException.PATH_NOT_ACCEPTED` 다.
+ *   갈리면 CLI 가 배제를 경합으로 읽어 **재시도가 수렴을 못 한다.**
+ */
+const PATH_NOT_ACCEPTED = "SOURCE_PATH_NOT_ACCEPTED";
+/** 편집의 모양이 지금 상태와 안 맞는다(경합) — **다시 읽고 재계산**해야 한다. 빼면 안 된다. */
+const SHAPE_STALE = "SOURCE_EDIT_SHAPE_STALE";
 
 /** 서버가 준 미리보기 주소의 표시 상한. 주소가 이보다 길면 그것은 주소가 아니라 다른 것이다. */
 const MAX_PREVIEW_URL = 2048;
@@ -157,7 +170,9 @@ export async function pushSiteSource(options: PushOptions): Promise<PushResult> 
     // ⚠ **세대가 갈렸으면 `mine` 을 안 넘긴다.** 지난 세계의 기록이라 소유를 증언할 수 없다
     //    (형제 `syncStatus` 의 `mineValid` 와 같은 규칙 — 규칙이 둘이면 한쪽만 조여진다).
     const owned = ownedBy(ledger, draft);
-    if (active > ledger.base.revisionNo) {
+    // ⚠ **`>` 가 아니라 `!==` 다.** 되돌리기도 움직임이다 — 콘솔에서 5판으로 되돌리면 이 폴더는
+    //    7판인데 가드가 안 서고 「사이트 쪽과 같습니다」가 나갔다(심의 실측).
+    if (active !== ledger.base.revisionNo) {
         // ⚠ **작업본을 본 뒤에 던진다.** 「`pull` 을 먼저」라고만 말하면 그 `pull` 이 로컬 변경 때문에
         //   또 거절하고, 그 거절은 「`push` 를 먼저」라고 답한다 — **두 문이 서로를 가리켜 사람이
         //   갇힌다**(실측). 출구를 대려면 이 폴더에 고친 것이 있는지 알아야 한다.
@@ -183,7 +198,7 @@ export async function pushSiteSource(options: PushOptions): Promise<PushResult> 
             retriedAfterConflict: false,
             reconciled,
             previewUrl: null,
-            warning: written ? null : LEDGER_WRITE_FAILED,
+            warning: written ? null : ledgerWriteFailed(0),
         };
     }
 
@@ -210,8 +225,10 @@ export async function pushSiteSource(options: PushOptions): Promise<PushResult> 
             //    `ledger.server !== null` 에서 곧바로 되돌아간다 — 문은 있는데 못 부른다(심의 실측).
             const attempted: Record<string, string | null> = {};
             for (const edit of plan.edits) attempted[edit.path] = edit.sha256;
-            await writeLedger(root, {...ledger, server: null, mine: attempted});
-            throw responseLost(sent.error!);
+            // ⚠ **쓰기 실패를 본다.** 못 쓰면 지난 세대가 남아 다음 실행의 화해가 진입도 못 하는데,
+            //    안내는 「다시 실행하면 정리합니다」라고 약속한다 — 그 약속이 거짓이 된다(심의 실측).
+            const noted = await writeLedger(root, {...ledger, server: null, mine: attempted});
+            throw responseLost(sent.error!, noted);
         }
 
         // ⚠ **상한이 두 군데다 — 일부러 그렇다.** 반복 조건이 경계이고, 이 줄은 **마지막 회전에서
@@ -258,7 +275,7 @@ export async function pushSiteSource(options: PushOptions): Promise<PushResult> 
                     retriedAfterConflict: false,
                     reconciled,
                     previewUrl: null,
-                    warning: written ? null : LEDGER_WRITE_FAILED,
+                    warning: written ? null : ledgerWriteFailed(0),
                 };
             }
             retried = true;
@@ -288,12 +305,20 @@ export async function pushSiteSource(options: PushOptions): Promise<PushResult> 
         retriedAfterConflict: retried,
         reconciled,
         previewUrl: sent.previewUrl,
-        warning: written ? sent.warning : LEDGER_WRITE_FAILED,
+        warning: written ? sent.warning : ledgerWriteFailed(plan.edits.length),
     };
 }
 
-const LEDGER_WRITE_FAILED =
-    "올린 것은 사이트 쪽에 반영됐지만 이 폴더의 기준 기록을 쓰지 못했습니다. `zalkera baseline` 을 한 번 실행해 주세요.";
+/**
+ * 장부를 못 썼을 때의 문면.
+ *
+ * ⚠ **올린 것이 있을 때만 「반영됐지만」이라 말한다.** 조기 반환 갈래는 `sent: 0` 이라 그 말이
+ *   거짓이 된다 — 종전에는 「올릴 것이 없습니다」 바로 밑에 「올린 것은 반영됐지만」이 붙었다(심의 실측).
+ */
+const ledgerWriteFailed = (sent: number) =>
+    sent > 0
+        ? "올린 것은 사이트 쪽에 반영됐지만 이 폴더의 기준 기록을 쓰지 못했습니다. `zalkera baseline` 을 한 번 실행해 주세요."
+        : "이 폴더의 기준 기록을 쓰지 못했습니다. `zalkera baseline` 을 한 번 실행해 주세요.";
 
 /** 서버 편집 조회. **못 읽으면 올리지 않는다.** */
 async function readDraft(api: ZalkeraApi): Promise<DraftFiles> {
@@ -330,26 +355,28 @@ function ownedBy(ledger: SyncLedger, draft: DraftFiles): Record<string, string |
 
 /** 지금 켜진 판. **못 읽으면 던진다** — 「모른다」를 「같다」로 바꾸지 않는다. */
 async function activeRevisionNo(api: ZalkeraApi): Promise<number> {
-    const rows = await api.listRevisions(REVISION_SCAN).catch(() => null);
-    const active = rows?.find((row) => row.isActive)?.revisionNo;
-    if (active === undefined) {
+    // ⚠ **상한을 걸지 않는다.** 형제 `fetchSource` 도 안 건다. 걸면 되돌리기 뒤에 새 판이 여럿
+    //   쌓였을 때 **활성이 창 밖으로 밀려** 영구히 못 올리게 된다(심의 실측).
+    const rows = await api.listRevisions().catch(() => null);
+    if (rows === null) {
         throw new DevtoolsError(
             "SERVER_UNREADABLE_DRAFT",
             "지금 사이트에 켜져 있는 버전을 확인하지 못해 아무것도 올리지 않았습니다.",
-            "잠시 뒤 다시 시도해 주세요.",
+            "잠시 뒤 다시 시도해 주세요. 계속 그러면 이 계정에 버전 목록을 볼 권한이 있는지 확인해 주세요.",
+        );
+    }
+    const active = rows.find((row) => row.isActive)?.revisionNo;
+    if (active === undefined) {
+        // 서버는 답했는데 켜진 판이 없다 — 「잠시 뒤 다시」가 거짓인 상태다.
+        throw new DevtoolsError(
+            "SERVER_UNREADABLE_DRAFT",
+            "이 사이트에 켜져 있는 버전이 없습니다.",
+            "콘솔에서 어떤 버전을 켤지 먼저 정해 주세요. 그 전에는 무엇 위에 얹는 것인지 알 수 없어 올리지 않습니다.",
         );
     }
     return active;
 }
 
-/**
- * 활성 판을 찾으려고 훑는 목록 길이.
- *
- * ⚠ 활성 판이 **목록 밖**일 수 있다: 되돌리기로 옛 판을 켜 두고 그 위로 새 판을 여럿 발행하면
- *   활성이 뒤로 밀린다. 그때 [activeRevisionNo] 는 못 찾고 **거절**한다 — 못 찾은 것을
- *   「안 움직였다」로 읽지 않는 쪽이 안전하다(그 거절의 문면이 「잠시 뒤 다시」라 사람을 가두지도 않는다).
- */
-const REVISION_SCAN = 50;
 
 /**
  * 지난 실행의 **응답 유실을 화해한다**(§2.3).
@@ -407,9 +434,10 @@ function requireWithinLimits(edits: readonly PushEdit[]): void {
  * ⚠ 재시도 판정을 여기 두면 상한이 자리마다 달라진다([MAX_PUSH_ATTEMPTS]).
  *
  * ⚠ **던지는 자리는 있다.** 다시 보내도 결과가 같을 것들이다:
- *   ⑴ [bodyOf] 의 크기 상한·이진 파일 거절 ⑵ `DevtoolsError` 가 아닌 예외
- *   ⑶ **응답 유실**(`SERVER_UNREACHABLE`) — 이것은 거절이 아니라 「모름」이라 재시도하면 같은 편집을
- *      두 번 얹을 수 있다. 끝내고 다음 실행이 화해한다([reconcile]).
+ *   ⑴ [bodyOf] 의 크기 상한·이진 파일 거절·서식 비밀 거절 ⑵ `DevtoolsError` 가 아닌 예외
+ *
+ * ⚠ **응답 유실은 던지지 않는다** — `kind: "lost"` 로 돌려준다. 여기서 던지면 부르는 쪽이 장부에
+ *   「모름」을 못 적고, 그러면 다음 실행의 화해가 아예 진입하지 못한다(그 결함을 실제로 겪었다).
  */
 async function attempt(
     api: ZalkeraApi,
@@ -438,10 +466,13 @@ async function attempt(
         if (error.code === "SERVER_UNREACHABLE") {
             return {kind: "lost", error, rejectedPaths: [], generation: null, previewUrl: null, warning: null};
         }
+        // ⚠ **사유를 서버 코드로 가른다.** 종전에는 「경로가 실려 왔는가」로 갈랐는데, 경합
+        //    (「기준 해시를 안 줬다」)도 경로를 싣는다 — 그것을 「배제」로 읽으면 그 파일이
+        //    **조용히 빠진 채** 「올렸습니다」가 나간다(심의 실측).
         const kind =
-            error.serverCode === "DRAFT_PRECONDITION_FAILED"
+            error.serverCode === "DRAFT_PRECONDITION_FAILED" || error.serverCode === SHAPE_STALE
                 ? "conflict"
-                : error.serverCode === "INVALID_INPUT_VALUE" && error.paths.length > 0
+                : error.serverCode === PATH_NOT_ACCEPTED && error.paths.length > 0
                   ? "excluded"
                   : "other";
         if (kind === "conflict" && error.paths.length > 0) {
@@ -542,11 +573,13 @@ function tooLarge(): DevtoolsError {
     );
 }
 
-function responseLost(cause: DevtoolsError): DevtoolsError {
+function responseLost(cause: DevtoolsError, noted: boolean): DevtoolsError {
     return new DevtoolsError(
         "PUSH_RESPONSE_LOST",
         "올렸는지 확인하지 못했습니다.",
-        "콘솔의 「편집 중」에서 지금 걸려 있는 내용을 먼저 봐 주세요. 다음에 다시 실행하면 이 도구가 사이트 쪽과 대조해 정리합니다.",
+        noted
+            ? "콘솔의 「편집 중」에서 지금 걸려 있는 내용을 먼저 봐 주세요. 다음에 다시 실행하면 이 도구가 사이트 쪽과 대조해 정리합니다."
+            : "콘솔의 「편집 중」에서 지금 걸려 있는 내용을 봐 주세요. 이 폴더의 기준 기록을 쓰지 못해 다음 실행이 자동으로 정리하지는 못합니다.",
         cause,
     );
 }

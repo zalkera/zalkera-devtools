@@ -28,7 +28,7 @@ import {join, resolve} from "node:path";
 import type {ZalkeraApi} from "./api.ts";
 import {DevtoolsError} from "./errors.ts";
 import {fetchVerifiedSourceTar} from "./fetchSource.ts";
-import {writeLedger} from "./pull.ts";
+import {withoutExcluded, writeLedger} from "./pull.ts";
 import {MAX_EXTRACT_BYTES} from "./limits.ts";
 import {
     SYNC_LEDGER_FORMAT,
@@ -62,6 +62,11 @@ export interface BaselineResult {
      * 부르는 쪽은 이것을 **말해야 한다.**
      */
     differing: string[];
+    /**
+     * 판이 담고 있지만 **우리가 안 보는** 경로들. 비어 있는 것이 정상이다 — 비지 않으면 정본에
+     * 실리면 안 될 것이 실린 것이므로 부르는 쪽이 말한다(형제 `pull` 과 같은 규율).
+     */
+    serverExcluded: string[];
 }
 
 /** 장부를 판에서 다시 세운다. 작업본은 **읽지도 쓰지도 않는다.** */
@@ -79,7 +84,13 @@ export async function rebuildBaseline(options: BaselineOptions): Promise<Baselin
         onProgress: report,
         fetchImpl: options.fetchImpl,
     });
-    const manifest = await readTarGzManifest(tar.buffer, {maxBytes: MAX_EXTRACT_BYTES});
+    // 🔴 **받을 매니페스트도 배제 목록을 지난다** — `pull` 과 같은 문이다. 안 지나면 우리가 안 보는
+    //    경로(`.env*`·`node_modules/…`)가 장부에 실리고, 작업본에는 없으니 다음 `push` 가 그것들을
+    //    **삭제로 내보낸다**(심의 실측: 만진 것 0개인데 `removed: 2`). 같은 비대칭을 `pull` 에서
+    //    🔴 로 고쳤는데 이 동사에만 남아 있었다.
+    const {incoming: manifest, dropped} = withoutExcluded(
+        await readTarGzManifest(tar.buffer, {maxBytes: MAX_EXTRACT_BYTES}),
+    );
 
     // 세대는 **다시 묻는다.** 옛 장부의 값을 물려받으면 이미 지난 세대를 지금 값이라 믿는다.
     const generation = await options.api
@@ -126,5 +137,6 @@ export async function rebuildBaseline(options: BaselineOptions): Promise<Baselin
         files: Object.keys(manifest).length,
         replaced: previous !== null,
         differing,
+        serverExcluded: dropped,
     };
 }

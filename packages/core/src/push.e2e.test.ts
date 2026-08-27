@@ -77,6 +77,10 @@ async function site(files: Record<string, string>, ledgerOver: Partial<SyncLedge
 
 const rejected = (code: string, paths: string[]) =>
     new DevtoolsError("SERVER_REJECTED", "거절", undefined, undefined, code, paths);
+/** 백엔드 `SourcePathQuery.RejectedException.PATH_NOT_ACCEPTED` — 「이 경로는 담기지 않는다」. */
+const NOT_ACCEPTED = "SOURCE_PATH_NOT_ACCEPTED";
+/** 백엔드 `…EDIT_SHAPE_STALE` — 경합이다. 빼면 안 되고 다시 읽어야 한다. */
+const SHAPE_STALE = "SOURCE_EDIT_SHAPE_STALE";
 
 test("고친 것을 **한 요청**으로 보낸다 — 나누면 반쪽이 원장에 선다", async () => {
     const s = server();
@@ -194,7 +198,7 @@ test("🔴 응답 유실 뒤 사실은 **안 들어갔으면** 다시 보낸다"
 
 test("🔴 배제 경로는 **그것만 빼고** 다시 보내고 **말한다**", async () => {
     // `.env` 는 우리 배제망에 걸려 계획에 안 들어온다 — 서버만 아는 경로(생성물)로 재현한다.
-    const s = server({replies: [{throw: rejected("INVALID_INPUT_VALUE", ["dist/x.js"])}, {generation: "G2"}]});
+    const s = server({replies: [{throw: rejected(NOT_ACCEPTED, ["dist/x.js"])}, {generation: "G2"}]});
     const dir = await site({"dist/x.js": "생성물", "a.tsx": "새것"}, {
         files: {"a.tsx": {sha256: sha("옛것"), bytes: 3}, "dist/x.js": {sha256: sha("옛"), bytes: 3}},
     });
@@ -207,8 +211,8 @@ test("🔴 배제 경로는 **그것만 빼고** 다시 보내고 **말한다**"
 test("🔴 배제 재시도는 **한 번**이다 — 또 거절되면 던진다", async () => {
     const s = server({
         replies: [
-            {throw: rejected("INVALID_INPUT_VALUE", ["dist/x.js"])},
-            {throw: rejected("INVALID_INPUT_VALUE", ["a.tsx"])},
+            {throw: rejected(NOT_ACCEPTED, ["dist/x.js"])},
+            {throw: rejected(NOT_ACCEPTED, ["a.tsx"])},
         ],
     });
     const dir = await site({"dist/x.js": "가", "a.tsx": "나"}, {
@@ -479,7 +483,7 @@ test("🔴 요청 총량이 상한 안이다 — 사유가 겹쳐도 갈래마�
     const s = server({
         replies: Array.from({length: 10}, (_, i) =>
             i % 2 === 0
-                ? {throw: rejected("INVALID_INPUT_VALUE", ["dist/x.js"])}
+                ? {throw: rejected(NOT_ACCEPTED, ["dist/x.js"])}
                 : {throw: rejected("DRAFT_PRECONDITION_FAILED", ["a.tsx"])},
         ),
     });
@@ -496,12 +500,12 @@ test("🔴 요청 총량이 상한 안이다 — 사유가 겹쳐도 갈래마�
 
 test("🔴 서버가 **우리 계획에 없는** 경로를 대면 그것을 보고하지 않는다", async () => {
     // 실측: `../../etc/passwd` 가 「우리가 뺀 경로」 목록에 그대로 떴다. 우리 출력이 남의 글이 된다.
-    const s = server({replies: [{throw: rejected("INVALID_INPUT_VALUE", ["../../etc/passwd", "없는것.tsx"])}]});
+    const s = server({replies: [{throw: rejected(NOT_ACCEPTED, ["../../etc/passwd", "없는것.tsx"])}]});
     const dir = await site({"a.tsx": "새것"}, {files: {"a.tsx": {sha256: sha("옛것"), bytes: 3}}});
     await rejects(() => pushSiteSource({api: s.api, folder: dir}), (e: unknown) => {
         ok(e instanceof DevtoolsError);
         // 서버의 원래 거절을 그대로 올린다 — 「우리가 뺐다」로 위장하지 않는다.
-        strictEqual(e.serverCode, "INVALID_INPUT_VALUE");
+        strictEqual(e.serverCode, NOT_ACCEPTED);
         return true;
     });
     strictEqual(s.seen.length, 1, "짚어 준 경로가 하나도 우리 것이 아닌데 다시 보냈다");
@@ -509,7 +513,7 @@ test("🔴 서버가 **우리 계획에 없는** 경로를 대면 그것을 보�
 
 test("서버가 **일부만** 우리 것을 대면 그것만 빼고 보낸다", async () => {
     const s = server({
-        replies: [{throw: rejected("INVALID_INPUT_VALUE", ["dist/x.js", "../남의것"])}, {generation: "G2"}],
+        replies: [{throw: rejected(NOT_ACCEPTED, ["dist/x.js", "../남의것"])}, {generation: "G2"}],
     });
     const dir = await site({"dist/x.js": "가", "a.tsx": "나"}, {
         files: {"dist/x.js": {sha256: sha("옛"), bytes: 1}, "a.tsx": {sha256: sha("옛"), bytes: 1}},
@@ -790,4 +794,66 @@ test("세대가 같으면 증언이 선다", async () => {
         mine: {"a.tsx": "내가-올린것"},
     });
     strictEqual((await pushSiteSource({api: s.api, folder: dir})).sent, 1);
+});
+
+test("🔴 «모양이 안 맞는다」는 배제가 아니다 — 빼면 그 파일이 조용히 안 올라간다", async () => {
+    // 심의 실측: 경합(「기준 해시를 안 줬다」)도 경로를 싣는데, 그것을 「배제」로 읽어
+    // 그 파일을 빼고 「올렸습니다」를 찍었다. 사유가 다르면 처분도 다르다.
+    let reads = 0;
+    const seen: unknown[] = [];
+    const api = {
+        tenantCode: () => "acme",
+        listRevisions: async () => [{revisionNo: 7, status: "READY", isActive: true}],
+        draftFiles: async () => {
+            reads += 1;
+            return reads === 1
+                ? {generation: null, changed: [], deleted: [], baseRevisionNo: null, strandedOnOldRevision: false}
+                : {
+                      generation: "G2",
+                      changed: [{path: "새것.tsx", sha256: "남이-만듦"}],
+                      deleted: [],
+                      baseRevisionNo: 7,
+                      strandedOnOldRevision: false,
+                  };
+        },
+        editDraft: async (e: unknown) => {
+            seen.push(e);
+            if (seen.length === 1) throw rejected(SHAPE_STALE, ["새것.tsx"]);
+            return {generation: "G3", files: [], warning: null, previewUrl: null};
+        },
+    } as never;
+    const dir = await site({"새것.tsx": "내가-만듦"}, {});
+    // 재계산하니 남이 그 경로를 만들어 뒀다 → 안 본 편집이므로 거절이 옳다.
+    await rejects(() => pushSiteSource({api, folder: dir}), (e: unknown) => {
+        ok(e instanceof DevtoolsError);
+        strictEqual(e.code, "PUSH_WOULD_REVERT", `경합을 배제로 읽었다: ${(e as DevtoolsError).code}`);
+        return true;
+    });
+    strictEqual(seen.length, 1, "경합인데 빼고 다시 보냈다");
+});
+
+test("🔴 판이 **되돌아가도** 멈춘다 — 되돌리기도 움직임이다", async () => {
+    // 심의 실측: 가드가 `>` 라 7판 폴더 + 5판 활성이 그대로 통과하고
+    // 「이 폴더의 내용이 사이트 쪽과 같습니다」가 나갔다.
+    const s = server({activeRevisionNo: 5});
+    const dir = await site({"a.tsx": "판7"}, {files: {"a.tsx": {sha256: sha("판7"), bytes: 3}}});
+    await rejects(() => pushSiteSource({api: s.api, folder: dir}), (e: unknown) => {
+        ok(e instanceof DevtoolsError);
+        strictEqual(e.code, "PUSH_BASE_MOVED");
+        return true;
+    });
+    strictEqual(s.seen.length, 0);
+});
+
+test("🔴 켜진 판이 하나도 없으면 「잠시 뒤 다시」라고 하지 않는다 — 그 말이 거짓인 상태다", async () => {
+    const s = server({activeRevisionNo: -1});
+    const api = {...(s.api as unknown as Record<string, unknown>),
+        listRevisions: async () => [{revisionNo: 9, status: "FAILED", isActive: false}]} as never;
+    const dir = await site({"a.tsx": "가"}, {files: {"a.tsx": {sha256: sha("옛"), bytes: 1}}});
+    await rejects(() => pushSiteSource({api, folder: dir}), (e: unknown) => {
+        ok(e instanceof DevtoolsError);
+        match(e.message, /켜져 있는 버전이 없습니다/);
+        match(e.humanMessage, /콘솔에서 어떤 버전을 켤지/, "다음 걸음을 안 알려 준다");
+        return true;
+    });
 });

@@ -298,7 +298,7 @@ async function requireNoLinkedTargets(root: string, paths: readonly string[]): P
  * ⚠ **조용히 빼지 않는다** — 뺀 건수를 돌려주고 부르는 쪽이 말한다(`zip.ts` 가 세운 원칙과 같다).
  *   정본 tar 에 이것들이 실려 오는 것 자체가 서버 쪽 결함 신호다.
  */
-function withoutExcluded(declared: Readonly<Record<string, {sha256: string; bytes: number}>>): {
+export function withoutExcluded(declared: Readonly<Record<string, {sha256: string; bytes: number}>>): {
     incoming: Record<string, {sha256: string; bytes: number}>;
     dropped: string[];
 } {
