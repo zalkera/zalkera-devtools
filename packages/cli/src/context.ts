@@ -113,21 +113,14 @@ export async function openContext(options: ContextOptions = {}): Promise<Context
 }
 
 /**
- * 이 도구의 판. 핸드셰이크가 이 값으로 「올려야 하는가」를 판정한다.
- *
- * ⚠ **값을 두 벌로 두지 않는다.** `package.json` 에서 읽는다 — 손으로 적으면 판을 올린 날
- *   핸드셰이크가 옛 판을 신고하고, 서버의 「올리세요」가 영영 안 뜬다. 못 읽으면 `0.0.0` 이다:
- *   버전을 못 읽었다고 도구가 죽으면 안 되고, 낮은 값이라 서버가 보수적으로 판정한다.
- */
-/**
  * 이 문에서 **어떻게** 업데이트하는가.
  *
- * ⚠ 확장은 편집기가 알아서 갱신하지만 여기는 사람이 명령을 쳐야 한다. 이 한 줄이 없으면
- *   최소판 게이트에 걸린 사람은 「업데이트한 뒤 다시 시도해 주세요」만 읽고 **나갈 길이 없다.**
+ * ⚠ 여기는 사람이 명령을 쳐야 한다. 이 한 줄이 없으면 최소판 게이트에 걸린 사람은
+ *   「업데이트한 뒤 다시 시도해 주세요」만 읽고 **나갈 길이 없다.**
  * ⚠ 두 길을 다 적는다 — `npx` 로 쓰는 사람과 전역 설치로 쓰는 사람이 나가는 문이 다르다.
  */
 export const UPGRADE_HOW =
-    "`npx zalkera@latest <명령>` 으로 부르거나, 전역 설치를 쓰신다면 `npm i -g zalkera@latest` 를 실행해 주세요.";
+    "`npx @zalkera/cli@latest <명령>` 으로 부르거나, 전역 설치를 쓰신다면 `npm i -g @zalkera/cli@latest` 를 실행해 주세요.";
 
 /**
  * 이 도구의 판. **서버의 최소판 게이트가 이 값으로 판정한다**(`fetchHandshake`).
@@ -147,7 +140,7 @@ export function version(): string {
         throw new DevtoolsError(
             "INSTALL_BROKEN",
             "이 도구의 설치가 온전하지 않습니다 — 자기 버전을 읽지 못했습니다.",
-            "`npm i -g zalkera@latest` 로 다시 설치하거나, `npx zalkera@latest <명령>` 으로 실행해 주세요.",
+            "`npm i -g @zalkera/cli@latest` 로 다시 설치하거나, `npx @zalkera/cli@latest <명령>` 으로 실행해 주세요.",
             error,
         );
     }
@@ -156,7 +149,7 @@ export function version(): string {
         throw new DevtoolsError(
             "INSTALL_BROKEN",
             "이 도구의 설치가 온전하지 않습니다 — 버전 표기가 비어 있습니다.",
-            "`npm i -g zalkera@latest` 로 다시 설치하거나, `npx zalkera@latest <명령>` 으로 실행해 주세요.",
+            "`npm i -g @zalkera/cli@latest` 로 다시 설치하거나, `npx @zalkera/cli@latest <명령>` 으로 실행해 주세요.",
         );
     }
     return declared;

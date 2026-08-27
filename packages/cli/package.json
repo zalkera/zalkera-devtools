@@ -1,6 +1,6 @@
 {
-    "name": "zalkera",
-    "version": "0.20.1",
+    "name": "@zalkera/cli",
+    "version": "0.20.2",
     "description": "잘커라 사이트 소스를 터미널에서 받고·올리고·발행합니다. 편집기 없이, 스크립트에서도.",
     "license": "MIT",
     "type": "module",

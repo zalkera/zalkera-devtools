@@ -71,13 +71,19 @@ npx vsce publish --packagePath dist/zalkera-devtools-<version>.vsix
 
 ```bash
 npm run pack:cli                                  # verify → 번들 → npm pack → 검수
-npm publish ./shared/zalkera-<version>.tgz        # 오너만
+npm publish ./shared/zalkera-cli-<version>.tgz    # 오너만
 ```
 
 ⚠ **판을 올릴 때마다 둘 다 발행한다.** 서버의 최소판 게이트는 **하나**다
 (`min-extension-version` · `check-version-lockstep.mjs` KDoc). 확장만 올리고 CLI 를 안 올리면,
 게이트가 새 판을 요구하는데 npm 최신은 옛 판이라 **CLI 사용자가 갇힌다** — 그들이 받는 안내는
 「업데이트하세요」인데 받을 새 판이 없다.
+
+⚠ **발행 계정 위생.** 이 이름은 `npm i -g` / `npx` 로 **남의 기계에서 실행되는 바이너리**다.
+토큰 하나가 그 전부에 닿으므로, 발행 계정은 **2FA(publish 단계까지)** 를 켜고 **발행 전용
+granular 토큰**을 쓴다. VSIX 는 마켓 서명이 있지만 npm 쪽에는 대응물이 없다 — 언젠가
+CI 신뢰 발행(OIDC · `publishConfig.provenance`)으로 옮기는 것이 정석이고, 그 전까지는 계정 위생이
+유일한 통제다.
 
 ⚠ **`npm pack` 을 직접 부르지 마라.** 그것은 지금 `dist/` 에 있는 것을 묻지 않고 담는다.
 `tsc` 조각이 남아 있으면 번들 대신 그것이 실려 고객 기계에서 `ERR_MODULE_NOT_FOUND` 가 난다.
@@ -87,7 +93,7 @@ npm publish ./shared/zalkera-<version>.tgz        # 오너만
 두 줄이면 포장은 성공하고 `node` 가 2행에서 `SyntaxError` 로 죽는다):
 
 ```bash
-npm i -g ./shared/zalkera-<version>.tgz && zalkera --version
+npm i -g ./shared/zalkera-cli-<version>.tgz && zalkera --version
 ```
 
 ---
@@ -157,8 +163,8 @@ code --install-extension zalkera.zalkera-devtools --force
 ```
 [ ] packages/vscode/package.json 의 version 을 올렸다
 [ ] packages/vscode/CHANGELOG.md 에 이번 판 항목을 적었다 (VSIX 안에 실려 마켓에 그대로 뜬다)
-[ ] **배송 문서 셋이 이번 변경을 담았다** — `packages/vscode/README.md`(마켓 개요 탭) ·
-    `doc/MANUAL.md`(고객 PDF) · `packages/vscode/media/help.md`. 고객이 보는 동작이 바뀌었는데
+[ ] **배송 문서 넷이 이번 변경을 담았다** — `packages/vscode/README.md`(마켓 개요 탭) ·
+    `doc/MANUAL.md`(고객 PDF) · `packages/vscode/media/help.md` · `packages/cli/README.md`(npm 개요 탭). 고객이 보는 동작이 바뀌었는데
     이 셋이 그대로면 **변경 기록에만 있고 설명하는 자리가 없다**
 [ ] npm run package  (verify 통과 + vsix 생성)
 [ ] 번들에 이번 변경이 들어갔는지 확인 — **문자열은 ASCII 로 escape 되어 실린다**(주석은 원문).
@@ -167,6 +173,9 @@ code --install-extension zalkera.zalkera-devtools --force
      print(b.count("".join(c if ord(c)<128 else "\\u%04X"%ord(c) for c in sys.argv[2])))' \
      packages/vscode/dist/extension.cjs '이미 게시됐습니다'`
 [ ] npx vsce publish --packagePath dist/…vsix   (오너)
+[ ] **CLI 도 같은 판으로** — `npm run pack:cli` → `npm publish ./shared/zalkera-cli-…tgz` (오너)
+    ⚠ 서버 최소판 게이트가 **하나**다. 한쪽만 올리면 다른 쪽 사용자가 「업데이트하세요」를 받는데
+    받을 새 판이 없다. `npm run package` 배너도 이 두 줄을 같이 찍는다
 [ ] v<version> 태그를 sha256 과 함께 찍고 push — **sha 는 마지막 포장 뒤에 파일에서 다시 읽는다.**
     포장을 한 번 더 돌리면 vsix sha 가 바뀌므로(zip 항목 순서), 먼저 적어 둔 값은 무효다
 [ ] 파일로 깔아 둔 사람이 있으면 마켓 경로로 다시 깔라고 안내 (§4)

@@ -22,7 +22,8 @@
  *   npm 자격증명이 필요하다. 이 스크립트는 굽고 멈춘다.
  */
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, cpSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, cpSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -43,7 +44,12 @@ if (manifest.version !== ext.version) {
 if (manifest.private) throw new Error("`private: true` 면 npm 이 발행을 거절한다 — 중단");
 
 // ── 1. 게이트 ───────────────────────────────────────────────────────────────
-if (!process.argv.includes("--skip-verify")) {
+// ⚠ **`--skip-verify` 는 CI 전용이다** — CI 는 바로 앞 단계에서 이미 verify 를 돌렸다.
+//   손으로 구울 때는 쓰지 마라(형제 `package-vsix.mjs` 가 같은 문에 같은 말을 적어 뒀다).
+//   그리고 **건넜다는 사실을 배너가 말한다** — 두 경로의 출력이 같으면 어느 쪽으로 구웠는지
+//   나중에 아무도 모른다.
+const skipped = process.argv.includes("--skip-verify");
+if (!skipped) {
     console.log("· npm run verify");
     execFileSync("npm", ["run", "verify"], { cwd: root, stdio: "inherit" });
 }
@@ -63,7 +69,12 @@ execFileSync("npm", ["pack", "--pack-destination", out], { cwd: cli, stdio: "inh
 // ── 3. 검수 ─────────────────────────────────────────────────────────────────
 // 이름을 매니페스트에서 조립한다 — 목록에서 「마지막 것」을 고르면 문자열 정렬이 0.1.10 을
 // 0.1.9 앞에 둔다(형제 스크립트가 같은 함정을 적어 뒀다).
-const made = join(out, `${manifest.name}-${manifest.version}.tgz`);
+//
+// ⚠ **스코프 패키지의 파일 이름은 패키지 이름과 다르다.** npm 은 `@` 를 떼고 `/` 를 `-` 로 바꿔
+//   `@zalkera/cli` → `zalkera-cli-<판>.tgz` 로 낸다. 이름을 그대로 쓰면 방금 구운 파일을
+//   「안 나왔다」고 보고한다(실측).
+const tarballName = `${manifest.name.replace(/^@/, "").replace(/\//g, "-")}-${manifest.version}.tgz`;
+const made = join(out, tarballName);
 if (!existsSync(made)) throw new Error(`탈볼이 안 나왔다: ${made} — 중단`);
 
 const listed = execFileSync("tar", ["tzf", made], { encoding: "utf8" })
@@ -93,15 +104,34 @@ const lines = bundle.split("\n");
 if (lines[0] !== "#!/usr/bin/env node") throw new Error(`1행이 shebang 이 아니다: ${lines[0]?.slice(0, 40)}`);
 if (lines.slice(1).some((l) => l.startsWith("#!"))) throw new Error("shebang 이 둘이다 — Node 가 2행에서 죽는다");
 
+// ⑸ **구운 것을 실제로 돌린다.** 위 넷은 전부 정적이라, 이 판이 고친 결함과 **같은 얼굴**의
+//    회귀(모듈 최상위에서 던지는 코드)가 넷을 전부 통과한다 — 굽기는 성공하고 사람이 설치해
+//    실행할 때에야 죽는다(심의 실측). 형제 `package-vsix.mjs` 도 같은 이유로 실행 축을 둔다.
+//
+// ⚠ **탈볼을 풀어서 돈다** — `packages/cli/dist` 를 직접 돌리면 `files` 가 빠뜨린 것을 못 잡는다.
+console.log("· 구운 것 실행");
+const probe = mkdtempSync(join(tmpdir(), "zalkera-pack-"));
+try {
+    execFileSync("tar", ["xzf", made, "-C", probe], { stdio: "inherit" });
+    const entry = join(probe, "package", "dist", "main.js");
+    const shown = execFileSync(process.execPath, [entry, "--version"], { encoding: "utf8" }).trim();
+    if (shown !== manifest.version) {
+        throw new Error(`구운 것이 답한 판이 다르다 — 매니페스트 ${manifest.version} · 실행 ${shown}`);
+    }
+} finally {
+    rmSync(probe, { recursive: true, force: true });
+}
+
 // 전달용 사본. `shared/` 는 손으로 건네는 자리다.
 const shared = join(root, "shared");
 mkdirSync(shared, { recursive: true });
 for (const old of readdirSync(shared).filter((f) => f.endsWith(".tgz"))) rmSync(join(shared, old));
-cpSync(made, join(shared, `${manifest.name}-${manifest.version}.tgz`));
+cpSync(made, join(shared, tarballName));
 
 console.log(`\n✅ ${made}`);
-console.log(`   항목 ${listed.length}개 · 자립 확인 · shebang 1개 · 판 ${manifest.version}`);
-console.log(`   사본: shared/${manifest.name}-${manifest.version}.tgz`);
+console.log(`   항목 ${listed.length}개 · 자립 확인 · shebang 1개 · 실행 확인 · 판 ${manifest.version}`);
+if (skipped) console.log("   ⚠ `--skip-verify` 로 구웠다 — 시험·검사기를 안 지났다. 발행 전에 `npm run verify` 를 돌리십시오.");
+console.log(`   사본: shared/${tarballName}`);
 console.log("");
-console.log(`   설치해 보기: npm i -g ./shared/${manifest.name}-${manifest.version}.tgz`);
-console.log(`   발행(오너):  npm publish ./shared/${manifest.name}-${manifest.version}.tgz`);
+console.log(`   설치해 보기: npm i -g ./shared/${tarballName}`);
+console.log(`   발행(오너):  npm publish ./shared/${tarballName}`);

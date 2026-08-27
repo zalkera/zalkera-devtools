@@ -29,7 +29,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join, relative } from "node:path";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-const ROOTS = ["packages/core/src", "packages/vscode/src"];
+const ROOTS = ["packages/core/src", "packages/vscode/src", "packages/cli/src"];
 
 function walk(dir) {
     return readdirSync(dir).flatMap((name) => {

@@ -28,7 +28,12 @@ import { dirname, join } from "node:path";
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 /** 사람이 확장 밖에서 읽는 문서. 마켓 개요·고객 PDF·동봉 매뉴얼. */
-const SHIPPED = ["packages/vscode/README.md", "doc/MANUAL.md", "packages/vscode/media/help.md"];
+const SHIPPED = ["packages/vscode/README.md",
+    "doc/MANUAL.md",
+    "packages/vscode/media/help.md",
+    // ⚠ **npm 페이지의 개요 탭이다.** `packages/cli/package.json` 의 `files` 가 이 파일을
+    //   담으므로 탈볼에 실려 나간다 — 그 순간 배송 문서가 됐는데 관할이 안 따라왔었다.
+    "packages/cli/README.md"];
 
 /** 폐기된 주장. 전부 「올리기 ≠ 배포」를 가르치던 문장이다. */
 const RETIRED = [

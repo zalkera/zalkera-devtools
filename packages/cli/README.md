@@ -1,24 +1,22 @@
-# zalkera
+# @zalkera/cli
 
 터미널에서 쓰는 길. VS Code 를 쓰지 않거나, 스크립트·CI 에서 돌릴 때를 위한 것이다.
 
 ```bash
-npx zalkera pull --site <사이트코드>     # 한 번만 쓸 때
-npm i -g zalkera && zalkera pull        # 자주 쓸 때
+npx @zalkera/cli pull --site <사이트코드>      # 한 번만 쓸 때
+npm i -g @zalkera/cli && zalkera pull         # 자주 쓸 때 (명령은 `zalkera`)
 ```
-
-> ⚠ **아직 npm 에 안 올라갔다.** 위 두 줄은 첫 발행 뒤에 선다. 그때까지는 구운 탈볼로 설치한다 —
-> `npm run pack:cli` 뒤 `npm i -g ./shared/zalkera-<version>.tgz`.
 
 > **상태: 한 바퀴가 돈다.** 받기 → 고치기 → 올리기 → 발행 → 되돌리기·버리기가 전부 선다.
 > 미리보기와 로컬 MCP 서버는 **아직 없다**.
 
 ⚠ **이것은 `import` 하는 패키지가 아니다.** 사이트 프로젝트의 의존으로 넣지 마라 — 사람이
-터미널에서 치는 명령이다. 소스가 `import` 하는 쪽은 `@zalkera/client` 이고 그것은 다른
-패키지다(스코프가 그 경계다 · `doc/DECISIONS.md`).
+터미널에서 치는 명령이다. 넣으면 그 `package.json` 이 사이트와 함께 올라가 **서버가 사이트를
+지을 때 이것까지 설치한다.** 소스가 `import` 하는 쪽은 `@zalkera/client` 이고 그것은 다른
+패키지다. (`zalkera doctor` 가 잘못 들어온 것을 짚어 준다.)
 
-⚠ **판이 확장과 묶여 있다.** 서버의 최소판 게이트가 하나라, 확장이 올라가면 이쪽도 같은 판으로
-올라간다. 게이트에 걸리면 `npx zalkera@latest` 나 `npm i -g zalkera@latest` 로 나간다.
+⚠ **판이 VS Code 확장과 묶여 있다.** 서버의 최소판 게이트가 하나라 두 도구가 같은 판으로 간다.
+게이트에 걸리면 `npx @zalkera/cli@latest` 나 `npm i -g @zalkera/cli@latest` 로 나간다.
 
 ## 지금 되는 것
 
@@ -121,7 +119,7 @@ VS Code 확장은 OS 키체인을 쓴다 — 그쪽이 **엄밀히 더 강하다
 
 요구사항: **Node.js 20+**. (확장으로 쓰면 Node 설치가 필요 없다 — VS Code 가 이미 싣고 있는 것을 쓴다.)
 
-로직은 전부 [`@zalkera/devtools-core`](../core) 에 있다. 이 패키지는 인자 해석과 출력만 맡는다.
+판정과 통신은 [`@zalkera/devtools-core`](../core) 에 있다 — 확장과 CLI 가 같은 답을 내야 하기 때문이다. 이 패키지가 맡는 것은 인자 해석·출력, 그리고 **토큰 보관**이다(그 판정은 코어에 두면 「코어는 파일을 안 쓴다」는 약속이 코어 안에서 먼저 깨진다).
 
 ## 라이선스
 

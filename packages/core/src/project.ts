@@ -17,6 +17,13 @@ export interface ProjectInfo {
     hasNext: boolean;
     /** `@zalkera/client` 선언 버전(없으면 null). 핸드셰이크의 최소 버전과 대조한다. */
     clientVersion: string | null;
+    /**
+     * **이 도구 자신**이 사이트 의존에 들어와 있는가(있으면 그 이름들).
+     *
+     * ⚠ 이것은 `import` 하는 패키지가 아니다 — 사람이 터미널에서 치는 명령이다. 의존에 들어가면
+     *   그 `package.json` 이 업로드돼 **서버 빌드가 CLI 를 설치한다.**
+     */
+    toolInDeps: readonly string[];
     /** 의존성이 설치돼 있는가. */
     hasNodeModules: boolean;
 }
@@ -55,9 +62,32 @@ export async function inspectProject(dir: string): Promise<ProjectInfo> {
         name: parsed.name ?? dir.split("/").filter(Boolean).pop() ?? dir,
         hasNext: "next" in deps,
         clientVersion: deps["@zalkera/client"] ?? null,
+        toolInDeps: TOOL_PACKAGES.filter((name) => name in deps),
         hasNodeModules: existsSync(join(dir, "node_modules")),
     };
 }
+
+/**
+ * **이 도구 자신**의 npm 이름들. 사이트 의존에 들어와 있으면 안 되는 것들이다.
+ *
+ * ■ 왜 이름이 아니라 검사기인가
+ *
+ * 초안은 이 도구를 **비스코프 이름**으로 내서 「`@zalkera/*` 는 `import` 하는 것」이라는 경계로
+ * 오용을 막으려 했다. npm 이 그 이름을 거절해(유사도 검사) 스코프 안으로 들어왔고, 그러면서
+ * 이름만으로 지키던 경계가 사라졌다. **이름 관례는 규약이고 이것은 검사다** — 이 레포는 규약보다
+ * 검사를 택한다.
+ *
+ * ■ 무엇이 문제인가
+ *
+ * 우리 나침반이 「고객 LLM + 로컬 코드 유지보수」다. 에이전트가 `node_modules/@zalkera/client` 에서
+ * 규약을 읽는 환경에서 「@zalkera/cli 를 쓰라」는 말을 들으면, 형제 패키지로 보고 **사이트
+ * 프로젝트에** 설치할 개연이 크다. 그러면 ⑴ 그 `package.json` 이 업로드돼 **서버 빌드가 CLI 를
+ * 설치**하고 ⑵ 사이트 의존 트리에 쓰지도 않는 것이 얹힌다.
+ *
+ * ⚠ **옛 이름도 함께 본다.** 발행 전에 갈린 이름이라 실제로 설치된 적은 없지만, 이 목록이
+ *   「지금 이름 하나」로 좁아지면 이름을 또 바꾸는 날 조용히 뚫린다.
+ */
+export const TOOL_PACKAGES = ["@zalkera/cli", "@zalkera/devtools", "zalkera", "zalkera-cli"] as const;
 
 /**
  * `.gitignore` 에 `.env.local` 을 보장한다(F4). 미리보기 키가 **레포에 커밋되는 사고**를 막는 마지막 자리다.

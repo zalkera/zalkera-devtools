@@ -239,4 +239,12 @@ console.log(`   설치(정본): code --install-extension ${manifest.publisher}.$
 console.log(
     `   게시(오너): npx vsce publish --packagePath shared/${manifest.name}-${manifest.version}.vsix`,
 );
+// ⚠ **한쪽만 알리면 한쪽만 나간다.** 서버의 최소판 게이트는 **하나**다 — 확장만 올리면 게이트가
+//   새 판을 요구하는데 npm 최신은 옛 판이라 **CLI 사용자가 갇힌다.** 그들이 받는 안내는
+//   「업데이트하세요」인데 받을 새 판이 없다. 규율을 문서에만 두면 언젠가 한쪽이 빠지므로,
+//   굽기가 끝나는 이 자리에서 둘을 같이 말한다.
+console.log("");
+console.log("   ⚠ CLI 도 **같은 판으로** 나가야 합니다 — 최소판 게이트가 하나입니다:");
+console.log("      npm run pack:cli");
+console.log(`      npm publish ./shared/zalkera-cli-${manifest.version}.tgz`);
 rmSync(stage, { recursive: true, force: true });
