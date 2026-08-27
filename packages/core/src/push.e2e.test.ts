@@ -1,6 +1,6 @@
 import {deepEqual, match, ok, rejects, strictEqual} from "node:assert/strict";
 import {createHash} from "node:crypto";
-import {mkdir, symlink, writeFile} from "node:fs/promises";
+import {mkdir, rm, symlink, writeFile} from "node:fs/promises";
 import {join} from "node:path";
 import {test} from "node:test";
 import {DevtoolsError} from "./errors.ts";
@@ -703,4 +703,91 @@ test("고친 것이 없으면 그냥 «받으세요»라고 한다 — 필요 �
         ok(!/--discard-local/.test(e.humanMessage), "버리라는 말을 필요 없이 붙였다");
         return true;
     });
+});
+
+test("🔴 상한은 **실제 요청 본문**으로 잰다 — 원본 바이트로 재면 이스케이프 몫을 못 본다", async () => {
+    // 심의 실측: 따옴표가 잦은 파일은 원본 3MiB 가 본문 4.65MiB 가 되어 4MiB 필터에 걸린다.
+    // 그러면 우리 문면 대신 **본문 없는 413** 이 나가고 사람은 「HTTP 413」만 본다.
+    const s = server();
+    const dir = await site({}, {});
+    // 원본으로는 상한 아래(3.0MiB)지만 JSON 이스케이프로 본문이 배가 된다.
+    const quoted = '"'.repeat(3.0 * 1024 * 1024);
+    await writeFile(join(dir, "따옴표.csv"), quoted);
+    // 파일 하나 상한(1MiB)에 먼저 걸리지 않게 여러 개로 쪼갠다.
+    await rm(join(dir, "따옴표.csv"));
+    for (let i = 0; i < 4; i += 1) await writeFile(join(dir, `q${i}.csv`), '"'.repeat(750 * 1024));
+    await rejects(() => pushSiteSource({api: s.api, folder: dir}), (e: unknown) => {
+        ok(e instanceof DevtoolsError);
+        strictEqual(e.code, "PUSH_TOO_LARGE", `실제 본문을 안 쟀다: ${(e as DevtoolsError).code}`);
+        return true;
+    });
+    strictEqual(s.seen.length, 0, "413 이 될 것을 보냈다");
+});
+
+test("상한 아래는 통과한다 — 조임 실수로 정상 올리기를 세우지 않는다", async () => {
+    const s = server();
+    const dir = await site({}, {});
+    // 이스케이프가 없는 평범한 소스 3MiB — 본문도 그만큼이라 통과해야 한다.
+    for (let i = 0; i < 4; i += 1) await writeFile(join(dir, `f${i}.tsx`), "가".repeat(250 * 1024));
+    strictEqual((await pushSiteSource({api: s.api, folder: dir})).sent, 4);
+});
+
+test("🔴 고치고 → 올리고 → 또 고치고 → 올리는 루프가 돈다 — 두 회차를 실제로 잰다", async () => {
+    // 심의 실측: 두 번째에서 `PUSH_WOULD_REVERT` 로 막혔다. 계획 시험만으로는 못 잡는 자리다 —
+    // 장부의 `mine` 과 세대가 회차 사이에 옳게 이어져야 참이 된다.
+    const dir = await site({"a.tsx": "내용1"}, {files: {"a.tsx": {sha256: sha("판7"), bytes: 3}}});
+    let changed: Array<{path: string; sha256: string}> = [];
+    let gen: string | null = null;
+    let round = 0;
+    const api = {
+        tenantCode: () => "acme",
+        listRevisions: async () => [{revisionNo: 7, status: "READY", isActive: true}],
+        draftFiles: async () => ({
+            generation: gen, changed, deleted: [], baseRevisionNo: gen ? 7 : null, strandedOnOldRevision: false,
+        }),
+        editDraft: async (edits: Array<{path: string; content?: string; remove?: boolean}>) => {
+            round += 1;
+            gen = `G${round}`;
+            for (const e of edits) {
+                changed = changed.filter((r) => r.path !== e.path);
+                if (!e.remove) changed.push({path: e.path, sha256: sha(e.content!)});
+            }
+            return {generation: gen, files: [], warning: null, previewUrl: null};
+        },
+    } as never;
+    strictEqual((await pushSiteSource({api, folder: dir})).sent, 1);
+    await writeFile(join(dir, "a.tsx"), "내용2");
+    strictEqual((await pushSiteSource({api, folder: dir})).sent, 1, "내가 올린 것을 내가 못 고쳤다");
+    await writeFile(join(dir, "a.tsx"), "내용3");
+    strictEqual((await pushSiteSource({api, folder: dir})).sent, 1, "세 번째도 막히면 안 된다");
+});
+
+test("🔴 세대가 갈렸으면 `mine` 이 소유를 증언 못 한다 — 지난 세계의 기록이다", async () => {
+    // 남이 되돌리고 새로 편집하면 세대가 갈린다. 그때 내 장부의 `mine` 은 아무것도 못 말하는데,
+    // 그대로 믿으면 남의 새 편집을 「내가 올린 것」이라 여겨 조용히 덮는다.
+    const s = server({
+        draft: {changed: [{path: "a.tsx", sha256: "남이-새로-올린것"}], generation: "G-남의것"},
+    });
+    const dir = await site({"a.tsx": "내가-고침"}, {
+        files: {"a.tsx": {sha256: sha("판7"), bytes: 3}},
+        // 내 장부는 옛 세대에서 그 경로를 올렸다고 적고 있다.
+        server: {generation: "G-내것"},
+        mine: {"a.tsx": "남이-새로-올린것"},
+    });
+    await rejects(() => pushSiteSource({api: s.api, folder: dir}), (e: unknown) => {
+        ok(e instanceof DevtoolsError);
+        strictEqual(e.code, "PUSH_WOULD_REVERT", "지난 세대의 소유 기록을 믿었다");
+        return true;
+    });
+    strictEqual(s.seen.length, 0);
+});
+
+test("세대가 같으면 증언이 선다", async () => {
+    const s = server({draft: {changed: [{path: "a.tsx", sha256: "내가-올린것"}], generation: "G1"}});
+    const dir = await site({"a.tsx": "또-고침"}, {
+        files: {"a.tsx": {sha256: sha("판7"), bytes: 3}},
+        server: {generation: "G1"},
+        mine: {"a.tsx": "내가-올린것"},
+    });
+    strictEqual((await pushSiteSource({api: s.api, folder: dir})).sent, 1);
 });

@@ -77,12 +77,15 @@ const MAX_PREVIEW_URL = 2048;
 const MAX_WARNING = 300;
 export const MAX_PUSH_FILE_BYTES = 1024 * 1024;
 /**
- * 한 요청에 실을 **원본 바이트** 총량. 4MiB(HTTP 본문 상한)에서 봉투 몫을 뺀 값이다.
+ * 한 요청의 **실제 본문** 상한. `RequestBodyLimitFilter` 가 재는 것과 **같은 것을 잰다.**
  *
- * ⚠ **원본 바이트는 요청 크기가 아니다.** JSON 이스케이프·경로·기준 해시가 더 붙는다. 여기서
- *   조금 좁게 잡아 **413 이라는 알 수 없는 벽** 대신 우리 문면이 나오게 한다.
+ * ⚠ **원본 바이트로 재면 안 된다**(심의 실측). 4MiB 필터가 재는 것은 JSON 본문이고, 이스케이프가
+ *   잦은 파일은 원본 3MiB 가 본문 4.65MiB 가 된다(따옴표 많은 CSV·JSON 픽스처). 그러면 우리 문면
+ *   대신 **본문 없는 413** 이 나가고 사람은 「HTTP 413」만 본다.
+ *   그래서 [bodyOf] 는 조립이 끝난 뒤 **직렬화해서** 잰다 — 그 시점에 본문을 이미 손에 들고 있다.
+ * ⚠ 4MiB 그대로가 아니라 조금 좁게 잡는다. 헤더·경계값에서 우리 문면이 먼저 나오게 하려는 것이다.
  */
-export const MAX_PUSH_BYTES = 3 * 1024 * 1024;
+export const MAX_PUSH_BYTES = 3.5 * 1024 * 1024;
 
 export interface PushOptions {
     api: ZalkeraApi;
@@ -151,6 +154,9 @@ export async function pushSiteSource(options: PushOptions): Promise<PushResult> 
     const reconciled = reconcile(ledger, draft);
 
     const local = await hashWorkdir(root);
+    // ⚠ **세대가 갈렸으면 `mine` 을 안 넘긴다.** 지난 세계의 기록이라 소유를 증언할 수 없다
+    //    (형제 `syncStatus` 의 `mineValid` 와 같은 규칙 — 규칙이 둘이면 한쪽만 조여진다).
+    const owned = ownedBy(ledger, draft);
     if (active > ledger.base.revisionNo) {
         // ⚠ **작업본을 본 뒤에 던진다.** 「`pull` 을 먼저」라고만 말하면 그 `pull` 이 로컬 변경 때문에
         //   또 거절하고, 그 거절은 「`push` 를 먼저」라고 답한다 — **두 문이 서로를 가리켜 사람이
@@ -160,7 +166,7 @@ export async function pushSiteSource(options: PushOptions): Promise<PushResult> 
         ).length;
         throw baseMoved(ledger.base.revisionNo, active, dirty);
     }
-    let plan = planPush({base: ledger.files, draft: viewOf(draft), local});
+    let plan = planPush({base: ledger.files, draft: viewOf(draft), local, mine: owned});
     requireSeen(plan, options);
 
     if (plan.edits.length === 0) {
@@ -231,7 +237,7 @@ export async function pushSiteSource(options: PushOptions): Promise<PushResult> 
             report("사이트 쪽이 그 사이 달라져 다시 읽습니다…");
             draft = await readDraft(options.api);
             const fresh = await hashWorkdir(root);
-            plan = planPush({base: ledger.files, draft: viewOf(draft), local: fresh});
+            plan = planPush({base: ledger.files, draft: viewOf(draft), local: fresh, mine: ownedBy(ledger, draft)});
             // ⚠ **가드를 다시 지난다.** 안 지나면 재시도가 곧 「받아 적고 다시 보내는」 세탁 경로다.
             requireSeen(plan, options);
             plan = {...plan, edits: plan.edits.filter((edit) => !dropped.includes(edit.path))};
@@ -310,6 +316,17 @@ async function readDraft(api: ZalkeraApi): Promise<DraftFiles> {
 }
 
 const viewOf = (draft: DraftFiles): DraftView => ({changed: draft.changed, deleted: draft.deleted});
+
+/**
+ * 장부의 「내가 올린 것」이 **지금도 증언할 수 있는가.**
+ *
+ * 세대가 갈렸으면 그 기록은 지난 세계의 것이라 아무것도 못 말한다 — 빈 것을 넘긴다.
+ * 형제 `syncStatus` 의 `mineValid` 와 **같은 규칙**이다(규칙이 둘이면 한쪽만 조여진다).
+ */
+function ownedBy(ledger: SyncLedger, draft: DraftFiles): Record<string, string | null> {
+    const seen = ledger.server?.generation ?? null;
+    return seen !== null && seen === (draft.generation ?? null) ? ledger.mine : {};
+}
 
 /** 지금 켜진 판. **못 읽으면 던진다** — 「모른다」를 「같다」로 바꾸지 않는다. */
 async function activeRevisionNo(api: ZalkeraApi): Promise<number> {
@@ -470,13 +487,9 @@ async function bodyOf(root: string, edits: readonly PushEdit[]): Promise<DraftEd
                 "동영상·원본 이미지·빌드 산출물이 소스 폴더에 들어 있지 않은지 확인해 주세요.",
             );
         }
-        if (total + size > MAX_PUSH_BYTES) {
-            throw new DevtoolsError(
-                "PUSH_TOO_LARGE",
-                `한 번에 올릴 수 있는 총량(${MAX_PUSH_BYTES / 1024 / 1024}MB)을 넘었습니다.`,
-                "나눠 보내면 사이트 쪽에 반쪽만 서는 상태가 생깁니다 — 콘솔에서 소스를 통째로 올려 주세요.",
-            );
-        }
+        // 원본 바이트로는 **거르기만** 한다 — 확실히 넘는 것을 읽기 전에 끊는다. 최종 판정은 아래
+        // 직렬화 뒤에 한다(이스케이프 몫은 여기서 모른다).
+        if (total + size > MAX_PUSH_BYTES) throw tooLarge();
         const raw = await readFile(join(root, edit.path));
         // 🔴 **이름만 서식인 비밀 파일을 안 보낸다.** `.env.example` 은 「값이 없다」는 전제로
         //    이름 예외를 받는데, 값이 들어 있으면 그 전제가 깨진 것이다. zip 레인은 이 문턱을
@@ -515,7 +528,18 @@ async function bodyOf(root: string, edits: readonly PushEdit[]): Promise<DraftEd
             ...(edit.baseSha256 === null ? {} : {baseSha256: edit.baseSha256}),
         });
     }
+    // 🔴 **실제 본문으로 잰다.** 여기서만 그 값을 알 수 있다 — 위의 누적은 원본 바이트라
+    //    이스케이프 몫을 못 본다(심의 실측: 원본 3MiB → 본문 4.65MiB → 413).
+    if (Buffer.byteLength(JSON.stringify({edits: body}), "utf8") > MAX_PUSH_BYTES) throw tooLarge();
     return body;
+}
+
+function tooLarge(): DevtoolsError {
+    return new DevtoolsError(
+        "PUSH_TOO_LARGE",
+        `한 번에 올릴 수 있는 총량(${Math.round(MAX_PUSH_BYTES / 1024 / 1024 * 10) / 10}MB)을 넘었습니다.`,
+        "나눠 보내면 사이트 쪽에 반쪽만 서는 상태가 생깁니다 — 콘솔에서 소스를 통째로 올려 주세요.",
+    );
 }
 
 function responseLost(cause: DevtoolsError): DevtoolsError {

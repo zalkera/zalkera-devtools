@@ -124,3 +124,46 @@ test("보낼 목록은 경로 순이다 — 같은 입력이 같은 요청을 �
     });
     deepEqual(plan.edits.map((e) => e.path), ["a.tsx", "b.tsx", "c.tsx"]);
 });
+
+test("🔴 내가 올린 것은 내가 다시 고칠 수 있다 — 안 그러면 통상 루프가 두 번째부터 막힌다", () => {
+    // 심의 실측: 술어를 넓히다 만든 회귀. 「고치고 → 올리고 → 또 고치고 → 올리는」 루프가
+    // 두 번째에서 `PUSH_WOULD_REVERT` 로 막혔고, 문면은 남을 탓했다.
+    const plan = planPush({
+        base: {"a.tsx": f("판")},
+        draft: draft({changed: [{path: "a.tsx", sha256: "내가-올린것"}]}),
+        local: {"a.tsx": l("이번에-또-고침")},
+        mine: {"a.tsx": "내가-올린것"},
+    });
+    deepEqual(plan.unseen, [], "내가 올린 것을 남의 것으로 셌다");
+    deepEqual(plan.edits, [{path: "a.tsx", sha256: "이번에-또-고침", baseSha256: "내가-올린것"}]);
+});
+
+test("🔴 내가 올린 **삭제**도 소유를 증언한다", () => {
+    const plan = planPush({
+        base: {"a.tsx": f("판")},
+        draft: draft({deleted: ["a.tsx"]}),
+        local: {"a.tsx": l("되살리려는 내용")},
+        mine: {"a.tsx": null},
+    });
+    deepEqual(plan.unseen, []);
+});
+
+test("🔴 남이 올린 것은 `mine` 이 있어도 못 덮는다 — sha 가 달라야 소유가 아니다", () => {
+    const plan = planPush({
+        base: {"a.tsx": f("판")},
+        draft: draft({changed: [{path: "a.tsx", sha256: "남이-그-위에-더-얹음"}]}),
+        local: {"a.tsx": l("내가-고침")},
+        // 내가 올린 적은 있지만, 지금 서버에 있는 것은 그것이 아니다.
+        mine: {"a.tsx": "내가-올린것"},
+    });
+    deepEqual(plan.unseen, ["a.tsx"], "남이 더 얹은 것을 덮는데 안 걸렸다");
+});
+
+test("🔴 `mine` 을 안 넘기면 **소유를 주장하지 않는다** — 빠뜨렸을 때 더 막는 쪽이다", () => {
+    const plan = planPush({
+        base: {"a.tsx": f("판")},
+        draft: draft({changed: [{path: "a.tsx", sha256: "내가-올린것"}]}),
+        local: {"a.tsx": l("또-고침")},
+    });
+    deepEqual(plan.unseen, ["a.tsx"]);
+});

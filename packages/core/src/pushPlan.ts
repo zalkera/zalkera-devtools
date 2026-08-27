@@ -40,6 +40,17 @@ export interface PushInput {
     draft: DraftView;
     /** 지금 작업본. */
     local: WorkdirManifest;
+    /**
+     * **내가 이 세대에 올린 것**(장부의 `mine`). 값이 `null` 이면 내가 올린 삭제다.
+     *
+     * ⚠ **선행조건 계산에 안 쓴다** — 그것이 🔴1 의 뿌리다. 여기 쓰이는 자리는 하나뿐이고,
+     *   그것은 [PushPlan.unseen] 의 **소유 판정**이다(§2.5 좌초 소유 판정과 같은 성질).
+     * ⚠ **세대가 갈렸으면 넘기지 마라.** 지난 세계의 기록이라 아무것도 못 말한다 — 부르는 쪽이
+     *   그때 빈 객체를 넘긴다(`syncStatus` 의 `mineValid` 와 같은 규칙).
+     * ⚠ 생략하면 **소유를 아무것도 주장하지 않는다.** 빠뜨렸을 때 더 막는 쪽으로 기울게 한 것이다 —
+     *   반대로 두면 잊는 순간 남의 편집이 조용히 덮인다.
+     */
+    mine?: Readonly<Record<string, string | null>>;
 }
 
 /** 보낼 편집 하나. [sha256] 이 `null` 이면 **지우는 것**이다. */
@@ -93,6 +104,7 @@ export function effectiveSha(
 /** 무엇을 보낼지 정한다. */
 export function planPush(input: PushInput): PushPlan {
     const {base, draft, local} = input;
+    const mine = input.mine ?? {};
     const edits: PushEdit[] = [];
     const unseen: string[] = [];
 
@@ -127,13 +139,23 @@ export function planPush(input: PushInput): PushPlan {
     //   보내는** 바로 그 형상이다(memo183 🟠4 가 서버 쪽에서 막은 것을 우리가 되살리는 꼴).
     //
     // ⚠ 대가를 정직하게 적는다: 받기는 **판**을 받지 편집을 안 받으므로, 남이 편집한 경로는 명시
-    //   동의 없이는 못 올린다. 내가 올린 편집은 그 다음 회차에 sha 가 같아 안 걸린다.
+    //   동의 없이는 못 올린다. **내가** 올린 것은 장부의 `mine` 이 소유를 증언해 안 걸린다 —
+    //   다만 그 증언은 **세대가 같을 때만** 유효하다.
     for (const path of paths) {
         const touched =
             draft.changed.some((row) => row.path === path) || draft.deleted.includes(path);
         if (!touched) continue;
+        const now = effectiveSha(base, draft, path);
         const here = local[path]?.sha256 ?? null;
-        if (here !== effectiveSha(base, draft, path)) unseen.push(path);
+        if (here === now) continue;
+        // 🔴 **내가 올린 것은 내가 본 것이다.** 이 줄이 없으면 「고치고 → 올리고 → 또 고치고 →
+        //    올리는」 통상 루프가 **두 번째부터 막힌다**(실측). 그때 문면은 남을 탓하고, 안내를
+        //    따르면 자기 작업이 판 내용으로 덮인다 — 술어를 넓히다 만든 회귀였다.
+        //
+        //    ⚠ 이것이 `mine` 의 **유일한** 쓰임이다. 선행조건은 여전히 서버 조회가 정한다(🔴1).
+        //    그리고 부르는 쪽이 **세대가 같을 때만** 이 값을 넘긴다 — 갈렸으면 지난 세계의 기록이다.
+        if (Object.hasOwn(mine, path) && mine[path] === now) continue;
+        unseen.push(path);
     }
 
     return {edits, unseen: unseen.sort()};
