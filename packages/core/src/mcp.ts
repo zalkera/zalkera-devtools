@@ -26,6 +26,20 @@ export interface McpRegistration {
     authServerMetadataUrl: string;
 }
 
+/**
+ * **로컬(stdio) 서버 등록.** 원격과 달리 주소·OAuth 가 없다 — 에이전트가 이 명령을 **직접 띄운다.**
+ *
+ * ⚠ **토큰을 여기 담지 않는다.** `.mcp.json` 은 팀이 공유하는 파일이고 레포에 들어간다. 로그인은
+ *   그 명령이 자기 보관소(`~/.config/zalkera/auth.json`)에서 읽는다 — 이 파일은 「무엇을 띄울지」만 안다.
+ */
+export interface LocalMcpRegistration {
+    serverName: McpServerName;
+    /** 실행할 명령(예: `npx`). */
+    command: string;
+    /** 그 인자. **우리 패키지 이름이 여기 있어야** 나중에 이 항목이 우리 것으로 판별된다. */
+    args: readonly string[];
+}
+
 export interface RegisterMcpResult {
     path: string;
     action: "created" | "updated" | "unchanged";
@@ -40,29 +54,75 @@ export interface RegisterMcpResult {
  */
 function isOurEntry(value: unknown): boolean {
     if (typeof value !== "object" || value === null) return false;
-    const e = value as { type?: unknown; oauth?: unknown };
-    if (e.type !== "http") return false;
-    // 우리는 항상 `oauth.{clientId,authServerMetadataUrl}` 를 같이 적는다. 그 짝이 없으면 남의 것이다.
-    const o = e.oauth;
-    if (typeof o !== "object" || o === null) return false;
-    const oauth = o as { clientId?: unknown; authServerMetadataUrl?: unknown };
-    return typeof oauth.clientId === "string" && typeof oauth.authServerMetadataUrl === "string";
+    const e = value as { type?: unknown; oauth?: unknown; command?: unknown; args?: unknown };
+    // ⑴ 원격(HTTP) 항목 — 우리는 항상 `oauth.{clientId,authServerMetadataUrl}` 를 같이 적는다.
+    //    그 짝이 없으면 남의 것이다.
+    if (e.type === "http") {
+        const o = e.oauth;
+        if (typeof o !== "object" || o === null) return false;
+        const oauth = o as { clientId?: unknown; authServerMetadataUrl?: unknown };
+        return typeof oauth.clientId === "string" && typeof oauth.authServerMetadataUrl === "string";
+    }
+    // ⑵ 로컬(stdio) 항목 — 인자에 우리 패키지 이름이 있어야 우리 것이다.
+    //
+    // ⚠ **`command` 로 판정하지 않는다.** 그 값은 `npx`·`node` 처럼 흔해서, 그것만 보면 고객이
+    //   쓰던 남의 stdio 서버를 우리 것으로 오인해 **덮는다** — 그 항목의 `env` 에 든 토큰째로.
+    //   유출이 아니라 **파괴**다(형제 갈래가 같은 이유로 그렇게 적혀 있다).
+    if (e.type === "stdio" || e.type === undefined) {
+        const args = Array.isArray(e.args) ? e.args : [];
+        return args.some((a) => typeof a === "string" && LOCAL_TOOL_ARGS.has(a));
+    }
+    return false;
 }
+
+/**
+ * 로컬 항목의 **소유 표식** — 인자에 이 중 하나가 있으면 우리가 적은 것이다.
+ *
+ * ⚠ **옛 이름도 남긴다.** 이 도구는 발행 전에 이미 이름이 한 번 갈렸다(npm 유사도 거절). 목록이
+ *   「지금 이름 하나」로 좁아지면 개명한 날 **우리가 적은 항목을 남의 것으로 보고 거절한다** —
+ *   그러면 사람이 손으로 지우기 전까지 다시 등록을 못 한다.
+ */
+const LOCAL_TOOL_ARGS = new Set(["@zalkera/cli", "zalkera", "zalkera-cli", "@zalkera/devtools"]);
 
 /** 프로젝트 스코프 `.mcp.json` 에 우리 서버를 적는다(팀이 공유하는 자리 — 시크릿은 담기지 않는다). */
 export async function registerMcpServer(
     projectDir: string,
     registration: McpRegistration,
 ): Promise<RegisterMcpResult> {
-    const path = join(projectDir, ".mcp.json");
-    const entry = {
+    return writeEntry(projectDir, registration.serverName, {
         type: "http",
         url: registration.url,
         oauth: {
             clientId: registration.clientId,
             authServerMetadataUrl: registration.authServerMetadataUrl,
         },
-    };
+    });
+}
+
+/**
+ * 로컬(stdio) 서버를 같은 파일에 적는다.
+ *
+ * ⚠ **병합 규율은 원격과 한 벌이다** — 남의 항목을 안 덮고, 형태가 틀리면 멈추고, 최상위의 다른
+ *   키를 살린다. 두 벌이 되면 한쪽만 조여진다.
+ */
+export async function registerLocalMcpServer(
+    projectDir: string,
+    registration: LocalMcpRegistration,
+): Promise<RegisterMcpResult> {
+    return writeEntry(projectDir, registration.serverName, {
+        type: "stdio",
+        command: registration.command,
+        args: [...registration.args],
+    });
+}
+
+async function writeEntry(
+    projectDir: string,
+    serverName: McpServerName,
+    entry: Record<string, unknown>,
+): Promise<RegisterMcpResult> {
+    const path = join(projectDir, ".mcp.json");
+    const registration = {serverName};
 
     if (!existsSync(path)) {
         await writeOwnFile(path, `${JSON.stringify({ mcpServers: { [registration.serverName]: entry } }, null, 2)}\n`);

@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import {
+  registerLocalMcpServer,
   DevtoolsError,
   diagnose,
   diagnoseClientUsage,
@@ -494,6 +495,7 @@ export function activate(context: vscode.ExtensionContext): void {
     register("zalkera.history", showHistory),
     register("zalkera.precheck", precheckCommand),
     register("zalkera.agent.connect", connectAgent),
+    register("zalkera.agent.source", connectAgentSource),
     register("zalkera.help", showHelp),
     register("zalkera.doctor", doctor),
   );
@@ -3156,8 +3158,50 @@ async function connectAgent(): Promise<void> {
   if (docs.claude === "created")
     log("CLAUDE.md 를 만들었습니다(AGENTS.md 를 참조하는 한 줄).");
 
+  // ⚠ **적은 것을 말한다.** 종전 문면은 「에이전트 설정을 적었습니다. 에이전트를 다시 열면…」
+  //   이었는데, 오너가 **무슨 말인지 물었다** — 그것이 판정이다. 걸린 자리 셋:
+  //   ⑴ 「에이전트」가 개발 용어다(이 레포 규칙은 「개발 도구 어휘 0」이다)
+  //   ⑵ 「다시 열면」이 VS Code 인지 폴더인지 **AI 확장**인지 모호했다
+  //   ⑶ **적은 파일 셋을 안 말했다** — 로그 패널에만 있어, 사람은 자기 폴더에 무엇이 생겼는지 몰랐다
   void vscode.window.showInformationMessage(
-    "에이전트 설정을 적었습니다. 에이전트를 다시 열면 이 사이트 도구가 보이고, 처음 쓸 때 브라우저 로그인이 한 번 필요합니다.",
+    "AI 가 이 사이트 데이터를 볼 수 있게 설정했습니다(이 폴더에 .mcp.json · AGENTS.md · CLAUDE.md). " +
+      "쓰시던 AI 확장을 껐다 켜 주세요 — 그래야 반영됩니다. 처음 쓸 때 브라우저 로그인이 한 번 뜹니다.",
+  );
+}
+
+/**
+ * **AI 가 이 폴더의 소스를 직접 다루게 한다**(memo184 T4 · 로컬 MCP).
+ *
+ * ⚠ **형제 [connectAgent] 와 다른 물건이다.** 그쪽은 우리 백엔드의 **원격** 평면을 열어 **데이터**
+ *   (상품·주문·설정)를 보여 준다. 이쪽은 고객 기계에서 도는 서버를 열어 **받기·올리기·발행**을
+ *   맡긴다. 둘은 짝이다 — 지금은 AI 가 파일을 고쳐 놓고도 올리는 것은 사람이 터미널에서 한다.
+ *
+ * ⚠ **토큰을 `.mcp.json` 에 안 담는다.** 그 파일은 팀이 공유하고 레포에 들어간다. 그 명령이
+ *   자기 보관소에서 로그인을 읽는다.
+ */
+async function connectAgentSource(): Promise<void> {
+  const dir = requireWorkspace();
+  await ensureApi(); // 테넌트를 고르게 한다(아직 안 골랐다면).
+
+  const name = mcpServerName("zalkera-source");
+  if (!name) throw new DevtoolsError("SERVER_REJECTED", "서버 이름을 만들지 못했습니다.", "잘커라에 문의해 주세요.");
+  const result = await registerLocalMcpServer(dir, {
+    serverName: name,
+    // ⚠ **`npx` 로 부른다.** 전역 설치를 요구하지 않는다 — 안 깔린 사람에게 설치를 먼저 시키면
+    //   그 자리에서 절반이 멈춘다. `-y` 는 「설치할까요」 물음을 없앤다(에이전트가 답할 수 없다).
+    command: "npx",
+    args: ["-y", "@zalkera/cli", "mcp"],
+  });
+  const docs = await ensureAgentDocs(dir);
+  log(
+    `.mcp.json ${result.action === "created" ? "생성" : result.action === "updated" ? "갱신" : "변경 없음"} — ${result.path}`,
+  );
+  if (docs.agents === "created") log("AGENTS.md 스텁을 만들었습니다.");
+  if (docs.claude === "created") log("CLAUDE.md 를 만들었습니다.");
+
+  void vscode.window.showInformationMessage(
+    "AI 가 이 폴더의 소스를 직접 다룰 수 있게 설정했습니다 — 받기 · 올리기 · 새 버전 만들기. " +
+      "쓰시던 AI 확장을 껐다 켜 주세요 — 그래야 반영됩니다. 되돌리기와 버리기는 안 맡깁니다.",
   );
 }
 

@@ -45,15 +45,19 @@ test("사이트가 붙어도 받기 진입점이 보인다", () => {
   assert.ok(commands().includes("zalkera.site.open"), "처음 쓰는 사람에게도 보여야 한다");
 });
 
-test("순서는 사이트 · 미리보기 · 배포 · 내려받기 · 작업 폴더 · 버전 · 도움", () => {
-  assert.deepEqual(ids({ site: "/tmp/x" }), ["site", "preview", "export", "download", "workdir", "version", "help"]);
+test("순서는 사이트 · 미리보기 · AI 연결 · 배포 · 내려받기 · 작업 폴더 · 버전 · 도움", () => {
+  // 🔴 **「AI 연결」은 미리보기와 갈린 묶음이다.** 미리보기는 「내 컴퓨터에서 띄워 본다」이고
+  //    이쪽은 「AI 에게 무엇을 여는가」다 — 같은 단계가 아니다(오너 지적).
+  assert.deepEqual(ids({ site: "/tmp/x" }), [
+    "site", "preview", "agent", "export", "download", "workdir", "version", "help",
+  ]);
 });
 
 test("소스가 없어도 묶음이 다 보인다 — 없으면 「갱신이 안 됐다」로 읽힌다", () => {
   // 오너 확정. 종전에는 못 하는 것을 숨겼는데, 실사용에서 그 대가가 더 컸다 — 확장을 새로
   // 깔았는데 메뉴가 셋뿐이니 갱신 실패로 읽혔다. 사람은 없는 것을 「조건이 안 됐다」로 읽지 않는다.
   // 못 하는 이유는 **누를 때** 말한다(`whyBlocked`).
-  assert.deepEqual(ids(), ["site", "preview", "export", "download", "workdir", "version", "help"]);
+  assert.deepEqual(ids(), ["site", "preview", "agent", "export", "download", "workdir", "version", "help"]);
 });
 
 test("소스가 있으나 없으나 묶음과 순서가 같다 — 화면이 흔들리지 않는다", () => {

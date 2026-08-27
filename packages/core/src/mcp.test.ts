@@ -1,10 +1,10 @@
-import { ok, rejects, strictEqual } from "node:assert/strict";
+import { deepEqual, ok, rejects, strictEqual } from "node:assert/strict";
 import { readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
 import { ensureAgentDocs } from "./agents.ts";
 import { DevtoolsError } from "./errors.ts";
-import { registerMcpServer, type McpRegistration } from "./mcp.ts";
+import { registerLocalMcpServer, registerMcpServer, type McpRegistration } from "./mcp.ts";
 import { mcpServerName } from "./serverUrl.ts";
 import { tempDir } from "./testing/tempDir.ts";
 
@@ -150,4 +150,57 @@ test("`.mcp.json` 이 심링크면 쓰지 않는다 — 링크 대상이 남의 
         await rm(victim, { recursive: true, force: true });
         await rm(dir, { recursive: true, force: true });
     }
+});
+
+test("로컬(stdio) 서버를 적는다 — 주소·OAuth 가 없고 **토큰도 없다**", async () => {
+    const dir = await tempDir("zalkera-mcp-local-");
+    await registerLocalMcpServer(dir, {serverName: serverName("zalkera-source"), command: "npx", args: ["-y", "@zalkera/cli", "mcp"]});
+    const written = JSON.parse(await readFile(join(dir, ".mcp.json"), "utf8")) as {
+        mcpServers: Record<string, {type: string; command: string; args: string[]; env?: unknown}>;
+    };
+    const entry = written.mcpServers["zalkera-source"];
+    strictEqual(entry?.type, "stdio");
+    strictEqual(entry.command, "npx");
+    ok(entry.args.includes("@zalkera/cli"), "우리 패키지 이름이 인자에 없다 — 소유 판별이 안 된다");
+    // `.mcp.json` 은 팀이 공유하고 레포에 들어간다. 로그인은 그 명령이 자기 보관소에서 읽는다.
+    strictEqual(entry.env, undefined, "설정 파일에 자격증명 자리를 만들었다");
+});
+
+test("🔴 로컬·원격이 **한 파일에 같이** 산다 — 한쪽이 다른 쪽을 안 지운다", async () => {
+    const dir = await tempDir("zalkera-mcp-both-");
+    await registerMcpServer(dir, {
+        serverName: serverName("zalkera"), url: "https://api.example.com/mcp",
+        clientId: "c", authServerMetadataUrl: "https://auth.example.com/.well-known/x",
+    });
+    await registerLocalMcpServer(dir, {serverName: serverName("zalkera-source"), command: "npx", args: ["-y", "@zalkera/cli", "mcp"]});
+    const written = JSON.parse(await readFile(join(dir, ".mcp.json"), "utf8")) as {mcpServers: Record<string, unknown>};
+    deepEqual(Object.keys(written.mcpServers).sort(), ["zalkera", "zalkera-source"]);
+});
+
+test("🔴 **남의 stdio 항목은 안 덮는다** — `command` 가 흔해서 그것만 보면 토큰째로 파괴한다", async () => {
+    const dir = await tempDir("zalkera-mcp-theirs-");
+    await writeFile(
+        join(dir, ".mcp.json"),
+        JSON.stringify({mcpServers: {"zalkera-source": {command: "npx", args: ["-y", "somebody-else"], env: {TOKEN: "비밀"}}}}),
+    );
+    await rejects(
+        () => registerLocalMcpServer(dir, {serverName: serverName("zalkera-source"), command: "npx", args: ["-y", "@zalkera/cli", "mcp"]}),
+        (e: unknown) => e instanceof DevtoolsError,
+    );
+    const after = JSON.parse(await readFile(join(dir, ".mcp.json"), "utf8")) as {
+        mcpServers: Record<string, {env?: Record<string, string>}>;
+    };
+    strictEqual(after.mcpServers["zalkera-source"]?.env?.TOKEN, "비밀", "남의 토큰을 지웠다");
+});
+
+test("🔴 **옛 이름으로 적힌 우리 항목도 우리 것으로 본다** — 아니면 개명한 날 다시 등록을 못 한다", async () => {
+    const dir = await tempDir("zalkera-mcp-old-");
+    await writeFile(
+        join(dir, ".mcp.json"),
+        JSON.stringify({mcpServers: {"zalkera-source": {type: "stdio", command: "npx", args: ["-y", "zalkera", "mcp"]}}}),
+    );
+    const result = await registerLocalMcpServer(dir, {
+        serverName: serverName("zalkera-source"), command: "npx", args: ["-y", "@zalkera/cli", "mcp"],
+    });
+    strictEqual(result.action, "updated");
 });
