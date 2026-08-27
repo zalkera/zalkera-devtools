@@ -130,6 +130,7 @@ export {
 export { safeFileName, writeOwnFile, ensureOwnDir } from "./safeWrite.ts";
 export {
   chooseNpm,
+  probeSystemNpm,
   describeNpm,
   npmArgvOf,
   acceptsResolvedNpmCli,

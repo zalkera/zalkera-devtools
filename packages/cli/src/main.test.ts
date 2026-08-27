@@ -117,3 +117,17 @@ test("🔴 이 도구가 사이트 의존에 들어와 있으면 **네트워크 
     match(err, /@zalkera\/cli 가 이 사이트의 의존으로 들어 있습니다/, `안 짚었다: ${err.slice(0, 200)}`);
     match(err, /package\.json/, "무엇을 하라는지 안 말한다");
 });
+
+test("🔴 `preview` 의 포트도 **네트워크·프로세스 기동보다 먼저** 걸러진다", async () => {
+    // 뒤에 두면 오타 하나가 의존성 설치(수 분)를 치른 뒤에야 드러난다.
+    for (const bad of ["abc", "0", "80", "70000", "1.5", "-1"]) {
+        const {code, err} = await cli("preview", "--port", bad, "--site", "acme", "--folder", "/tmp");
+        strictEqual(code, 1, `${bad} 이 통과했다`);
+        match(err, /미리보기 포트가 올바르지 않습니다/, `${bad} 에서 다른 이유로 멈췄다: ${err.slice(0, 80)}`);
+    }
+});
+
+test("`preview` 가 도움말과 명령 목록에 있다 — 없는 명령을 문서가 약속하면 안 된다", async () => {
+    const {out} = await cli("--help");
+    match(out, /zalkera preview/);
+});

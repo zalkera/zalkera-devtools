@@ -9,6 +9,11 @@
  * ⚠ **이 파일에 판정을 두지 마라.** 여기 한 줄을 더하면 그 줄은 확장이 안 지나는 줄이 된다.
  */
 import {
+    startPreview,
+    probeSystemNpm,
+    npmArgvOf,
+    describeNpm,
+    chooseNpm,
     DevtoolsError,
     pullSiteSource,
     pushSiteSource,
@@ -53,6 +58,7 @@ function help(): string {
   zalkera publish               올린 것을 새 버전으로 만든다(그래야 손님에게 보인다)
   zalkera rollback <판번호>      라이브를 그 버전으로 되돌린다
   zalkera discard               사이트 쪽에서 편집 중인 것을 버린다(판은 안 옮긴다)
+  zalkera preview               이 폴더를 로컬에서 띄워 본다(손님에게는 안 보인다)
   zalkera baseline              기준 기록만 지금 판으로 다시 세운다(파일은 안 건드린다)
 
 옵션
@@ -66,6 +72,7 @@ function help(): string {
                                  ⚠ 쓴 크레딧은 돌아오지 않는다 — 편집만 버릴 때는 필요 없다
   --yes                          discard 확인을 미리 준다 — **내가 올린 것과 같을 때만** 먹는다
   --confirm 버립니다               여기 없는 편집을 버릴 때 필요한 문구(터미널이 아닐 때)
+  --port <번호>                  preview 가 쓸 포트(1024~65535). 없으면 빈 포트를 고른다
   --verbose                      경로를 전부 보여 준다
 
 로그인 정보는 ${tokenPath()} 에 **평문**으로 저장됩니다.
@@ -93,6 +100,9 @@ async function main(argv: readonly string[]): Promise<number> {
     // ⚠ **인자 검증이 네트워크보다 먼저다.** 뒤에 두면 오타 하나가 핸드셰이크 왕복을 치른 뒤에야
     //   드러나고, 이 갈래를 재는 시험이 **상용 서버를 두드린다**(실측으로 그랬다).
     const revisionNo = revisionOf(flags);
+    // ⚠ **같은 자리다.** `preview` 안에서 부르면 핸드셰이크·의존성 설치(수 분) 뒤에야 오타가
+    //   드러난다 — 형제 판 번호가 이미 여기 있는 이유와 같다.
+    const port = portOf(flags);
 
     switch (command) {
         case "login": {
@@ -326,6 +336,71 @@ async function main(argv: readonly string[]): Promise<number> {
             process.stdout.write(`${lines.join("\n")}\n`);
             return 0;
         }
+        case "preview": {
+            const context = await openContext(common);
+            // ⚠ **어느 npm 을 쓸지 판정을 우회하지 않는다.** 그 판정은 코어에 한 벌 있고
+            //   (`chooseNpm`), `null` 은 「PATH 로 해 보라」가 아니라 **「실행하지 마라」**다.
+            //
+            // ⚠ **확장과 다른 점 하나** — 우리는 npm 을 동봉하지 않는다. 확장은 비개발자 기계에
+            //   npm 이 없을 수 있어 동봉본을 싣지만, 이 도구는 **npm 으로 설치돼야 여기까지 온다.**
+            //   그래도 이름(`npm`)으로 부르지는 않는다 — 그 탐색은 OS 손에 넘어가고, 우리가 도는
+            //   곳은 남이 준 zip 을 푼 폴더다. 경로로 찾아 우리 Node 로 부른다.
+            const npm = chooseNpm("auto", {bundled: null, system: probeSystemNpm(process.execPath)});
+            const npmCommand = npmArgvOf(npm, process.execPath);
+            if (npmCommand === null) {
+                throw new DevtoolsError(
+                    "SERVER_REJECTED",
+                    `미리보기를 켜려면 이 컴퓨터의 npm 이 필요합니다 — ${describeNpm(npm)}`,
+                    npm.kind === "unavailable" ? npm.hint : "npm 을 설치한 뒤 다시 시도해 주세요.",
+                );
+            }
+
+            const session = await startPreview({
+                projectDir: context.folder,
+                api: context.api,
+                apiBase: context.serverUrl,
+                tenantCode: context.tenant,
+                nodePath: process.execPath,
+                npmCommand,
+                label: `zalkera cli · ${process.platform}`,
+                port,
+                onProgress: (m: string) => process.stderr.write(`${m}\n`),
+                onLog: (l: string) => process.stderr.write(`${l}\n`),
+            });
+
+            // ⚠ **끊긴 다른 기계가 있으면 말한다.** 말 없이 끊기면 저쪽 사람은 고장으로 읽는다.
+            if (session.revokedPrevious > 0) {
+                process.stderr.write(
+                    `⚠ 다른 곳에서 켜 두신 미리보기 ${session.revokedPrevious}개가 끊겼습니다 — 미리보기 열쇠는 한 번에 하나입니다.\n`,
+                );
+            }
+            process.stdout.write(`${session.server.url}\n`);
+            process.stderr.write("멈추려면 Ctrl+C 를 누르세요.\n");
+
+            // 🔴 **끝날 때 열쇠를 폐기한다.** 안 하면 이 기계를 떠난 뒤에도 서버에 살아 있는
+            //    자격증명이 남고, 다음 사람이 미리보기를 켤 때 그것이 끊긴다(그리고 왜 끊겼는지
+            //    아무도 모른다). 형제 확장은 로그아웃·중지에서 같은 일을 한다.
+            //
+            // ⚠ **폐기 실패로 죽지 않는다.** 이미 서버에 난 열쇠라 우리가 못 지우는 상황이 있고,
+            //   그때 사람에게 남는 것이 「미리보기가 실패했다」면 거짓이다 — 미리보기는 돌았다.
+            const stop = async (): Promise<never> => {
+                await session.server.stop().catch(() => {});
+                await context.api.revokeStorefrontKey(session.keyId).catch(() => {
+                    process.stderr.write("⚠ 미리보기 열쇠를 폐기하지 못했습니다 — 콘솔에서 확인해 주세요.\n");
+                });
+                process.exit(0);
+            };
+            process.on("SIGINT", () => void stop());
+            process.on("SIGTERM", () => void stop());
+            // dev 서버가 스스로 죽으면 그 사실을 말하고 같은 정리를 지난다.
+            session.server.onExit((code) => {
+                process.stderr.write(`미리보기가 멈췄습니다(코드 ${code ?? "없음"}).\n`);
+                void stop();
+            });
+            // 서버가 도는 동안 붙잡는다 — 위 셋 중 하나가 `process.exit` 로 끝낸다.
+            await new Promise<never>(() => {});
+            return 0;
+        }
         case "baseline": {
             const context = await openContext(common);
             const result = await rebuildBaseline({
@@ -367,6 +442,27 @@ async function main(argv: readonly string[]): Promise<number> {
             process.stderr.write(`모르는 명령입니다: ${command}\n\n${help()}\n`);
             return 2;
     }
+}
+
+/**
+ * `--port` 를 미리보기 포트로. 없으면 `undefined`(코어가 빈 포트를 고른다).
+ *
+ * ⚠ **형제 판 번호와 같은 규율이다** — 검증이 네트워크·프로세스 기동보다 **먼저**다. 뒤에 두면
+ *   오타 하나가 의존성 설치(수 분)를 치른 뒤에야 드러난다.
+ */
+function portOf(flags: ReturnType<typeof parseArgs>["flags"]): number | undefined {
+    const raw = flagValue(flags, "port");
+    if (raw === null) return undefined;
+    const value = Number(raw);
+    // 1024 미만은 대개 권한이 필요하고, 65535 를 넘으면 포트가 아니다.
+    if (!Number.isInteger(value) || value < 1024 || value > 65535) {
+        throw new DevtoolsError(
+            "SERVER_REJECTED",
+            `미리보기 포트가 올바르지 않습니다(1024~65535). 받은 값: ${raw}`,
+            "`--port` 를 빼면 빈 포트를 알아서 고릅니다.",
+        );
+    }
+    return value;
 }
 
 /** 위치 인자의 판 번호(`zalkera rollback 5`). 없거나 숫자가 아니면 **거절한다.** */
