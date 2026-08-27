@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import {
+  tokenPath,
   registerLocalMcpServer,
   DevtoolsError,
   diagnose,
@@ -3187,10 +3188,29 @@ async function connectAgentSource(): Promise<void> {
   if (!name) throw new DevtoolsError("SERVER_REJECTED", "서버 이름을 만들지 못했습니다.", "잘커라에 문의해 주세요.");
   const result = await registerLocalMcpServer(dir, {
     serverName: name,
-    // ⚠ **`npx` 로 부른다.** 전역 설치를 요구하지 않는다 — 안 깔린 사람에게 설치를 먼저 시키면
-    //   그 자리에서 절반이 멈춘다. `-y` 는 「설치할까요」 물음을 없앤다(에이전트가 답할 수 없다).
+    // 🔴 **판과 레지스트리를 고정한다.** `.mcp.json` 은 **사이트 소스 폴더**에 씌어지고 그 폴더가
+    //    MCP 클라이언트의 cwd 가 된다 — 이 레포는 그 폴더를 이미 적대적으로 다룬다
+    //    (`npmChoice.ts`: 「그 폴더의 `package.json` 라이프사이클과 `.npmrc` 의 `node-options` 가
+    //    그대로 임의 코드가 된다 — 둘 다 실측」). 고정하지 않으면 ⑴ 폴더의
+    //    `node_modules/@zalkera/cli` 가 먼저 잡히고 ⑵ 폴더의 `.npmrc` 가 레지스트리를 갈아 끼운다
+    //    (둘 다 실측 재현). 그 프로세스가 읽는 자리에 **평문 refresh 토큰**이 있다.
+    //
+    // ⚠ **판을 확장 판으로 못박는다.** 서버 최소판 게이트가 하나라 두 도구가 같은 판으로 간다 —
+    //   `@latest` 로 두면 그 계약이 설정 파일에서 풀린다.
+    // ⚠ `--ignore-scripts` 로 설치 스크립트를 막는다(형제 `npmArgvOf` 와 같은 규율).
     command: "npx",
-    args: ["-y", "@zalkera/cli", "mcp"],
+    args: [
+      "-y",
+      "--registry=https://registry.npmjs.org",
+      "--ignore-scripts",
+      `@zalkera/cli@${extensionVersion}`,
+      "mcp",
+      // ⚠ **폴더를 못박는다.** 안 적으면 서버가 **에이전트의 cwd** 로 폴더를 정하고, 그것이 이
+      //   폴더가 아니면 네 도구가 전부 죽는다 — 그때 안내가 「`--site` 를 붙여 주세요」인데
+      //   그 인자는 이 파일 안에 있어 **모델이 붙일 수 없다.**
+      "--folder",
+      dir,
+    ],
   });
   const docs = await ensureAgentDocs(dir);
   log(
@@ -3198,6 +3218,31 @@ async function connectAgentSource(): Promise<void> {
   );
   if (docs.agents === "created") log("AGENTS.md 스텁을 만들었습니다.");
   if (docs.claude === "created") log("CLAUDE.md 를 만들었습니다.");
+
+  // 🔴 **이 확장의 로그인은 그 프로세스에서 안 보인다.** 확장은 VS Code SecretStorage 를 쓰고,
+  //    설정이 띄우는 것은 **별개 프로세스**라 자기 파일 보관소를 읽는다. 다리가 없으면 사람은
+  //    「로그인은 돼 있는데 AI 도구가 전부 안 된다」를 겪는다(심의 실측 — 네 도구 전부
+  //    「로그인이 필요합니다」로 죽었다).
+  //
+  // ⚠ **토큰을 복제하지 않는다.** 확장이 SecretStorage 의 값을 평문 파일로 옮기면 그 보관소를
+  //   쓰는 이유가 사라진다. 대신 **그 도구가 자기 규율대로 로그인하게** 자리를 열어 준다.
+  if (!existsSync(tokenPath())) {
+    const go = await vscode.window.showInformationMessage(
+      "설정을 적었습니다. 다만 이 통로는 **따로 한 번 로그인**해야 합니다 — AI 가 띄우는 프로그램은 이 창의 로그인을 볼 수 없습니다.",
+      {modal: true, detail: "「로그인 열기」를 누르면 터미널이 열리고, 브라우저에서 한 번 로그인하시면 끝납니다. 그 뒤 AI 확장을 껐다 켜 주세요."},
+      "로그인 열기",
+    );
+    if (go === "로그인 열기") {
+      const terminal = vscode.window.createTerminal("잘커라 로그인");
+      terminal.show();
+      // ⚠ 등록에 적은 것과 **같은 판·같은 레지스트리**로 부른다 — 다른 것을 띄우면 그 로그인이
+      //   엉뚱한 자리에 저장될 수 있다.
+      terminal.sendText(
+        `npx -y --registry=https://registry.npmjs.org --ignore-scripts @zalkera/cli@${extensionVersion} login`,
+      );
+    }
+    return;
+  }
 
   void vscode.window.showInformationMessage(
     "AI 가 이 폴더의 소스를 직접 다룰 수 있게 설정했습니다 — 받기 · 올리기 · 새 버전 만들기. " +

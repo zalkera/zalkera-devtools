@@ -367,7 +367,40 @@ async function main(argv: readonly string[]): Promise<number> {
                 );
             }
 
+            // 🔴 **열쇠를 붙잡는 자리가 `startPreview` 앞이어야 한다.** 발급은 그 안에서 나고
+            //    (`preview.ts` 의 `onKeyIssued` KDoc: 「종전에는 성공해서 반환될 때만 keyId 가
+            //    호출부에 닿아, 실패하면 **아무도 폐기할 수 없는 키**가 서버에 TTL(최대 12시간)까지
+            //    남았다」), 그 뒤 의존성 설치가 **수 분** 돈다. 신호 처리기를 반환 뒤에 걸면 그
+            //    구간의 Ctrl+C 가 기본 동작으로 죽어 열쇠가 남는다 — 그 훅이 생긴 이유가 그것인데
+            //    새 호출부가 안 썼다(심의 실측).
+            //
+            // ⚠ 그리고 그 발급은 **다른 기계의 미리보기를 이미 끊었다**(`revokedPrevious`).
+            let keyId: number | null = null;
+            let stopping = false;
+            const stop = async (code = 0): Promise<never> => {
+                // 두 신호가 겹쳐도 한 번만 돈다 — 폐기를 두 번 부르면 두 번째가 404 로 시끄럽다.
+                if (stopping) await new Promise<never>(() => {});
+                stopping = true;
+                await server?.stop().catch(() => {});
+                // ⚠ **폐기 실패로 죽지 않는다.** 사람에게 「미리보기가 실패했다」로 읽히면 거짓이다.
+                if (keyId !== null) {
+                    await context.api.revokeStorefrontKey(keyId).catch(() => {
+                        process.stderr.write("⚠ 미리보기 열쇠를 폐기하지 못했습니다 — 콘솔에서 확인해 주세요.\n");
+                    });
+                }
+                process.exit(code);
+            };
+            let server: {stop(): Promise<void>} | null = null;
+            // ⚠ **SIGHUP 도 건다.** 터미널 탭을 닫거나 SSH 가 끊기면 그 신호가 온다 — 안 걸면
+            //   기본 동작으로 죽어 열쇠가 남는다.
+            for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
+                process.on(signal, () => void stop(0));
+            }
+
             const session = await startPreview({
+                onKeyIssued: (id: number) => {
+                    keyId = id;
+                },
                 projectDir: context.folder,
                 api: context.api,
                 apiBase: context.serverUrl,
@@ -378,6 +411,12 @@ async function main(argv: readonly string[]): Promise<number> {
                 port,
                 onProgress: (m: string) => process.stderr.write(`${m}\n`),
                 onLog: (l: string) => process.stderr.write(`${l}\n`),
+            }).catch(async (error: unknown) => {
+                // 🔴 **기동이 실패해도 열쇠는 이미 서버에 났다.** 여기서 안 지우면 그 열쇠가
+                //    TTL(최대 12시간)까지 살고, 다음 사람이 미리보기를 켤 때 그것이 끊긴다 —
+                //    그리고 왜 끊겼는지 아무도 모른다.
+                if (keyId !== null) await context.api.revokeStorefrontKey(keyId).catch(() => {});
+                throw error;
             });
 
             // ⚠ **끊긴 다른 기계가 있으면 말한다.** 말 없이 끊기면 저쪽 사람은 고장으로 읽는다.
@@ -389,25 +428,13 @@ async function main(argv: readonly string[]): Promise<number> {
             process.stdout.write(`${session.server.url}\n`);
             process.stderr.write("멈추려면 Ctrl+C 를 누르세요.\n");
 
-            // 🔴 **끝날 때 열쇠를 폐기한다.** 안 하면 이 기계를 떠난 뒤에도 서버에 살아 있는
-            //    자격증명이 남고, 다음 사람이 미리보기를 켤 때 그것이 끊긴다(그리고 왜 끊겼는지
-            //    아무도 모른다). 형제 확장은 로그아웃·중지에서 같은 일을 한다.
-            //
-            // ⚠ **폐기 실패로 죽지 않는다.** 이미 서버에 난 열쇠라 우리가 못 지우는 상황이 있고,
-            //   그때 사람에게 남는 것이 「미리보기가 실패했다」면 거짓이다 — 미리보기는 돌았다.
-            const stop = async (): Promise<never> => {
-                await session.server.stop().catch(() => {});
-                await context.api.revokeStorefrontKey(session.keyId).catch(() => {
-                    process.stderr.write("⚠ 미리보기 열쇠를 폐기하지 못했습니다 — 콘솔에서 확인해 주세요.\n");
-                });
-                process.exit(0);
-            };
-            process.on("SIGINT", () => void stop());
-            process.on("SIGTERM", () => void stop());
+            server = session.server;
             // dev 서버가 스스로 죽으면 그 사실을 말하고 같은 정리를 지난다.
+            // ⚠ **그 종료 코드를 그대로 낸다.** 0 으로 접으면 `zalkera preview` 가 **실패해도 성공**을
+            //   보고하고, 스크립트는 그것만 본다.
             session.server.onExit((code) => {
                 process.stderr.write(`미리보기가 멈췄습니다(코드 ${code ?? "없음"}).\n`);
-                void stop();
+                void stop(code === 0 || code === null ? 0 : 1);
             });
             // 서버가 도는 동안 붙잡는다 — 위 셋 중 하나가 `process.exit` 로 끝낸다.
             await new Promise<never>(() => {});

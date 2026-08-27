@@ -149,6 +149,7 @@ export {
   UPGRADE_NOTICE_INTERVAL_MS,
   type UpgradeNoticeState,
 } from "./upgradeNotice.ts";
+export { tokenPath } from "./tokenPath.ts";
 export { plainNotice, ours, count, countJosa } from "./notice.ts";
 export { say, type CapturedTenant } from "./tenantScope.ts";
 export { fetchPresetZip, type PresetZip } from "./presets.ts";

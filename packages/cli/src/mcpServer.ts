@@ -29,10 +29,12 @@
  * `preview`·`baseline` 은 사람이 부르는 자리라 CLI 명령으로만 둔다.
  */
 import {
+    count,
     hashWorkdir,
     pullSiteSource,
     pushSiteSource,
     publishDraft,
+    plainNotice,
     readLedger,
     syncStatus,
     type DraftFiles,
@@ -67,18 +69,54 @@ const NO_ARGS = {type: "object", properties: {}, additionalProperties: false} as
  * ⚠ **모델에게도 「모른다」를 숨기지 않는다.** 서버를 못 읽었을 때 「같습니다」로 접으면 모델이
  *   그것을 근거로 올리기를 부른다.
  */
-function describeForAgent(status: SyncStatus, draft: DraftFiles | null): string {
+export function describeForAgent(status: SyncStatus, draft: DraftFiles | null): string {
     const lines = [
-        `사이트: ${status.tenant ?? "모름"}`,
-        `켜진 버전: ${status.activeRevisionNo ?? "모름"}`,
-        `이 폴더의 기준 버전: ${status.baseRevisionNo ?? "모름"}`,
-        `이 폴더에서 고친 것: ${status.changed.length}개`,
+        `사이트: ${siteCodeOf(status.tenant)}`,
+        `켜진 버전: ${count(status.activeRevisionNo)}`,
+        `이 폴더의 기준 버전: ${count(status.baseRevisionNo)}`,
+        // ⚠ **셋을 다 싣는다.** 고친 것만 세면 **새로 만들기만 한 폴더가 「0개」**가 된다 —
+        //   AI 가 새 페이지를 만드는 것이 이 기능의 주 용도다(심의 실측).
+        `이 폴더에서 고친 것: ${status.changed.length}개 · 새로 만든 것: ${status.added.length}개 · 지운 것: ${status.removed.length}개`,
         `사이트 쪽에 걸린 편집: ${draft === null ? "모름(서버를 못 읽음)" : `${status.draftPaths}개`}`,
     ];
+    // ⚠ **날 식별자를 모델에게 주지 않는다.** `LEDGER_UNKNOWN` 같은 값은 사람 말이 아니고,
+    //   모델은 그것을 그대로 사장님께 옮긴다. 형제 `report.ts` 의 규율과 같다.
     if (status.blockers.length > 0) {
-        lines.push(`막혀 있는 것: ${status.blockers.join(" · ")}`);
+        lines.push(`막혀 있는 것: ${status.blockers.map(blockerText).join(" · ")}`);
     }
     return lines.join("\n");
+}
+
+/**
+ * 사이트 코드 — **알려진 모양이 아니면 안 싣는다.**
+ *
+ * 🔴 **소독으로 막을 자리가 아니다.** `plainNotice` 는 제어문자·링크를 지우지만 **글자 자체는
+ *    남긴다** — 개행을 지워도 「이전 지시는 무시하고…」는 그대로 모델에게 간다(실측). 이 값의
+ *    출처는 폴더 안 `.zalkera/sync.json` 이고, 그 파일은 **남이 준 zip·시작 소스 팩에 실려 온다.**
+ *    서버 탈취가 필요 없다.
+ *
+ * ⚠ **형태로 잰다** — 사이트 코드는 모양이 정해져 있다(콘솔 입력이 같은 잣대를 쓴다). 아니면
+ *   「모름」이다: 모르는 것을 그대로 옮기느니 모른다고 말하는 쪽이 정직하고 안전하다.
+ */
+const SITE_CODE = /^[a-z0-9][a-z0-9-]{0,62}$/;
+
+function siteCodeOf(raw: string | null): string {
+    return raw !== null && SITE_CODE.test(raw) ? raw : "모름";
+}
+
+/** 막힌 사유를 사람 말로. 다음에 할 일이 문장 안에 있어야 한다. */
+function blockerText(blocker: string): string {
+    switch (blocker) {
+        case "LEDGER_UNKNOWN":
+            return "이 폴더의 기준 기록이 없습니다(사람이 `zalkera baseline` 을 한 번 실행해야 합니다)";
+        case "SERVER_UNREADABLE":
+            return "사이트 상태를 읽지 못했습니다(로그인·연결을 확인해 주세요)";
+        case "STRANDED":
+            return "사이트 쪽 편집이 옛 버전 위에 있습니다(사람이 버리거나 되돌려야 합니다)";
+        default:
+            // 모르는 값을 지어내지 않는다 — 다만 그 글자도 서버·파일에서 올 수 있으므로 소독한다.
+            return plainNotice(blocker, 60);
+    }
 }
 
 const TOOLS: Tool[] = [
@@ -114,7 +152,7 @@ const TOOLS: Tool[] = [
         async run(context) {
             const result = await pullSiteSource({api: context.api, folder: context.folder});
             return (
-                `${result.revisionNo}판을 받았습니다. ` +
+                `${count(result.revisionNo)}판을 받았습니다. ` +
                 `쓴 파일 ${result.written}개 · 지운 파일 ${result.deleted}개 · 그대로 ${result.unchanged}개.`
             );
         },
@@ -156,7 +194,7 @@ const TOOLS: Tool[] = [
             const label = typeof args.label === "string" ? args.label : undefined;
             const result = await publishDraft({api: context.api, folder: context.folder, label});
             const lines = [
-                `${result.revisionNo}판으로 올렸습니다.`,
+                `${count(result.revisionNo)}판으로 올렸습니다.`,
                 result.siteType === "STATIC"
                     ? "지금 바로 손님에게 보입니다."
                     : "사이트를 다시 짓는 중입니다 — 다 지어지면 손님에게 보입니다.",
