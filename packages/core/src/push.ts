@@ -181,7 +181,19 @@ export async function pushSiteSource(options: PushOptions): Promise<PushResult> 
         //    이 갈래를 안 가르면 **방금 발행한 사람에게** 「기준이 12판에서 11판으로 움직였다」는
         //    거꾸로 된 문장이 나가고, 그 안내(`zalkera pull`)를 따르면 옛 판을 받아 방금 발행한
         //    내용이 폴더에서 사라진다(판에는 남지만 사람은 「발행이 날아갔다」를 본다).
-        const mineRow = rows.find((row) => row.revisionNo === ledger.base.revisionNo);
+        // ⚠ **방향을 본다.** 「아직 안 켜졌다」가 참인 것은 활성이 내 기준보다 **뒤에** 있을 때뿐이다.
+        //   활성이 앞서 갔는데(남이 발행했거나 되돌리기가 새 판을 세웠다) 내 기준 판이 마침 빌드
+        //   중이면, 「빌드가 끝나면 그 버전이 켜집니다」는 **거짓**이다 — 서버는 되돌린 시점에 빌드
+        //   중이던 판을 완료돼도 안 켠다(`activateByPointer` KDoc: READY 로 원장에 남는다).
+        //   라이브는 남의 내용인데 사람은 「기다리면 내 것이 켜진다」를 듣게 된다.
+        //
+        //   `FAILED` 쪽이 더 날카롭다 — 그 힌트가 `zalkera baseline` 을 대는데, 활성이 앞서 간
+        //   경우 그것은 장부만 새 판으로 바꾸고 작업본은 옛 내용 그대로라 뒤이은 `push` 가 **남의
+        //   판을 통째로 덮는다.** 형제 [baseMoved] 가 KDoc 으로 금지해 둔 바로 그 행동이다.
+        const notYetLive = active < ledger.base.revisionNo;
+        const mineRow = notYetLive
+            ? rows.find((row) => row.revisionNo === ledger.base.revisionNo)
+            : undefined;
         if (mineRow?.status === "BUILDING") {
             throw new DevtoolsError(
                 "PUSH_BASE_BUILDING",

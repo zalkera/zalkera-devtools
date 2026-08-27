@@ -628,6 +628,38 @@ test("🔴 **짓는 중**을 「움직였다」로 말하지 않는다 — 그 �
     strictEqual(s.seen.length, 0);
 });
 
+test("🔴 활성이 **앞서 갔으면** 내 기준이 빌드 중이어도 「기다리면 켜진다」가 아니다", async () => {
+    // 남이 9판을 발행했고 내 기준 8판은 아직 빌드 중이다. 서버는 되돌린 시점에 빌드 중이던 판을
+    // 완료돼도 안 켠다 — 「빌드가 끝나면 그 버전이 켜집니다」는 그 상황에서 거짓이다.
+    const s = server({activeRevisionNo: 9, otherRevisions: [{revisionNo: 8, status: "BUILDING"}]});
+    const dir = await site({"a.tsx": "가"}, {
+        files: {"a.tsx": {sha256: sha("가"), bytes: 1}},
+        base: {revisionNo: 8, tarSha256: "b".repeat(64)},
+    });
+    await rejects(() => pushSiteSource({api: s.api, folder: dir}), (e: unknown) => {
+        ok(e instanceof DevtoolsError);
+        strictEqual(e.code, "PUSH_BASE_MOVED", "활성이 앞섰는데 「짓는 중」이라 말한다");
+        ok(!/짓는 중/.test(e.humanMessage), `거짓 기다림을 안내한다: ${e.humanMessage}`);
+        return true;
+    });
+});
+
+test("🔴 활성이 앞서 갔으면 빌드 **실패** 판도 `baseline` 을 대지 않는다 — 남의 판을 통째로 덮는다", async () => {
+    // `baseline` 은 장부만 새 판으로 바꾸고 작업본은 옛 내용 그대로다. 그 상태의 `push` 는
+    // 내가 만진 적 없는 것까지 전부 올려 남의 9판을 덮는다(형제 `baseMoved` 가 금지해 둔 행동).
+    const s = server({activeRevisionNo: 9, otherRevisions: [{revisionNo: 8, status: "FAILED"}]});
+    const dir = await site({"a.tsx": "가"}, {
+        files: {"a.tsx": {sha256: sha("가"), bytes: 1}},
+        base: {revisionNo: 8, tarSha256: "b".repeat(64)},
+    });
+    await rejects(() => pushSiteSource({api: s.api, folder: dir}), (e: unknown) => {
+        ok(e instanceof DevtoolsError);
+        strictEqual(e.code, "PUSH_BASE_MOVED");
+        ok(!/zalkera baseline/.test(e.humanMessage), `남의 판을 덮는 출구를 댄다: ${e.humanMessage}`);
+        return true;
+    });
+});
+
 test("🔴 **짓다가 실패해** 안 켜진 것도 「움직였다」가 아니다", async () => {
     const s = server({activeRevisionNo: 7, otherRevisions: [{revisionNo: 8, status: "FAILED"}]});
     const dir = await site({"a.tsx": "가"}, {
