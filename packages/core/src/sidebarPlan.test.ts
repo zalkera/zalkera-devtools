@@ -7,6 +7,7 @@
  *
  * 재현: `npm test -w @zalkera/devtools-core`
  */
+import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { sidebarPlan, type SidebarState } from "./sidebarPlan.ts";
@@ -405,4 +406,28 @@ test("모르면 보여 준다 — 모름을 「하나뿐」으로 접지 않는�
 test("사이트가 없으면 「선택」이다 — 전환할 것이 없다", () => {
     const first = siteItems({ ...base, tenant: "", canSwitch: null })[0]!;
     assert.equal(first.label, "사이트 선택");
+});
+
+test("🔴 **묶음 목록을 나열하는 자리들이 실물과 같다** — 묶음을 더하면 그 문장들이 조용히 거짓이 된다", () => {
+    // 실측: 「AI 연결」을 더했더니 `help.md` 의 「일곱 묶음 — 사이트 · 미리보기 · …」가 거짓이
+    // 됐는데 **아무 게이트도 안 잡았다.** 명령 검사기는 명령을 보지 묶음을 안 보고, 인용
+    // 검사기는 그 문장이 인용으로 표시돼 있지 않아 관할 밖이다.
+    //
+    // ⚠ **개수를 세지 않는다.** 「일곱 묶음」처럼 숫자를 박으면 항목이 늘 때마다 거짓이 되고,
+    //   그 거짓은 사람 눈에만 걸린다. 여기서 재는 것은 **목록이 같은가**다.
+    // ⚠ **`plan()` 을 쓴다** — `sidebarPlan` 에 부분 상태를 주면 로그인 전 갈래로 접혀 라벨이
+    //   **빈 배열**이 되고, 그러면 `listed` 가 빈 문자열이라 `includes("")` 가 언제나 참이다.
+    //   초판이 그랬다: 문서를 낡게 만드는 변이가 **초록으로 통과**했다(실측).
+    const labels = plan({site: "/tmp/x"}).map((g) => g.label).filter((l) => l !== "");
+    assert.ok(labels.length > 3, `묶음을 못 읽었다 — 이 시험은 아무것도 안 재고 있다: ${JSON.stringify(labels)}`);
+    const listed = labels.join(" · ");
+
+    const root = new URL("../../../", import.meta.url);
+    for (const rel of ["packages/vscode/media/help.md", "packages/core/src/sidebarPlan.ts"]) {
+        const text = readFileSync(new URL(rel, root), "utf8");
+        assert.ok(
+            text.includes(listed),
+            `${rel} 의 묶음 목록이 실물과 다릅니다.\n  실물: ${listed}`,
+        );
+    }
 });
