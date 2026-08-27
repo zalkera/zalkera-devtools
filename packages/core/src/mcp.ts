@@ -69,8 +69,20 @@ function isOurEntry(value: unknown): boolean {
     //   쓰던 남의 stdio 서버를 우리 것으로 오인해 **덮는다** — 그 항목의 `env` 에 든 토큰째로.
     //   유출이 아니라 **파괴**다(형제 갈래가 같은 이유로 그렇게 적혀 있다).
     if (e.type === "stdio" || e.type === undefined) {
-        const args = Array.isArray(e.args) ? e.args : [];
-        return args.some((a) => typeof a === "string" && LOCAL_TOOL_ARGS.has(a));
+        const args = (Array.isArray(e.args) ? e.args : []).filter((a): a is string => typeof a === "string");
+        // 🔴 **맨 낱말 하나로 판정하지 않는다.** 종전 목록에 `zalkera` 가 들어 있어, `args` 어딘가에
+        //    그 낱말이 한 번 있으면 **남의 stdio 항목을 우리 것으로 봤다** — 실측 변이에서
+        //    `{command:"docker", args:["run","-i","zalkera"], env:{TOK}}` 가 토큰째로 덮였다.
+        //    유출이 아니라 **파괴**다.
+        //
+        // ⚠ **우리가 적는 모양으로 잰다**: 마지막 인자가 우리 하위 명령이고, 패키지 인자가 우리
+        //   이름이거나 명령 자체가 우리 실행기다. 그래야 「남의 것을 안 덮는다」와 「우리가 적은
+        //   것은 다시 적을 수 있다」가 **둘 다** 선다.
+        const runsOurVerb = args.includes("mcp");
+        const namesUs =
+            e.command === "zalkera" ||
+            args.some((a) => LOCAL_TOOL_ARGS.has(a.replace(/@[^@/]*$/, "")));
+        return runsOurVerb && namesUs;
     }
     return false;
 }
@@ -83,6 +95,9 @@ function isOurEntry(value: unknown): boolean {
  *   그러면 사람이 손으로 지우기 전까지 다시 등록을 못 한다.
  */
 const LOCAL_TOOL_ARGS = new Set(["@zalkera/cli", "zalkera", "zalkera-cli", "@zalkera/devtools"]);
+
+// ⚠ 판이 붙은 인자(`@zalkera/cli@0.21.0`)도 같은 이름으로 읽는다 — 등록이 판을 못박기 때문이다.
+//   그래서 위 판정이 `replace(/@[^@/]*$/, "")` 로 꼬리를 떼고 대조한다.
 
 /** 프로젝트 스코프 `.mcp.json` 에 우리 서버를 적는다(팀이 공유하는 자리 — 시크릿은 담기지 않는다). */
 export async function registerMcpServer(
@@ -156,7 +171,8 @@ async function writeEntry(
     const existing = servers[registration.serverName];
     // ⚠ **남의 항목을 덮지 않는다.** 이름 형태 검사는 `github` 같은 **흔한 이름**을 막지 못한다 —
     //   그 자리에 고객이 쓰던 stdio 서버가 있으면 토큰이 든 `env` 째로 사라지고, 우리는 "갱신"이라
-    //   보고한다. 유출이 아니라 **파괴**다. 우리 형상(`type: "http"`)이 아닌 것은 손대지 않는다.
+    //   보고한다. 유출이 아니라 **파괴**다. **우리가 적는 모양**이 아닌 것은 손대지 않는다
+    //   (원격은 `type:"http"` + `oauth` 짝, 로컬은 우리 하위 명령 + 우리 패키지 이름).
     if (existing !== undefined && !isOurEntry(existing)) {
         throw new DevtoolsError(
             "NOT_A_SITE",

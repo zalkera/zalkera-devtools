@@ -138,7 +138,13 @@ export interface PathOps {
     sep: string;
 }
 
-/** 경로 조작 한 벌. 순수 판정에 주입해 플랫폼별 동작을 시험할 수 있게 한다. */
+/**
+ * 경로 조작 한 벌. **순수 판정**([systemNpmSearchSteps]·[acceptsResolvedNpmCli])에 주입해
+ * 플랫폼별 동작을 시험할 수 있게 한다.
+ *
+ * ⚠ [probeSystemNpm] 은 주입을 안 받는다 — 그쪽은 파일시스템에 대고 도는 껍데기라 이 상수를
+ *   그대로 쓴다. 그래서 그 함수의 Windows 갈래는 여기 시험이 아니라 위 두 순수 함수가 문다.
+ */
 const PATH_OPS = { join, isAbsolute, normalize, sep };
 
 /**
@@ -181,6 +187,13 @@ export function probeSystemNpm(
                 encoding: "utf8",
                 timeout: 3_000,
                 stdio: ["ignore", "pipe", "ignore"],
+                // 🔴 **자식에게도 넘긴다.** 종전에는 이 `env` 가 PATH 를 읽는 데만 쓰이고 자식은
+                //    `process.env` 를 물려받았다 — 그러면 VS Code 확장 호스트에 `ELECTRON_RUN_AS_NODE`
+                //    가 없어 `execPath` 가 **Electron 으로** 뜨고, `npm-cli.js --version` 이 실패하거나
+                //    3초 타임아웃을 먹는다. 그 결과 「PATH 에 npm 이 없다」는 **거짓 진단**이 나가고
+                //    `zalkera.npm="system"` 인 사람은 미리보기가 통째로 막힌다(심의 실측).
+                //    KDoc 이 이미 그렇게 약속하고 있었는데 코드가 안 지켰다.
+                env,
             });
             const version = out.trim();
             if (version) return { version, path: cli };

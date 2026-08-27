@@ -204,3 +204,44 @@ test("🔴 **옛 이름으로 적힌 우리 항목도 우리 것으로 본다** 
     });
     strictEqual(result.action, "updated");
 });
+
+test("🔴 **남의 stdio 항목을 안 덮는다** — 실측 변이 셋(그 env 에 토큰이 있다)", async () => {
+    // 종전 판정은 `args` 에 맨 낱말 `zalkera` 가 한 번 있으면 우리 것으로 봤다.
+    const theirs = [
+        {type: "stdio", command: "node", args: ["srv.js", "zalkera"], env: {GITHUB_TOKEN: "비밀"}},
+        {command: "uvx", args: ["mcp-server", "zalkera"], env: {API_KEY: "비밀"}},
+        {command: "docker", args: ["run", "-i", "zalkera"], env: {TOK: "비밀"}},
+    ];
+    for (const entry of theirs) {
+        const dir = await tempDir("zalkera-theirs-");
+        await writeFile(join(dir, ".mcp.json"), JSON.stringify({mcpServers: {"zalkera-source": entry}}));
+        await rejects(
+            () => registerLocalMcpServer(dir, {
+                serverName: serverName("zalkera-source"), command: "npx", args: ["-y", "@zalkera/cli@1.0.0", "mcp"],
+            }),
+            (e: unknown) => e instanceof DevtoolsError,
+            `덮었다: ${JSON.stringify(entry)}`,
+        );
+        const after = JSON.parse(await readFile(join(dir, ".mcp.json"), "utf8")) as {
+            mcpServers: Record<string, {env?: Record<string, string>}>;
+        };
+        ok(after.mcpServers["zalkera-source"]?.env, `남의 env 가 사라졌다: ${JSON.stringify(entry)}`);
+    }
+});
+
+test("🔴 **우리가 적은 것은 다시 적을 수 있다** — 판이 붙어도, 전역 설치 모양이어도", async () => {
+    // 좁히다 못 알아보면 「잘커라에 문의해 주세요」로 **영구 잠김**이 된다(사람이 손으로 지워야 한다).
+    const ours = [
+        {type: "stdio", command: "npx", args: ["-y", "@zalkera/cli@0.20.2", "mcp", "--folder", "/x"]},
+        {type: "stdio", command: "npx", args: ["-y", "zalkera", "mcp"]},
+        {command: "zalkera", args: ["mcp"]},
+    ];
+    for (const entry of ours) {
+        const dir = await tempDir("zalkera-ours-");
+        await writeFile(join(dir, ".mcp.json"), JSON.stringify({mcpServers: {"zalkera-source": entry}}));
+        const result = await registerLocalMcpServer(dir, {
+            serverName: serverName("zalkera-source"), command: "npx", args: ["-y", "@zalkera/cli@1.0.0", "mcp"],
+        });
+        ok(result.action === "updated" || result.action === "unchanged", `못 알아봤다: ${JSON.stringify(entry)}`);
+    }
+});

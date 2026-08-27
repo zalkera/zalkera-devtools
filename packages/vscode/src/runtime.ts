@@ -1,17 +1,13 @@
-import { execFileSync } from "node:child_process";
-import { existsSync, realpathSync } from "node:fs";
-import { delimiter, isAbsolute, join, normalize, sep } from "node:path";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 
 /** 순수 판정에 넘기는 경로 조작 한 벌. 코어는 `node:path` 를 안 가져간다. */
-const PATH_OPS = {join, isAbsolute, normalize, sep};
 import { execPath } from "node:process";
 import {
     probeSystemNpm,
     chooseNpm,
     describeNpm,
     npmArgvOf,
-    acceptsResolvedNpmCli,
-    systemNpmSearchSteps,
     type NpmChoice,
     type NpmPreference,
 } from "@zalkera/devtools-core";

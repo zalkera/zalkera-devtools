@@ -3,7 +3,7 @@
  *
  * 고객 기계에서 돌며, 그 사람의 에이전트에게 **소스 동기화**를 연다.
  *
- * ⚠ **형제 「에이전트 연결(MCP)」과 다른 물건이다.** 그쪽은 우리 백엔드의 **원격** 평면을
+ * ⚠ **형제 「내 데이터 보여 주기」와 다른 물건이다.** 그쪽은 우리 백엔드의 **원격** 평면을
  *   에이전트 설정에 등록해 **서버 쪽 데이터**(상품·주문·설정)를 보여 준다(`core/mcp.ts`).
  *   이쪽은 여기서 돌고 여는 것이 데이터가 아니라 **받기·올리기·발행**이다. 둘은 짝이다 —
  *   원격이 「내 사이트에 뭐가 있나」를, 로컬이 「고친 걸 올리고 발행해」를 맡는다.
@@ -44,12 +44,16 @@ import {openContext, version, type Context} from "./context.ts";
 import {RPC, RpcError, serveStdio} from "./jsonRpc.ts";
 
 /**
- * 우리가 말하는 프로토콜 판.
+ * 우리가 **아는** 프로토콜 판들. 첫 번째가 기본이다.
  *
- * ⚠ **상대가 다른 판을 말하면 그 판을 되돌려 주지 않는다** — 우리가 아는 판을 답한다. 규격이
- *   그렇게 정하고, 모르는 판을 흉내내면 상대가 없는 기능을 기대한다.
+ * ⚠ **상대가 아는 판을 말하면 그 판으로 답한다.** 종전에는 우리 판만 답했는데, 그러면 옛 판만
+ *   아는 클라이언트가 조용히 안 붙고 사람에게는 **「도구가 안 뜬다」**로만 보인다 —
+ *   `help.md` 가 지원 대상으로 이름을 대는 도구들이 그 처지가 될 수 있다.
+ * ⚠ **모르는 판은 흉내내지 않는다.** 그때는 우리 기본판을 답한다 — 상대가 없는 기능을 기대하게
+ *   만드느니 판이 다르다는 사실을 보이는 쪽이 낫다.
  */
-const PROTOCOL_VERSION = "2025-06-18";
+const PROTOCOL_VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"] as const;
+const PROTOCOL_VERSION = PROTOCOL_VERSIONS[0];
 
 /** 도구 하나의 선언. `inputSchema` 는 JSON Schema 다. */
 interface Tool {
@@ -57,6 +61,13 @@ interface Tool {
     title: string;
     description: string;
     inputSchema: Record<string, unknown>;
+    /**
+     * 클라이언트가 **물어볼지 자동승인할지** 정하는 입력(규격의 도구 힌트).
+     *
+     * ⚠ 없으면 넷이 같은 등급으로 취급된다 — `status` 는 읽기이고 `publish` 는 **손님이 보는
+     *   사이트를 바꾼다.** 파괴적 동사를 카탈로그 밖에 둔 논리와 같은 축이다.
+     */
+    annotations: Record<string, boolean>;
     run(context: Context, args: Record<string, unknown>): Promise<string>;
 }
 
@@ -126,6 +137,7 @@ const TOOLS: Tool[] = [
         description:
             "이 폴더와 잘커라 사이트가 어떻게 다른지 본다. 서버만 아는 것을 답한다 — 지금 켜진 버전, " +
             "이 폴더에 없는 편집, 좌초 여부. 파일을 읽는 것으로는 알 수 없는 값이다. 아무것도 바꾸지 않는다.",
+        annotations: {readOnlyHint: true, openWorldHint: true},
         inputSchema: NO_ARGS,
         async run(context) {
             const draft = await context.api.draftFiles().catch(() => null);
@@ -148,6 +160,7 @@ const TOOLS: Tool[] = [
         description:
             "잘커라 사이트의 지금 버전을 이 폴더에 받는다. **이 폴더에서 고친 것이 있으면 거절한다** — " +
             "덮어쓰지 않는다. 그때는 먼저 올리거나, 사람이 직접 정하게 해야 한다.",
+        annotations: {readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true},
         inputSchema: NO_ARGS,
         async run(context) {
             const result = await pullSiteSource({api: context.api, folder: context.folder});
@@ -163,6 +176,7 @@ const TOOLS: Tool[] = [
         description:
             "이 폴더에서 고친 것을 사이트 쪽 편집으로 올린다. **손님에게는 아직 안 보인다** — " +
             "보이게 하려면 zalkera_publish 를 부른다. 사이트 쪽에 이 폴더가 모르는 편집이 있으면 거절한다.",
+        annotations: {readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true},
         inputSchema: NO_ARGS,
         async run(context) {
             const result = await pushSiteSource({api: context.api, folder: context.folder});
@@ -181,8 +195,9 @@ const TOOLS: Tool[] = [
         title: "올린 것을 새 버전으로 만들기",
         description:
             "사이트 쪽에 올려 둔 편집을 새 버전으로 만든다. **이때부터 손님에게 보인다** " +
-            "(정적 사이트는 바로, Next 사이트는 다시 지은 뒤). 되돌리려면 사람이 터미널에서 " +
-            "`zalkera rollback` 을 쓴다 — 그 동사는 이 목록에 없다.",
+            "(정적 사이트는 바로, Next 사이트는 다시 지은 뒤). 되돌리는 것은 이 목록에 없다 — " +
+            "사람이 화면에서 직접 고른다.",
+        annotations: {readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true},
         inputSchema: {
             type: "object",
             properties: {
@@ -233,13 +248,19 @@ export async function serveMcp(options: {folder?: string; tenant?: string} = {})
     let initialized = false;
     await serveStdio(process.stdin, process.stdout, async (method, params) => {
         switch (method) {
-            case "initialize":
+            case "initialize": {
                 initialized = true;
+                const asked = (params as {protocolVersion?: unknown} | undefined)?.protocolVersion;
+                const agreed =
+                    typeof asked === "string" && (PROTOCOL_VERSIONS as readonly string[]).includes(asked)
+                        ? asked
+                        : PROTOCOL_VERSION;
                 return {
-                    protocolVersion: PROTOCOL_VERSION,
+                    protocolVersion: agreed,
                     capabilities: {tools: {}},
                     serverInfo: {name: "zalkera", title: "잘커라 소스 동기화", version: version()},
                 };
+            }
             // 상대가 「준비됐다」고 알린다. 답하지 않는 알림이다.
             case "notifications/initialized":
                 return undefined;
@@ -252,6 +273,7 @@ export async function serveMcp(options: {folder?: string; tenant?: string} = {})
                         title: t.title,
                         description: t.description,
                         inputSchema: t.inputSchema,
+                        annotations: t.annotations,
                     })),
                 };
             case "tools/call": {

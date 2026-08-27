@@ -179,3 +179,46 @@ test("🔴 막힌 사유를 **날 식별자로** 주지 않는다 — 모델이 
     ok(!shown.includes("LEDGER_UNKNOWN"), `날 식별자가 나갔다: ${shown}`);
     ok(shown.includes("baseline"), "다음에 할 일이 문장 안에 없다");
 });
+
+test("🔴 `id: 0` 은 알림이 아니다 — falsy 함정", async () => {
+    // `!id` 로 재면 0 이 알림으로 접혀 그 요청이 영영 답을 못 받는다. 지금 코드는 옳은데
+    // **그것을 무는 것이 없었다**(심의 변이 실측: `!id` 로 바꿔도 62 시험 전부 초록).
+    const {frames} = await speak([INIT, '{"jsonrpc":"2.0","id":0,"method":"ping"}']);
+    strictEqual(frames[1]?.id, 0, `id:0 을 알림으로 접었다: ${JSON.stringify(frames)}`);
+});
+
+test("🔴 `id: null` 도 **답해야 하는 요청**이다 — 알림은 `id` 가 «없는» 것이다", async () => {
+    const {frames} = await speak([INIT, '{"jsonrpc":"2.0","id":null,"method":"ping"}']);
+    strictEqual(frames.length, 2, `id:null 을 알림으로 접었다: ${JSON.stringify(frames)}`);
+    strictEqual(frames[1]?.id, null);
+});
+
+test("🔴 배치를 **조용히 삼키지 않는다** — 상대가 영원히 기다린다", async () => {
+    const {frames} = await speak([INIT, '[{"jsonrpc":"2.0","id":10,"method":"ping"}]']);
+    strictEqual(frames.length, 2, `배치를 삼켰다: ${JSON.stringify(frames)}`);
+    strictEqual(frames[1]?.error?.code, -32600);
+});
+
+test("🔴 응답에는 `result` 나 `error` 가 **반드시** 있다 — 규격이 그렇게 정한다", async () => {
+    const {frames} = await speak([INIT, '{"jsonrpc":"2.0","id":2,"method":"notifications/initialized"}']);
+    const answer = frames[1] as Record<string, unknown>;
+    ok("result" in answer || "error" in answer, `둘 다 없는 응답이 나갔다: ${JSON.stringify(answer)}`);
+});
+
+test("🔴 상대가 **아는 판**을 말하면 그 판으로 답한다 — 아니면 조용히 안 붙는다", async () => {
+    const old = '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{}}}';
+    const {frames} = await speak([old]);
+    strictEqual(frames[0]?.result?.protocolVersion, "2024-11-05");
+
+    // 모르는 판은 흉내내지 않는다 — 우리 기본판을 답한다.
+    const unknown = '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"1999-01-01","capabilities":{}}}';
+    const other = await speak([unknown]);
+    strictEqual(other.frames[0]?.result?.protocolVersion, "2025-06-18");
+});
+
+test("🔴 도구 힌트를 싣는다 — 없으면 클라이언트가 `publish` 를 읽기 도구와 같은 등급으로 본다", async () => {
+    const {frames} = await speak([INIT, '{"jsonrpc":"2.0","id":2,"method":"tools/list"}']);
+    const tools = (frames[1]?.result?.tools ?? []) as Array<{name: string; annotations?: Record<string, boolean>}>;
+    strictEqual(tools.find((t) => t.name === "zalkera_status")?.annotations?.readOnlyHint, true);
+    strictEqual(tools.find((t) => t.name === "zalkera_publish")?.annotations?.destructiveHint, true);
+});

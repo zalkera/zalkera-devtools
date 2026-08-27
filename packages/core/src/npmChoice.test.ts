@@ -1,3 +1,6 @@
+import {tempDir} from "./testing/tempDir.ts";
+import {join} from "node:path";
+import {chmod, mkdir, writeFile} from "node:fs/promises";
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
 import {
@@ -8,6 +11,7 @@ import {
     npmArgvOf,
     acceptsResolvedNpmCli,
     systemNpmSearchSteps,
+    probeSystemNpm,
     type NpmProbe,
 } from "./npmChoice.ts";
 
@@ -207,4 +211,19 @@ test("어느 npm 이든 실행 인자는 이름이 아니라 경로다", () => {
         strictEqual(argv[0], "/node");
         ok(argv[1]?.endsWith(".js"), argv[1]);
     }
+});
+
+test("🔴 `probeSystemNpm` 이 `env` 를 **자식에게** 넘긴다 — 안 넘기면 VS Code 에서 Electron 이 뜬다", async () => {
+    // 확장은 `execPath`(Electron 바이너리)로 npm 을 부르고, 그것이 Node 로 뜨려면
+    // `ELECTRON_RUN_AS_NODE=1` 이 있어야 한다. `env` 가 PATH 파싱에만 쓰이면 자식은 그 값을
+    // 못 받아 「PATH 에 npm 이 없다」는 **거짓 진단**이 나간다(심의 실측).
+    const dir = await tempDir("zalkera-npmenv-");
+    const fake = join(dir, "fakenode");
+    await writeFile(fake, "#!/bin/sh\necho \"MARK=[${ZALKERA_PROBE_MARK}]\"\n");
+    await chmod(fake, 0o755);
+    await mkdir(join(dir, "node_modules", "npm", "bin"), {recursive: true});
+    await writeFile(join(dir, "node_modules", "npm", "bin", "npm-cli.js"), "//");
+
+    const found = probeSystemNpm(fake, [], {PATH: dir, ZALKERA_PROBE_MARK: "지나감"});
+    strictEqual(found?.version, "MARK=[지나감]", `자식이 env 를 못 받았다: ${JSON.stringify(found)}`);
 });

@@ -69,12 +69,29 @@ export async function serveStdio(
     };
 
     let buffered = "";
+    // 상한을 넘긴 줄을 건너뛰는 중인가 — 다음 `\n` 에서 풀린다.
+    let skipping = false;
     input.setEncoding("utf8");
     for await (const chunk of input) {
         buffered += chunk as string;
         // ⚠ **상한을 건다.** 줄바꿈 없는 스트림을 무한히 모으면 우리 메모리가 상대 손에 있다.
-        if (buffered.length > MAX_LINE_BYTES) {
+        //
+        // 🔴 **버퍼를 통째로 비우지 않는다.** 종전에는 그랬는데, 그러면 같은 청크에 이미 들어와
+        //    있던 **완결된 정상 요청들**이 응답도 오류도 없이 사라진다(실측). JSON-RPC 에서
+        //    「답이 영영 안 오는 요청」은 상대를 매달고, 그 실패는 「도구가 안 뜬다」로만 보인다.
+        //    다음 줄바꿈까지만 건너뛰어 **줄 경계에서 정확히 재동기화**한다.
+        if (skipping) {
+            const end = buffered.indexOf("\n");
+            if (end === -1) {
+                buffered = "";
+                continue;
+            }
+            buffered = buffered.slice(end + 1);
+            skipping = false;
+        }
+        if (buffered.length > MAX_LINE_BYTES && !buffered.includes("\n")) {
             buffered = "";
+            skipping = true;
             write({jsonrpc: "2.0", id: null, error: {code: RPC.PARSE_ERROR, message: "메시지가 너무 깁니다."}});
             continue;
         }
@@ -95,27 +112,56 @@ export async function serveStdio(
                 continue;
             }
 
+            // 🔴 **배열(배치)을 조용히 삼키지 않는다.** JSON-RPC 2.0 은 배열을 허용하고, 종전에는
+            //    `method` 가 문자열이 아니라 **알림으로 접혀 아무것도 안 썼다** — 상대는 영원히
+            //    기다린다(실측). 우리는 배치를 안 받으므로 **그렇다고 말한다.**
+            if (Array.isArray(request)) {
+                write({
+                    jsonrpc: "2.0",
+                    id: null,
+                    error: {code: RPC.INVALID_REQUEST, message: "이 서버는 배치 요청을 받지 않습니다."},
+                });
+                continue;
+            }
+
             const id = request?.id;
-            // 알림 — 답하지 않는다. 우리가 아는 알림이 없으므로 조용히 넘긴다.
-            const isNotification = id === undefined || id === null;
+            // 🔴 **알림은 `id` 가 «없는» 것이지 `null` 인 것이 아니다.** 종전에는 `id: null` 을
+            //    알림으로 접어 아무것도 안 썼는데, 규격상 그것은 **답해야 하는 요청**이다.
+            //    (`id === 0` 도 같은 함정이라 `!id` 로 재지 않는다.)
+            const isNotification = !("id" in (request ?? {})) || id === undefined;
 
             if (typeof request?.method !== "string") {
                 if (!isNotification) {
-                    write({jsonrpc: "2.0", id, error: {code: RPC.INVALID_REQUEST, message: "method 가 없습니다."}});
+                    write({jsonrpc: "2.0", id: id ?? null, error: {code: RPC.INVALID_REQUEST, message: "method 가 없습니다."}});
                 }
                 continue;
             }
 
+            // ⚠ **한 번에 하나씩 처리한다 — 의도한 것이다.**
+            //
+            //   대가: 긴 도구 호출(큰 사이트 `pull` 은 수십 초) 동안 `ping` 과 취소 알림을 못 읽는다.
+            //   실측으로 4초 도구 뒤의 ping 이 그만큼 밀렸다.
+            //
+            //   그래도 직렬로 두는 이유 둘:
+            //   ⑴ `initialize` 는 다른 요청보다 **먼저 끝나야 한다**(규격). 띄워 두면 `tools/call` 이
+            //      그것을 추월해 판 협상 없이 사이트를 고치는 창이 생긴다.
+            //   ⑵ 우리 도구는 **같은 폴더의 장부 한 파일**을 쓴다. 두 `push` 가 겹치면 그 쓰기가
+            //      경합하고, 서버 쪽 드래프트 CAS 도 함께 흔들린다.
+            //
+            //   푸는 값어치가 생기면 ⑴을 지키는 선별 병렬(초기화 뒤 · 읽기 도구만)로 간다.
             try {
                 const result = await handle(request.method, request.params);
-                if (!isNotification) write({jsonrpc: "2.0", id, result});
+                // ⚠ **`result` 를 빠뜨리지 않는다.** 규격은 응답에 `result` 나 `error` **하나가
+                //   반드시** 있어야 한다고 정한다 — `undefined` 를 그대로 두면 `JSON.stringify` 가
+                //   그 칸을 지워 둘 다 없는 응답이 나간다.
+                if (!isNotification) write({jsonrpc: "2.0", id: id ?? null, result: result ?? {}});
             } catch (error) {
                 if (isNotification) continue;
                 const code = error instanceof RpcError ? error.code : RPC.INTERNAL_ERROR;
                 // ⚠ **여기서 스택을 안 싣는다.** 상대는 우리 파일 경로를 알 필요가 없고, 그 문자열은
                 //   에이전트가 사람에게 그대로 옮긴다.
                 const message = error instanceof Error ? error.message : String(error);
-                write({jsonrpc: "2.0", id, error: {code, message}});
+                write({jsonrpc: "2.0", id: id ?? null, error: {code, message}});
             }
         }
     }
