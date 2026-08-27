@@ -119,6 +119,17 @@ async function main(argv: readonly string[]): Promise<number> {
             ];
             if (result.untracked > 0) parts.push(`이 폴더에만 있는 파일 ${result.untracked}개는 건드리지 않았습니다.`);
             if (result.savedTo) parts.push(`고쳐 두었던 것은 ${result.savedTo} 에 옮겨 두었습니다.`);
+            if (result.foreignLedger) {
+                parts.push("이 폴더에 다른 사이트의 기준 기록이 있어 쓰지 않았습니다. 지금은 이 사이트 것으로 되어 있습니다.");
+            }
+            // ⚠ **조용히 빼지 않는다.** 정본에 이것들이 실려 오는 것 자체가 서버 쪽 결함 신호다 —
+            //    말하지 않으면 아무도 그 사실을 모른다.
+            if (result.serverExcluded.length > 0) {
+                parts.push(
+                    `사이트가 보낸 것 중 ${result.serverExcluded.length}개는 이 도구가 다루지 않는 파일이라 받지 않았습니다.`,
+                    ...trim(result.serverExcluded, 10, verbose).map((p) => `  · ${p}`),
+                );
+            }
             if (!result.ledgerWritten) {
                 parts.push(
                     "다만 기준 기록을 쓰지 못했습니다. 파일은 새 판입니다.",

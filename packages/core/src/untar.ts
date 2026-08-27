@@ -147,7 +147,7 @@ export interface TarManifestEntry {
  */
 export async function readTarGzManifest(
     gzipped: Buffer,
-    options: {maxBytes?: number; maxEntries?: number} = {},
+    options: {maxBytes?: number; maxEntries?: number; rejectVendored?: boolean} = {},
 ): Promise<Record<string, TarManifestEntry>> {
     const tar = await gunzipBuffer(gzipped, options.maxBytes);
     const manifest: Record<string, TarManifestEntry> = {};
@@ -173,6 +173,10 @@ export async function readTarGzManifest(
         // 디렉터리(`5`)·심볼릭 링크(`2`)·하드링크(`1`)는 매니페스트에 없다 — **파일의 목록**이다.
         if (meta.type !== "0" && meta.type !== "\0") return;
         const segments = safeSegments(root, name);
+        // 🔴 **거절은 쓰기보다 앞이어야 한다.** 이 검사를 해제 쪽에만 두면 아카이브 앞부분이 이미
+        //    디스크에 내려앉은 **뒤에** 던진다 — 실측: `.env` 를 덮은 뒤 `node_modules` 에서 던졌다.
+        //    읽기 훑기는 아무것도 안 쓰므로, 여기서 걸리면 폴더가 그대로다.
+        if (options.rejectVendored === true) assertNotVendored(segments, name);
         const path = segments.join("/");
         if (path === "") return;
         manifest[path] = {sha256: createHash("sha256").update(data).digest("hex"), bytes: meta.size};
@@ -384,6 +388,11 @@ async function createSink(targetDir: string, options: UntarOptions) {
      * 같은 경로를 두 번 담음」을 가르는 데 쓴다 — 다음에 할 일이 정반대라 뭉치면 안 된다.
      */
     const writtenPaths = new Set<string>();
+    /**
+     * 위의 것을 **소문자로 접은** 사본. 대소문자를 안 가리는 파일시스템에서 같은 파일이 되는 짝을
+     * 잡는 데만 쓴다 — 「안 덮는」 갈래는 그 짝을 `EEXIST` 로 잡지만 「골라 덮는」 갈래는 못 잡는다.
+     */
+    const foldedPaths = new Set<string>();
     const names = createNameResolver();
 
     return {
@@ -451,8 +460,14 @@ async function createSink(targetDir: string, options: UntarOptions) {
                 // 부르는 쪽이 「이 경로는 덮어도 잃을 것이 없다」를 이미 판정했다. 그래도 **같은 해제에서
                 // 두 번 나오는 것**은 여전히 사고다 — 그 판정은 [assertNotWrittenTwice] 한 벌이 한다.
                 assertNotWrittenTwice(path, name, writtenPaths);
+                // 🔴 **대소문자만 다른 짝도 잡는다.** macOS·Windows 에서 `App.tsx` 와 `app.tsx` 는
+                //    같은 파일이다. 「안 덮는」 갈래는 그 자리에서 `EEXIST` 로 걸렸는데, 이 갈래는
+                //    맨 `writeFile` 이라 **조용히 뒤엣것으로 교체된다** — 그리고 장부에는 둘 다
+                //    남아 한쪽이 영영 안 맞는다(실측). 정본 tar 에 그런 짝이 있는 것 자체가 결함이다.
+                assertNotWrittenTwice(path.toLowerCase(), name, foldedPaths);
                 await writeFile(path, data);
                 writtenPaths.add(path);
+                foldedPaths.add(path.toLowerCase());
             } else {
                 await writeExclusive(path, data, name, writtenPaths);
             }

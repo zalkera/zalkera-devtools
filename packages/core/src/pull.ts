@@ -17,7 +17,7 @@
  *   면 충돌 아님)로 이어받는다. 장부를 먼저 쓰면 그 재실행이 **자기 잔해를 순수 로컬로 착각**해
  *   영영 안 고친다.
  */
-import {mkdir, readFile, rename, rmdir, unlink, writeFile} from "node:fs/promises";
+import {lstat, mkdir, readFile, rename, rmdir, unlink, writeFile} from "node:fs/promises";
 import {dirname, join, basename, resolve} from "node:path";
 import type {ZalkeraApi} from "./api.ts";
 import {DevtoolsError} from "./errors.ts";
@@ -33,6 +33,7 @@ import {
 } from "./syncLedger.ts";
 import {extractTarGz, readTarGzManifest} from "./untar.ts";
 import {hashWorkdir, resolveExisting} from "./workdir.ts";
+import {isExcludedEntry} from "./zip.ts";
 
 /**
  * 충돌 파일을 치워 두는 형제 폴더의 이름 접두(memo184 §2.8 (가)).
@@ -68,6 +69,16 @@ export interface PullResult {
     /** `discardLocal` 로 치워 둔 자리. 치운 것이 없으면 `null`. */
     savedTo: string | null;
     /**
+     * 서버가 보냈지만 **우리가 안 만지는** 경로들(`.env`·`.git` 따위). 비어 있는 것이 정상이다 —
+     * 비지 않으면 정본 tar 에 실리면 안 될 것이 실린 것이므로 **말한다.**
+     */
+    serverExcluded: string[];
+    /**
+     * 이 폴더에 **다른 사이트의** 기준 기록이 있었는가. 참이면 그 기록은 판정에 안 쓰였고
+     * 이번 받기가 이 사이트 것으로 덮어썼다.
+     */
+    foreignLedger: boolean;
+    /**
      * 장부를 다시 썼는가. **거짓이면 다음 `push` 가 거절된다** — 「모름」이 정직한 답이고,
      * 복구는 `baseline` 이다(작업본 무접촉).
      */
@@ -79,7 +90,13 @@ export async function pullSiteSource(options: PullOptions): Promise<PullResult> 
     const report = options.onProgress ?? (() => {});
     const root = resolve(options.folder);
 
-    const ledger = await readLedger(root);
+    // ⑤ **소속이 다른 장부는 근거가 못 된다.** 남의 사이트 장부를 들고 있으면 그 `files` 가
+    //    이 판의 매니페스트인 양 판정에 들어가 「이 폴더에서 고친 것이 N개」라는 **엉뚱한 이유**로
+    //    거절된다(실측). 규칙은 이미 형제 `declaredBaseRevisionNo` 가 세웠다 — 소속이 다르면
+    //    선언하지 않는다.
+    const found = await readLedger(root);
+    const foreignLedger = found !== null && found.tenant !== options.api.tenantCode();
+    const ledger = foreignLedger ? null : found;
     report("사이트 소스를 받는 중입니다…");
     const tar = await fetchVerifiedSourceTar({
         api: options.api,
@@ -89,7 +106,13 @@ export async function pullSiteSource(options: PullOptions): Promise<PullResult> 
     });
 
     report("무엇이 달라졌는지 견주는 중입니다…");
-    const incoming = await readTarGzManifest(tar.buffer, {maxBytes: MAX_EXTRACT_BYTES});
+    // `rejectVendored` 를 **읽기 훑기에** 건다 — 거절이 쓰기보다 앞이어야 폴더가 그대로 남는다.
+    const declared = await readTarGzManifest(tar.buffer, {
+        maxBytes: MAX_EXTRACT_BYTES,
+        rejectVendored: true,
+    });
+    const {incoming, dropped} = withoutExcluded(declared);
+    requireNoFoldedCollision(incoming);
     const local = await hashWorkdir(root);
     const plan = planPull({incoming, ledger: ledger?.files ?? {}, local});
 
@@ -107,9 +130,15 @@ export async function pullSiteSource(options: PullOptions): Promise<PullResult> 
     // 치운 뒤에는 **처분이 달라진다** — 치워 두기만 하고 서버 내용을 안 쓰면 그 경로가 통째로
     // 사라진다([applyAfterDiscard]).
     const todo = savedTo ? applyAfterDiscard(plan, incoming) : {writes: plan.writes, deletes: plan.deletes};
+    // ③ **쓸 자리가 링크면 쓰기 전에 멈춘다.** 해제기도 마지막 조각을 검사하지만 그 검사는 그
+    //    항목 차례에 걸리므로, 앞 항목들이 이미 내려앉은 뒤다 — 그리고 재실행해도 링크는 그대로라
+    //    사람은 **반쯤 적용된 폴더에 갇힌다.**
+    await requireNoLinkedTargets(root, todo.writes);
     const writes = new Set(todo.writes);
     await extractTarGz(tar.buffer, root, {
         maxBytes: MAX_EXTRACT_BYTES,
+        // 여기도 켠다 — 읽기 훑기가 이미 걸렀지만, 이 함수는 공개 API 라 두 경로가 같은 판정을
+        // 지나야 한다. 실제로 걸리는 자리는 위쪽이다.
         rejectVendored: true,
         decide: (path) => (writes.has(path) ? "replace" : "skip"),
     });
@@ -138,8 +167,84 @@ export async function pullSiteSource(options: PullOptions): Promise<PullResult> 
         unchanged: plan.unchanged.length,
         untracked: plan.untracked.length,
         savedTo,
+        serverExcluded: dropped,
+        foreignLedger,
         ledgerWritten,
     };
+}
+
+/**
+ * 받을 매니페스트에 **대소문자만 다른 짝**이 있으면 거절한다 — **쓰기 전에**.
+ *
+ * macOS·Windows 에서 `App.tsx` 와 `app.tsx` 는 같은 파일이다. 해제기도 이것을 잡지만 그 차례에
+ * 걸리므로 앞 항목이 이미 내려앉은 뒤다. 여기서 잡으면 폴더가 그대로 남는다.
+ *
+ * ⚠ 리눅스에서는 둘이 다른 파일이라 «정상»으로 보이지만, 정본 tar 에 그런 짝이 있으면 **다른
+ *   기계에서 이 폴더가 안 선다.** 여기서 끊는 편이 정직하다.
+ */
+function requireNoFoldedCollision(incoming: Readonly<Record<string, unknown>>): void {
+    const seen = new Map<string, string>();
+    for (const path of Object.keys(incoming)) {
+        const folded = path.toLowerCase();
+        const first = seen.get(folded);
+        if (first !== undefined) {
+            throw new DevtoolsError(
+                "SERVER_REJECTED",
+                `사이트가 보낸 파일 중 이름이 대소문자만 다른 것이 있습니다: ${first} · ${path}`,
+                "컴퓨터에 따라 같은 파일로 취급돼 한쪽이 사라집니다. 아무것도 받지 않았습니다 — 잘커라에 알려 주세요.",
+            );
+        }
+        seen.set(folded, path);
+    }
+}
+
+/**
+ * 쓸 자리 중 **이미 링크인 것**이 있으면 거절한다 — **쓰기 전에**.
+ *
+ * 🔴 링크에 쓰면 그 쓰기가 링크를 따라가 **폴더 밖 파일을 덮는다.** 해제기가 마지막 조각을 검사해
+ *    막긴 하지만, 그 검사는 그 항목 차례에 걸린다 — 앞 항목들은 이미 디스크에 있고, 재실행해도
+ *    링크는 그대로라 사람은 반쯤 적용된 폴더에서 못 빠져나온다.
+ *
+ * ⚠ 부모 조각의 링크는 여기서 안 본다 — 그것은 해제기의 [descend] 가 뿌리부터 조각 단위로 본다.
+ *   여기가 보는 것은 **마지막 조각**이고, 그것이 재실행으로 안 풀리는 유일한 자리다.
+ */
+async function requireNoLinkedTargets(root: string, paths: readonly string[]): Promise<void> {
+    for (const path of paths) {
+        const info = await lstat(join(root, path)).catch(() => null);
+        if (!info?.isSymbolicLink()) continue;
+        throw new DevtoolsError(
+            "PULL_WOULD_OVERWRITE",
+            `이 폴더의 ${path} 가 다른 곳을 가리키는 바로가기입니다. 아무것도 받지 않았습니다.`,
+            "그 바로가기를 지우고 다시 실행해 주세요. 그대로 두면 이 폴더 밖의 파일을 덮어쓰게 됩니다.",
+        );
+    }
+}
+
+/**
+ * 받을 매니페스트에서 **우리가 절대 안 만지는 경로**를 걷어낸다.
+ *
+ * 🔴 **없으면 고객 파일이 조용히 교체된다.** 실측(2026-08-27): 서버 tar 에 `.env` 가 들어 있으면
+ *    ⑴ 받을 목록에는 있고 ⑵ 작업본 목록에는 [isExcludedEntry] 때문에 없다 → **신설**로 판정 →
+ *    `decide` 가 `replace` 를 돌려 **고객의 진짜 `.env` 를 서버 내용으로 덮었다.** 「이미 있는 파일
+ *    위에 안 쓴다」는 규칙은 `replace` 갈래를 안 지나므로 그 자리를 못 막는다.
+ *
+ * ⚠ **비대칭 자체가 병이다.** 받을 쪽과 작업본 쪽이 다른 목록을 쓰면, 걸러진 경로는 영원히
+ *   「그대로 둔 것」이 못 되고 **매 pull 마다 다시 쓰인다.**
+ *
+ * ⚠ **조용히 빼지 않는다** — 뺀 건수를 돌려주고 부르는 쪽이 말한다(`zip.ts` 가 세운 원칙과 같다).
+ *   정본 tar 에 이것들이 실려 오는 것 자체가 서버 쪽 결함 신호다.
+ */
+function withoutExcluded(declared: Readonly<Record<string, {sha256: string; bytes: number}>>): {
+    incoming: Record<string, {sha256: string; bytes: number}>;
+    dropped: string[];
+} {
+    const incoming: Record<string, {sha256: string; bytes: number}> = {};
+    const dropped: string[] = [];
+    for (const [path, entry] of Object.entries(declared)) {
+        if (isExcludedEntry(path)) dropped.push(path);
+        else incoming[path] = entry;
+    }
+    return {incoming, dropped: dropped.sort()};
 }
 
 /** 장부를 읽는다. 없거나 깨졌으면 `null` — **부분 복구하지 않는다.** */

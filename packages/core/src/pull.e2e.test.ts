@@ -215,3 +215,73 @@ test("🔴 심볼릭 링크는 작업본 파일로 안 센다 — 링크의 sha 
     strictEqual(result.untracked, 0, "링크를 순수 로컬 파일로 셌다");
     strictEqual(await readFile(outside, "utf8"), "폴더 밖 내용");
 });
+
+test("🔴 서버가 보낸 `.env` 가 고객의 `.env` 를 **안 덮는다**", async () => {
+    // 실측으로 잡힌 결함: 받을 목록에는 있고(배제 안 함) 작업본 목록에는 없어(배제함) **신설**로
+    // 판정됐고, `replace` 갈래는 「있는 파일 위에 안 쓴다」를 안 지나 조용히 덮었다.
+    const dir = await site({".env": "고객의-진짜-비밀=1", "a.tsx": "가"});
+    const result = await run(dir, tarGz({"a.tsx": "가", ".env": "서버가-보낸-것"}));
+    strictEqual(await readFile(join(dir, ".env"), "utf8"), "고객의-진짜-비밀=1", "고객 비밀이 교체됐다");
+    deepEqual(result.serverExcluded, [".env"], "조용히 빼고 말을 안 했다");
+});
+
+test("🔴 배제 경로는 장부에도 안 들어간다 — 들어가면 매 pull 이 그 파일을 다시 쓴다", async () => {
+    const dir = await site({});
+    await run(dir, tarGz({"a.tsx": "가", ".env": "x", ".git/config": "y"}));
+    const files = Object.keys((await readLedger(dir))?.files ?? {});
+    deepEqual(files, ["a.tsx"], `배제 경로가 장부에 들어왔다: ${files}`);
+});
+
+test("🔴 배제된 것이 「그대로 둔 것」으로도 안 샌다 — 재실행이 멱등이다", async () => {
+    const dir = await site({});
+    const payload = tarGz({"a.tsx": "가", ".env": "x"});
+    await run(dir, payload);
+    const again = await run(dir, payload);
+    strictEqual(again.written, 0, "같은 판을 또 받았는데 뭔가를 다시 썼다");
+    strictEqual(again.unchanged, 1);
+});
+
+test("🔴 벤더 트리를 담은 아카이브는 **파일 하나 쓰기 전에** 거절된다", async () => {
+    // 종전에는 앞 항목을 디스크에 내려놓은 **뒤** `node_modules` 에서 던졌다(실측).
+    const dir = await site({});
+    await rejects(
+        () => run(dir, tarGz({"먼저.tsx": "이것이 남으면 안 된다", "node_modules/p/i.js": "벤더"})),
+        DevtoolsError,
+    );
+    strictEqual(await readFile(join(dir, "먼저.tsx"), "utf8").catch(() => null), null, "거절인데 파일이 남았다");
+    strictEqual(await readLedger(dir), null, "거절인데 장부가 섰다");
+});
+
+test("🔴 쓸 자리가 바로가기면 **아무것도 안 하고** 멈춘다 — 재실행해도 안 풀리는 자리다", async () => {
+    // ⚠ 계획 단계에서 먼저 끊기면 이 시험은 **아무것도 안 재게 된다.** 그래서 장부를 세워
+    //   `정상.tsx` 를 깨끗하게 만들고(=충돌 없음), tar 도 그것을 **먼저** 담는다. 사전검사가 없으면
+    //   `정상.tsx` 가 이미 내려앉은 뒤에 링크에서 던진다 — 그 반쯤 적용을 이 시험이 잡는다.
+    const dir = await site({"정상.tsx": "가"}, {"정상.tsx": "가"});
+    const outside = join(dir, "..", "피해자.txt");
+    await writeFile(outside, "원본");
+    await symlink(outside, join(dir, "a.tsx"));
+    await rejects(() => run(dir, tarGz({"정상.tsx": "나", "a.tsx": "덮어썼다"})), (e: unknown) => {
+        ok(e instanceof DevtoolsError);
+        strictEqual(e.code, "PULL_WOULD_OVERWRITE", `거절 사유가 다르다: ${e.code}`);
+        return true;
+    });
+    strictEqual(await readFile(outside, "utf8"), "원본", "링크를 타고 폴더 밖을 덮었다");
+    strictEqual(await readFile(join(dir, "정상.tsx"), "utf8"), "가", "거절인데 앞 파일이 이미 바뀌었다");
+});
+
+test("🔴 대소문자만 다른 짝은 **쓰기 전에** 거절한다 — 다른 기계에서 한쪽이 사라진다", async () => {
+    const dir = await site({});
+    await rejects(() => run(dir, tarGz({"App.tsx": "하나", "app.tsx": "둘"})), DevtoolsError);
+    deepEqual(await readdir(dir), [], "거절인데 파일이 남았다");
+});
+
+test("🔴 남의 사이트 장부는 판정에 안 쓴다 — 엉뚱한 이유로 거절하게 된다", async () => {
+    const dir = await site({"기밀.tsx": "남의 사이트 파일"}, {"기밀.tsx": "남의 사이트 파일"});
+    const stale: SyncLedger = {...(await readLedger(dir))!, tenant: "남의사이트"};
+    await writeFile(join(dir, SYNC_LEDGER_PATH), serializeSyncLedger(stale));
+    const result = await run(dir, tarGz({"a.tsx": "가"}));
+    strictEqual(result.foreignLedger, true, "남의 장부인 것을 못 알아봤다");
+    strictEqual(result.untracked, 1, "남의 장부의 파일을 이 판이 아는 것으로 셌다");
+    strictEqual(await readFile(join(dir, "기밀.tsx"), "utf8"), "남의 사이트 파일", "남의 파일을 지웠다");
+    strictEqual((await readLedger(dir))?.tenant, "acme");
+});
