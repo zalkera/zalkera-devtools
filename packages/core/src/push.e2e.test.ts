@@ -4,7 +4,7 @@ import {mkdir, symlink, writeFile} from "node:fs/promises";
 import {join} from "node:path";
 import {test} from "node:test";
 import {DevtoolsError} from "./errors.ts";
-import {MAX_PUSH_ENTRIES, MAX_PUSH_FILE_BYTES, pushSiteSource, reconcile} from "./push.ts";
+import {MAX_PUSH_ATTEMPTS, MAX_PUSH_ENTRIES, MAX_PUSH_FILE_BYTES, pushSiteSource, reconcile} from "./push.ts";
 import {readLedger} from "./pull.ts";
 import {SYNC_LEDGER_FORMAT, SYNC_LEDGER_PATH, serializeSyncLedger, type SyncLedger} from "./syncLedger.ts";
 import {tempDir} from "./testing/tempDir.ts";
@@ -146,21 +146,16 @@ test("🔴 응답을 못 받으면 «모름»으로 끝낸다 — 「아마 올�
     strictEqual((await readLedger(dir))?.server, null, "모름이 아니라 세대를 적었다");
 });
 
-test("🔴 배제 경로는 **그것만 빼고 1회** 다시 보내고 **말한다**", async () => {
-    const s = server({replies: [{throw: rejected("INVALID_INPUT_VALUE", [".env"])}, {generation: "G2"}]});
-    const dir = await site({".env": "S=1", "a.tsx": "새것"}, {
-        files: {"a.tsx": {sha256: sha("옛것"), bytes: 3}},
-    });
-    // `.env` 는 우리 배제망에도 걸리므로 계획에 안 들어온다 — 서버만 아는 경로로 재현한다.
-    const s2 = server({replies: [{throw: rejected("INVALID_INPUT_VALUE", ["dist/x.js"])}, {generation: "G2"}]});
-    const dir2 = await site({"dist/x.js": "생성물", "a.tsx": "새것"}, {
+test("🔴 배제 경로는 **그것만 빼고** 다시 보내고 **말한다**", async () => {
+    // `.env` 는 우리 배제망에 걸려 계획에 안 들어온다 — 서버만 아는 경로(생성물)로 재현한다.
+    const s = server({replies: [{throw: rejected("INVALID_INPUT_VALUE", ["dist/x.js"])}, {generation: "G2"}]});
+    const dir = await site({"dist/x.js": "생성물", "a.tsx": "새것"}, {
         files: {"a.tsx": {sha256: sha("옛것"), bytes: 3}, "dist/x.js": {sha256: sha("옛"), bytes: 3}},
     });
-    const result = await pushSiteSource({api: s2.api, folder: dir2});
-    strictEqual(s2.seen.length, 2, "재시도가 안 났거나 두 번 넘게 났다");
+    const result = await pushSiteSource({api: s.api, folder: dir});
+    strictEqual(s.seen.length, 2, `요청이 ${s.seen.length}번 나갔다`);
     deepEqual(result.droppedByServer, ["dist/x.js"]);
-    deepEqual((s2.seen[1] as Array<{path: string}>).map((e) => e.path), ["a.tsx"]);
-    strictEqual(s.seen.length + dir.length * 0, 0, "우리 배제망이 이미 거른다");
+    deepEqual((s.seen[1] as Array<{path: string}>).map((e) => e.path), ["a.tsx"]);
 });
 
 test("🔴 배제 재시도는 **한 번**이다 — 또 거절되면 던진다", async () => {
@@ -423,4 +418,62 @@ test("상한 바로 아래는 통과한다 — 조임 실수로 정상 요청을
     const dir = await site({}, {});
     for (let i = 0; i < MAX_PUSH_ENTRIES; i += 1) await writeFile(join(dir, `f${i}.tsx`), "가");
     strictEqual((await pushSiteSource({api: s.api, folder: dir})).sent, MAX_PUSH_ENTRIES);
+});
+
+test("🔴 요청 총량이 상한 안이다 — 사유가 겹쳐도 갈래마다 세지 않는다", async () => {
+    // 실측으로 잡힌 것: 배제 + 선행조건이 겹치면 갈래마다 한 번씩이라 **세 번**이 나갔는데
+    // 주석은 「재시도는 한 번」이라 적고 있었다. 지금은 상한이 반복문 하나에 있다.
+    const s = server({
+        replies: Array.from({length: 10}, (_, i) =>
+            i % 2 === 0
+                ? {throw: rejected("INVALID_INPUT_VALUE", ["dist/x.js"])}
+                : {throw: rejected("DRAFT_PRECONDITION_FAILED", ["a.tsx"])},
+        ),
+    });
+    const dir = await site({"dist/x.js": "가", "a.tsx": "나", "b.tsx": "다"}, {
+        files: {
+            "dist/x.js": {sha256: sha("옛"), bytes: 1},
+            "a.tsx": {sha256: sha("옛"), bytes: 1},
+            "b.tsx": {sha256: sha("옛"), bytes: 1},
+        },
+    });
+    await rejects(() => pushSiteSource({api: s.api, folder: dir}), DevtoolsError);
+    ok(s.seen.length <= MAX_PUSH_ATTEMPTS, `요청이 ${s.seen.length}번 나갔다(상한 ${MAX_PUSH_ATTEMPTS})`);
+});
+
+test("🔴 서버가 **우리 계획에 없는** 경로를 대면 그것을 보고하지 않는다", async () => {
+    // 실측: `../../etc/passwd` 가 「우리가 뺀 경로」 목록에 그대로 떴다. 우리 출력이 남의 글이 된다.
+    const s = server({replies: [{throw: rejected("INVALID_INPUT_VALUE", ["../../etc/passwd", "없는것.tsx"])}]});
+    const dir = await site({"a.tsx": "새것"}, {files: {"a.tsx": {sha256: sha("옛것"), bytes: 3}}});
+    await rejects(() => pushSiteSource({api: s.api, folder: dir}), (e: unknown) => {
+        ok(e instanceof DevtoolsError);
+        // 서버의 원래 거절을 그대로 올린다 — 「우리가 뺐다」로 위장하지 않는다.
+        strictEqual(e.serverCode, "INVALID_INPUT_VALUE");
+        return true;
+    });
+    strictEqual(s.seen.length, 1, "짚어 준 경로가 하나도 우리 것이 아닌데 다시 보냈다");
+});
+
+test("서버가 **일부만** 우리 것을 대면 그것만 빼고 보낸다", async () => {
+    const s = server({
+        replies: [{throw: rejected("INVALID_INPUT_VALUE", ["dist/x.js", "../남의것"])}, {generation: "G2"}],
+    });
+    const dir = await site({"dist/x.js": "가", "a.tsx": "나"}, {
+        files: {"dist/x.js": {sha256: sha("옛"), bytes: 1}, "a.tsx": {sha256: sha("옛"), bytes: 1}},
+    });
+    const result = await pushSiteSource({api: s.api, folder: dir});
+    deepEqual(result.droppedByServer, ["dist/x.js"], "우리 것이 아닌 경로가 보고에 섞였다");
+});
+
+test("🔴 같은 사유가 계속 와도 상한에서 멈춘다 — 상한이 없으면 서버에 무한히 매달린다", async () => {
+    const s = server({
+        replies: Array.from({length: 20}, () => ({throw: rejected("DRAFT_PRECONDITION_FAILED", ["a.tsx"])})),
+    });
+    const dir = await site({"a.tsx": "새것"}, {files: {"a.tsx": {sha256: sha("옛것"), bytes: 3}}});
+    await rejects(() => pushSiteSource({api: s.api, folder: dir}), (e: unknown) => {
+        ok(e instanceof DevtoolsError);
+        strictEqual(e.serverCode, "DRAFT_PRECONDITION_FAILED");
+        return true;
+    });
+    strictEqual(s.seen.length, MAX_PUSH_ATTEMPTS, `요청이 ${s.seen.length}번 나갔다(상한 ${MAX_PUSH_ATTEMPTS})`);
 });

@@ -13,10 +13,17 @@
  *   문(발행·되돌리기)의 대상이 될 수 있다 — 의도한 변경의 **반쪽이 원장에 영구히 서는** 형상이다.
  *   상한을 넘으면 분할이 아니라 **거절**이고, 그때 길은 zip 레인이다.
  *
- * ■ 재시도는 **한 번**이고, 그때도 가드를 다시 지난다
+ * ■ 요청은 **최대 [MAX_PUSH_ATTEMPTS] 번**이고, 재계산마다 가드를 다시 지난다
  *
- * 선행조건이 어긋나면 서버를 다시 읽고 한 번만 다시 보낸다. 그 재계산에도 [PushPlan.unseen] 가드가
- * **그대로** 걸린다 — 안 그러면 재시도가 「받아 적고 다시 보내는」 세탁 경로가 된다(memo183 🟠4).
+ * 거절 사유가 둘이라 갈래마다 한 번씩 재시도하면 **두 사유가 겹칠 때 세 번**이 된다 — 종전 판이
+ * 그랬고 주석은 「한 번」이라 적고 있었다(실측). 지금은 상한이 반복문 하나에 있고 그 값이 곧 계약이다.
+ *
+ * 실패한 요청은 세대를 만들지 않으므로(서버가 얹기 전에 거절한다) 여러 번 나가도 **원장에 반쪽이
+ * 서지는 않는다.** 상한이 있는 이유는 그것이 아니라, 사유가 번갈아 오는 서버에 무한히 매달리지
+ * 않기 위해서다.
+ *
+ * 재계산에는 [PushPlan.unseen] 가드가 **그대로** 걸린다 — 안 그러면 재시도가 「받아 적고 다시
+ * 보내는」 세탁 경로가 된다(memo183 🟠4).
  *
  * ■ 응답을 못 받으면 「모름」이다
  *
@@ -44,6 +51,13 @@ import {hashWorkdir} from "./workdir.ts";
  *   서버가 거절한다 — 둘 다 서버 문면이 최종 판정이므로 조용한 오작동은 아니다.
  */
 export const MAX_PUSH_ENTRIES = 500;
+/**
+ * 한 번의 `push` 가 서버에 보내는 요청의 **총 상한**. 처음 한 번 + 재시도 둘이다.
+ *
+ * ⚠ 갈래마다 세지 않는다 — 그러면 사유가 겹칠 때 총량이 조용히 늘고, 「한 번」이라 적은 주석이
+ *   거짓이 된다(실측: 배제 + 선행조건이 겹쳐 세 번 나갔다).
+ */
+export const MAX_PUSH_ATTEMPTS = 3;
 export const MAX_PUSH_FILE_BYTES = 1024 * 1024;
 export const MAX_PUSH_BYTES = 16 * 1024 * 1024;
 
@@ -121,53 +135,70 @@ export async function pushSiteSource(options: PushOptions): Promise<PushResult> 
     requireWithinLimits(root, plan.edits);
     report(`${plan.edits.length}개를 올리는 중입니다…`);
 
-    let dropped: string[] = [];
+    const dropped: string[] = [];
     let retried = false;
-    let sent = await attempt(options.api, root, plan.edits, ledger, report);
+    let sent: Attempt | null = null;
 
-    // ── 배제 목록 드리프트 — 그 경로만 빼고 **1회** 재시도하고 **말한다**(§2.8) ──
-    if (sent.rejectedPaths.length > 0 && sent.kind === "excluded") {
-        dropped = sent.rejectedPaths;
-        const kept = plan.edits.filter((edit) => !dropped.includes(edit.path));
-        if (kept.length === 0) throw sent.error;
-        report(`사이트가 받지 않는 경로 ${dropped.length}개를 빼고 다시 보냅니다…`);
-        sent = await attempt(options.api, root, kept, ledger, report);
-        plan = {...plan, edits: kept};
-    }
+    // ⚠ **경계를 구조에 둔다.** 종전에는 갈래마다 `if` 로 한 번씩 재시도했고, 두 사유가 **겹치면
+    //   요청이 세 번** 나갔다(실측). 「재시도는 한 번」이라 적어 두고 그것이 거짓이었다.
+    //   여기서는 상한이 하나이고, 그 값이 곧 계약이다.
+    for (let round = 0; round < MAX_PUSH_ATTEMPTS; round += 1) {
+        requireWithinLimits(root, plan.edits);
+        sent = await attempt(options.api, root, plan.edits, report);
+        if (sent.kind === "ok") break;
 
-    // ── 선행조건 어긋남 — 서버를 **다시 읽고** 재계산해 1회 재시도 ──
-    if (sent.kind === "conflict") {
-        report("사이트 쪽이 그 사이 달라져 다시 읽습니다…");
-        draft = await readDraft(options.api);
-        const fresh = await hashWorkdir(root);
-        plan = planPush({base: ledger.files, draft: viewOf(draft), local: fresh});
-        // ⚠ **가드를 다시 지난다.** 안 지나면 재시도가 곧 「받아 적고 다시 보내는」 세탁 경로다.
-        requireSeen(plan, options);
-        const kept = plan.edits.filter((edit) => !dropped.includes(edit.path));
-        if (kept.length === 0) {
-            const written = await writeLedger(root, {
-                ...ledger,
-                server: draft.generation === null ? null : {generation: draft.generation},
-                mine: {},
-            });
-            return {
-                sent: 0,
-                removed: 0,
-                generation: draft.generation,
-                droppedByServer: dropped,
-                retriedAfterConflict: true,
-                reconciled,
-                previewUrl: null,
-                warning: written ? null : LEDGER_WRITE_FAILED,
-            };
+        // ⚠ **상한이 두 군데다 — 일부러 그렇다.** 반복 조건이 경계이고, 이 줄은 **마지막 회전에서
+        //   쓸데없는 재조회를 안 하려는** 것이다(선행조건 갈래는 여기서 서버를 다시 읽는다).
+        //   한쪽만 빼도 관측 결과는 같다(변이 실측 — 둘 다 빼야 시험이 깨진다). 그래도 남기는 이유는
+        //   빼면 **거절당할 것이 뻔한 회전에서 서버를 한 번 더 두드리기** 때문이다.
+        if (round === MAX_PUSH_ATTEMPTS - 1) throw sent.error;
+
+        if (sent.kind === "excluded") {
+            // ⚠ **우리 계획에 있는 경로만 받는다.** 서버가 아무 문자열이나 주면 그것이 그대로
+            //   사람에게 보고되고, 우리 출력이 남의 글이 된다(실측: `../../etc/passwd` 가 목록에 떴다).
+            const named = sent.rejectedPaths.filter((path) => plan.edits.some((edit) => edit.path === path));
+            if (named.length === 0) throw sent.error;
+            dropped.push(...named);
+            const kept = plan.edits.filter((edit) => !named.includes(edit.path));
+            if (kept.length === 0) throw sent.error;
+            report(`사이트가 받지 않는 경로 ${named.length}개를 빼고 다시 보냅니다…`);
+            plan = {...plan, edits: kept};
+            continue;
         }
-        retried = true;
-        requireWithinLimits(root, kept);
-        sent = await attempt(options.api, root, kept, ledger, report);
-        plan = {...plan, edits: kept};
+
+        if (sent.kind === "conflict") {
+            report("사이트 쪽이 그 사이 달라져 다시 읽습니다…");
+            draft = await readDraft(options.api);
+            const fresh = await hashWorkdir(root);
+            plan = planPush({base: ledger.files, draft: viewOf(draft), local: fresh});
+            // ⚠ **가드를 다시 지난다.** 안 지나면 재시도가 곧 「받아 적고 다시 보내는」 세탁 경로다.
+            requireSeen(plan, options);
+            plan = {...plan, edits: plan.edits.filter((edit) => !dropped.includes(edit.path))};
+            retried = true;
+            if (plan.edits.length === 0) {
+                const written = await writeLedger(root, {
+                    ...ledger,
+                    server: draft.generation === null ? null : {generation: draft.generation},
+                    mine: {},
+                });
+                return {
+                    sent: 0,
+                    removed: 0,
+                    generation: draft.generation,
+                    droppedByServer: dropped,
+                    retriedAfterConflict: true,
+                    reconciled,
+                    previewUrl: null,
+                    warning: written ? null : LEDGER_WRITE_FAILED,
+                };
+            }
+            continue;
+        }
+
+        throw sent.error;
     }
 
-    if (sent.kind !== "ok") throw sent.error;
+    if (sent === null || sent.kind !== "ok") throw sent?.error ?? unreachable();
 
     // ⑹ 장부 갱신 — **이번에 보낸 경로 전체**를 그 세대 기준으로 다시 적는다.
     const mine: Record<string, string | null> = {};
@@ -269,7 +300,6 @@ async function attempt(
     api: ZalkeraApi,
     root: string,
     edits: readonly PushEdit[],
-    ledger: SyncLedger,
     report: (message: string) => void,
 ): Promise<Attempt> {
     const body = await bodyOf(root, edits);
@@ -383,3 +413,8 @@ const foreignLedger = (tenant: string) =>
         `이 폴더의 기준 기록은 다른 사이트(${tenant})의 것입니다.`,
         "`zalkera pull` 로 이 사이트의 소스를 받거나, `zalkera baseline` 으로 기준을 다시 세워 주세요.",
     );
+
+/** 반복문이 상한 안에서 반드시 `ok` 로 끝나거나 던지므로 여기 오지 않는다. */
+function unreachable(): DevtoolsError {
+    return new DevtoolsError("SERVER_REJECTED", "올리기가 끝나지 않았습니다.", "다시 시도해 주세요.");
+}
