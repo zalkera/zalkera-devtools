@@ -726,7 +726,7 @@ const WIRES = [
     ],
     [
         "packages/core/src/untar.ts",
-        "await writeExclusive(path, data, name, written);",
+        "await writeExclusive(path, data, name, writtenPaths);",
         "tar 쪽에서 「원래 있던 파일」과 「아카이브 중복 항목」이 다시 뭉친다 — 후자에 「빈 폴더를 만드세요」는 무한 고리다",
     ],
     [

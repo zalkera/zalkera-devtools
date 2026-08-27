@@ -18,6 +18,19 @@ export class DevtoolsError extends Error {
      * 그 문장이 곧 막다른 길이 된다.
      */
     readonly serverCode: string | undefined;
+    /**
+     * 서버가 **어느 항목이 걸렸는지** 짚어 준 목록(응답의 `errors[].field`). 대개 소스 경로다.
+     *
+     * ■ 왜 문면이 아니라 목록인가
+     *
+     * 배치 요청 하나가 여러 항목을 담으면 「무엇이 걸렸는가」는 문장이 아니라 목록이다. 문면을
+     * 뜯어 쓰면 서버의 **한국어 문구가 계약이 된다** — 백엔드의 `ErrorResponse.errorCode` KDoc 이
+     * 이미 「문자열 매칭을 유도하면 계약이 깨진다」고 못박은 자리다.
+     *
+     * ⚠ **서버가 정하는 값이다.** 표시에 쓸 때는 [humanMessage] 와 같은 소독을 지나야 한다 —
+     *   알림 본문은 링크를 렌더하고 그 링크는 명령을 실행할 수 있다(형제 `api.ts` 의 실측).
+     */
+    readonly paths: readonly string[];
 
     // 파라미터 프로퍼티(`constructor(readonly x)`)를 쓰지 않는다 — Node 의 타입 스트립 실행이 그 문법을
     // 받지 않아서, 쓰는 순간 테스트가 빌드 산출물을 거쳐야 한다(소스를 그대로 돌리는 이점이 사라진다).
@@ -27,12 +40,14 @@ export class DevtoolsError extends Error {
         hint?: string,
         cause?: unknown,
         serverCode?: string,
+        paths?: readonly string[],
     ) {
         super(message, cause === undefined ? undefined : { cause });
         this.name = "DevtoolsError";
         this.code = code;
         this.hint = hint;
         this.serverCode = serverCode;
+        this.paths = paths ?? [];
     }
 
     /**
@@ -80,4 +95,57 @@ export type DevtoolsErrorCode =
      * 사람이 취소했다. **오류로 보여 주지 않는다** — 사용자가 스스로 한 일을 실패로 고지하면
      * "내가 뭘 잘못했나"를 만든다. 호출자는 이 코드를 조용히 삼키고 상태만 되돌린다.
      */
-    | "CANCELLED";
+    | "CANCELLED"
+    /** 로컬 폴더가 다룰 수 있는 크기를 넘었다(사이트 폴더가 아닌 곳을 가리켰을 때가 대부분이다). */
+    | "LOCAL_TOO_LARGE"
+    /**
+     * 받기가 **로컬 작업을 덮게 되어** 아무것도 하지 않았다(memo184 §2.2).
+     *
+     * ⚠ 실패가 아니라 **거절**이다. 이 코드가 뜬 뒤 폴더는 부르기 전과 같다.
+     */
+    | "PULL_WOULD_OVERWRITE"
+    /** 로컬 장부(`.zalkera/sync.json`)가 없거나 읽을 수 없어 선행조건을 세울 수 없다. */
+    | "LEDGER_UNKNOWN"
+    /**
+     * 사이트 쪽 「편집 중인 것」을 못 읽었다 — **올리기를 막는다**(memo184 §2.1).
+     *
+     * ⚠ 이때 장부로 폴백하지 않는다. 폴백하는 순간 「이미 반영됨」이 남이 되돌린 뒤에도 참이 된다.
+     */
+    | "SERVER_UNREADABLE_DRAFT"
+    /** 사이트 쪽 편집이 지금 판 위가 아니다(좌초). 발행도 열람도 막혀 있고 되돌리기만 남는다. */
+    | "STRANDED_DRAFT"
+    /**
+     * 올리면 **이 폴더가 못 받은 남의 편집이 사라진다.** 명시 동의가 없어 아무것도 안 올렸다.
+     *
+     * ⚠ 선행조건(CAS)은 이것을 못 막는다 — 선행조건 값이 서버 조회에서 나오므로 정당하게 통과한다.
+     */
+    | "PUSH_WOULD_REVERT"
+    /** 한 번에 올릴 수 있는 크기·개수를 넘었다. **나누지 않는다** — 반쪽이 원장에 서기 때문이다. */
+    | "PUSH_TOO_LARGE"
+    /**
+     * 요청은 나갔는데 응답을 못 받았다. **「아마 올라갔을 겁니다」라고 말하지 않는다.**
+     *
+     * 다음 실행이 `GET /draft/files` 로 대조해 정리한다(§2.3 화해).
+     */
+    | "PUSH_RESPONSE_LOST"
+    /**
+     * 글자로 되돌아오지 않는 바이트라 올릴 수 없다(그림·글꼴·압축 파일).
+     *
+     * ⚠ 이 문의 본문은 JSON 문자열이다 — 실으면 **조용히 망가진다.** 거절이 정직한 답이고,
+     *   길은 콘솔의 소스 통째 올리기다.
+     */
+    | "PUSH_NOT_TEXT"
+    /**
+     * 이름만 서식인 **비밀 파일**이라 올리지 않았다( 에 실제 값이 들어 있음).
+     *
+     * ⚠ 조용히 빼지 않는다 — 사람이 그 파일을 고쳐서 부른 것일 수 있고, 그때 조용히 빼면
+     *   「올렸는데 안 바뀐다」가 되고 원인이 아무 데도 안 보인다.
+     */
+    | "PUSH_SECRET_TEMPLATE"
+    /**
+     * 이 폴더의 기준 판이 그 사이 움직였다 — **받기가 먼저다.**
+     *
+     * ⚠ 막는 이유는 값이 낡아서다. 판이 움직이면 기준 매니페스트가 낡고, 그 위에서 「보낼 것이
+     *   없다」가 나오면 그것은 「같다」가 아니라 **모른다**이다.
+     */
+    | "PUSH_BASE_MOVED";

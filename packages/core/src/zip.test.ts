@@ -90,3 +90,25 @@ test("같은 소스는 같은 바이트를 낸다(재현 가능)", async () => {
     const second = await packProject({ projectDir: dir });
     strictEqual(first.sha256, second.sha256, "타임스탬프가 섞이면 매번 다른 zip 이 된다");
 });
+
+test("🔴 치워 둔 자리는 **정본 zip 에도** 안 실린다 — 접두 배제가 포장기에 안 닿았다", async () => {
+    // 심의 실측: `packProject` 의 훑기가 `EXCLUDED_PATHS` 만 인라인으로 보고 접두는 안 봤다.
+    // 「둘째 겹」이라 적혀 있었는데 정작 정본을 만드는 경로에는 안 닿았다.
+    const dir = await tempDir("zalkera-pack-saved-");
+    await mkdir(join(dir, ".zalkera", "saved", "2026-08-27"), {recursive: true});
+    await writeFile(join(dir, ".zalkera", "saved", "2026-08-27", "옛작업.tsx"), "치워 둔 것");
+    await writeFile(join(dir, ".zalkera", "ASSETS-LICENSE.md"), "배송 문서");
+    await writeFile(join(dir, "app.tsx"), "가");
+    const result = await packProject({projectDir: dir});
+    const path = join(await tempDir("zalkera-zipout-saved-"), "packed.zip");
+    await writeZip(path, result.buffer);
+    const names = execFileSync("python3", [
+        "-c",
+        `import zipfile,sys
+print("\\n".join(zipfile.ZipFile(sys.argv[1]).namelist()))`,
+        path,
+    ]).toString().trim().split("\n");
+    ok(!names.some((n) => n.startsWith(".zalkera/saved/")), `치워 둔 것이 실렸다: ${names}`);
+    ok(names.includes(".zalkera/ASSETS-LICENSE.md"), `배송 문서가 빠졌다: ${names}`);
+    ok(names.includes("app.tsx"));
+});
