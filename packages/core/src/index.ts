@@ -214,6 +214,7 @@ export {
     decideFetchTargetPlan,
     changeFolderPlan,
     needsRelinkConsent,
+    folderStillShown,
     type TenantScope,
     type SiteChoice,
     type ElsewhereOption,

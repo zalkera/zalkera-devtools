@@ -9,6 +9,7 @@ import {
   decideTenantScope,
   elsewhereOptions,
   folderBinding,
+  folderStillShown,
   linkedTenantOf,
   needsRelinkConsent,
 } from "./siteBinding.ts";
@@ -351,4 +352,19 @@ test("확증이 없으면 고르는 화면을 건너뛴다 — 한 단계 덜", 
 
 test("이미 그 폴더를 열어 뒀으면 제안하지 않는다 — 눌러도 아무 일이 없는 항목이다", () => {
     assert.strictEqual(changeFolderPlan({openDir: "/b", confirmedDir: "/b"}).kind, "pick");
+});
+
+test("보인 폴더가 아직 그 폴더인가 — 사라진 것과 달라진 것을 둘 다 본다", () => {
+    // ⚠ **`null` 만 보면 안 된다.** 목록을 띄운 사이 다른 창이 링크를 바꾸면, `detail` 에 적힌
+    //   경로와 **다른 폴더**가 말없이 열린다. 세 판이 그 상태로 배송됐다(소급 심의 🟠).
+    assert.equal(folderStillShown("/a/site", "/a/site"), true, "같은 폴더인데 막았다");
+    assert.equal(folderStillShown(null, "/a/site"), false, "사라진 폴더를 열려 했다");
+    assert.equal(folderStillShown("/b/other", "/a/site"), false, "보인 것과 다른 폴더를 열려 했다");
+    assert.equal(folderStillShown("", "/a/site"), false, "빈 값을 폴더로 봤다");
+    // ⚠ 타입이 막아 주는 자리지만 **런타임에는 뚫린다** — 보인 것도 없고 지금도 없을 때
+    //   `current === shown` 만 쓰면 `null === null` 로 참이 되어 「그 폴더 맞다」가 된다.
+    assert.equal(
+        folderStillShown(null, null as unknown as string), false,
+        "보인 것도 없는데 같다고 답했다",
+    );
 });

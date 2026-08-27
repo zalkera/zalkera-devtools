@@ -83,6 +83,7 @@ import {
   isReceivable,
   type ElsewhereOption,
   needsRelinkConsent,
+  folderStillShown,
   writeBindingMarkTo,
   isCancelled,
   readIssuedKeysWithOverflow,
@@ -1205,7 +1206,7 @@ async function changeFolder(): Promise<void> {
       // ⚠ **보인 것과 여는 것이 같아야 한다.** `null` 만 보면, 목록을 띄운 사이 다른 창이
       //    레지스트리를 바꿨을 때 `detail` 에 적힌 것과 **다른 폴더**가 열린다 — 이 축의 주제가
       //    바로 「보이는 것과 실제가 갈리지 않게」다.
-      if (still === null || still !== plan.dir) {
+      if (!folderStillShown(still, plan.dir)) {
         void vscode.window.showInformationMessage(
           ours("그 폴더를 더는 찾지 못했습니다 — 직접 골라 주세요."),
         );
@@ -3658,10 +3659,19 @@ async function runElsewhere(
       // 확증은 목록을 만들 때도 했지만 **누른 시점에 다시 한다** — 그 사이 폴더가 사라지거나
       // 다른 사이트를 담게 됐을 수 있고, 그때 여는 것이 이 설계가 막으려는 사고다.
       const dir = confirmedFolderFor(picked);
-      if (dir === null) {
-        void vscode.window.showInformationMessage(
-          ours("받아 두신 폴더를 찾지 못했습니다 — 「소스 다운로드」로 새로 받아 주세요."),
+      // ⚠ **보인 것과 여는 것이 같아야 한다.** `null` 만 보면, 목록을 띄운 사이 다른 창이
+      //    레지스트리를 바꿨을 때 `detail` 에 적힌 것과 **다른 폴더**가 말없이 열린다 —
+      //    형제 자리(`작업 폴더 변경`)가 이미 같은 잣대를 쓴다. 한쪽만 고치면 갈린다.
+      if (!folderStillShown(dir, option.dir)) {
+        // ⚠ **「소스 다운로드」로 보내지 않는다.** 이 안내가 뜨는 순간 사이트를 캡처한 목록은 이미
+        //    닫혔고, 화면에 남은 같은 이름의 버튼은 **무캡처 배선**이라 이 창의 유효 사이트를
+        //    받는다 — 방금 고른 사이트가 아니다. 캡처를 쥔 여기서 바로 제안한다.
+        const RETRY = "새로 받기";
+        const answer = await vscode.window.showInformationMessage(
+          ours(`받아 두신 폴더를 더는 찾지 못했습니다 — ${picked} 의 소스를 새로 받으시겠습니까?`),
+          RETRY,
         );
+        if (answer === RETRY) await openSite(pinned);
         return;
       }
       await openSiteFolder(dir);

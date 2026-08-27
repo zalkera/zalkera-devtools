@@ -296,3 +296,22 @@ export function decideFetchTargetPlan(input: FetchTargetInput): FetchTargetPlan 
 export function needsRelinkConsent(binding: string | null, chosen: string): boolean {
     return binding !== null && binding !== chosen;
 }
+
+/**
+ * **화면에 보인 폴더가 아직 그 폴더인가.** 아니면 열지 않는다.
+ *
+ * 목록·모달을 만들 때 확증한 폴더([shown])와, **누른 시점에** 다시 확증한 폴더([current])를 견준다.
+ * 그 사이 다른 창이 같은 사이트의 링크를 바꿨을 수 있고, 그때 여는 것이 이 축이 막는 사고다 —
+ * 이 축의 주제가 「보이는 것과 실제가 갈리지 않게」다.
+ *
+ * ⚠ **`null` 만 보면 안 된다.** 폴더가 **사라진 것**과 **다른 폴더가 된 것**은 다르고, 뒤엣것을
+ *   안 보면 `detail` 에 적힌 경로와 다른 폴더가 말없이 열린다.
+ *
+ * ⚠ **이 술어가 여기 있는 이유**: 종전에는 같은 판정이 확장 쪽 **두 자리에 손으로** 적혀 있었고,
+ *   심의 권고가 그중 한쪽에만 반영돼 나머지 한 자리가 `null` 만 보는 채로 세 판이 배송됐다.
+ *   한 벌로 두면 한쪽만 고쳐질 수 없다.
+ */
+// 타입 가드로 둔다 — 호출부가 통과 뒤 `current` 를 non-null 로 쓴다(좁힘을 손으로 다시 하지 않게).
+export function folderStillShown(current: string | null, shown: string): current is string {
+    return current !== null && current === shown;
+}
