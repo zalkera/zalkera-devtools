@@ -1891,15 +1891,26 @@ async function updateZipCommand(): Promise<void> {
  *   쪽이 반쪽이다). 어디 있는지 말하고 사람이 한다.
  */
 async function announceStashLeftovers(): Promise<void> {
-  const dir = siteDir();
-  if (dir === null) return;
+  // ⚠ **`siteDir()` 이 아니라 `workspaceDir()` 이다 — 이 차이가 곧 이 알림의 존재 이유다.**
+  //    `siteDir()` 은 `package.json` 이 있어야 참인데, 교체가 **일찍** 죽으면(치우기는 끝나고
+  //    해제는 시작 전) 그 파일이 **스태시 안**에 있다. 즉 알림이 가장 필요한 최악 사례에서
+  //    정확히 침묵한다 — 그리고 배송 문서는 「그런 폴더가 있으면 창을 열 때 알려 드립니다」라고
+  //    **무조건**으로 약속한다. 그 약속을 지키려면 소스 여부를 안 물어야 한다(3축 심의 F1).
+  const dir = workspaceDir();
+  if (dir === undefined) return;
   const found = await siblingStashes(dir);
   if (found.length === 0) return;
-  void vscode.window.showWarningMessage(
+  // ⚠ **이름만 말하면 못 찾는다.** 숨은 dot 폴더라 탐색기 기본 설정에서는 안 보인다 — 전체
+  //    경로를 주고, 여는 단추까지 준다(설계 §5).
+  const open = "폴더 열기";
+  const answer = await vscode.window.showWarningMessage(
     ours("지난 갈아 끼우기가 중간에 끊긴 흔적이 있습니다: ") +
-      plainNotice(found.join(" · "), 512) +
+      plainNotice(found.map((n) => join(dirname(dir), n)).join(" · "), 512) +
       ours(" — 원래 소스가 그 안에 있을 수 있습니다. 옮기실 것을 옮기신 뒤 그 폴더를 지우시면 됩니다."),
+    open,
   );
+  if (answer !== open || found[0] === undefined) return;
+  await vscode.commands.executeCommand("revealFileInOS", vscode.Uri.file(join(dirname(dir), found[0])));
 }
 
 /**
@@ -1944,11 +1955,16 @@ async function updateFromServerCommand(): Promise<void> {
   }
   const {api, tenant} = await ensureApiFor();
 
-  // ⚠ **판을 여기서 고른다 — 받기 셋과 같은 판정으로.** 새 문만 다르게 고르면 「소스 다운로드가
-  //    준 것과 이 문이 준 것이 다른」 날이 온다.
-  const revisions = await api.listRevisions(REFLECT_PAGE);
+  // ⚠ **판을 여기서 고른다 — 받기 셋과 «같은 재료로».** 판정 함수만 같고 목록이 다르면 「소스
+  //    다운로드가 준 것과 이 문이 준 것이 다른」 날이 온다. 형제 셋이 전량을 읽으므로 여기도
+  //    전량이다 — 페이지를 걸면 활성 판이 그 밖으로 밀린 사이트에서 **다른 판을 갈아 끼운다.**
+  const revisions = await api.listRevisions();
   const picked = pickRevision(revisions);
   if (picked === null) throw noRevisionError(revisions);
+  // ⚠ **켜져 있는 판이 아닐 때는 말한다.** 사이드바 툴팁이 「서버에 **켜져 있는** 판」이라고
+  //    적어 두었으므로, 폴백으로 최신 READY 를 잡은 칸에서 침묵하면 **파괴 동사가 켜져 있지도
+  //    않은 판을 무표기로 받는** 형상이 된다(3축 심의 F2). 형제 받기와 같은 문면을 쓴다.
+  if (picked.why === "latest-ready") log(say.pickedLatestReady(tenant, picked.revisionNo));
 
   // ⚠ **되돌릴 수 없는 조작이라 재료를 «확인 앞»에 모은다.** 사람이 동의할 때 「어느 판에서
   //    어느 판으로」·「무엇이 남는가」·「지난 잔재가 있는가」를 이미 알고 있어야 한다.

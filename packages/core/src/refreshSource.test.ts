@@ -122,6 +122,26 @@ test("남의 사이트 표식이면 **안 덮는다** — 소스는 갈아 끼�
     strictEqual((await markOf(dir)).tenant, "other", "남의 소속을 덮었다");
 });
 
+test("소속을 **못 읽으면** 표식을 안 쓴다 — 모르는 채로 «적지도» 않는다", async () => {
+    // ⚠ 「모른다」로 **막지는** 않는다(소스는 갈아 끼운다). 다만 모르는 채로 소속을 **적지도**
+    //    않는다 — 이 폴더가 누구 것인지 판정할 근거가 없기 때문이다. 표식이 없고 워크스페이스
+    //    링크도 못 읽는 폴더가 그 자리다.
+    const dir = await tempDir("zalkera-refresh-unknown-");
+    await writeFile(join(dir, "package.json"), '{"name":"old"}');
+    const payload = tarGz([{ name: "package.json", body: '{"name":"new"}' }]);
+
+    const result = await refreshSiteSource({
+        api: api(payload), targetDir: dir, tenant: "bix",
+        link: { kind: "unreadable" }, fetchImpl: serve(payload),
+    });
+
+    strictEqual(result.mark.written, false);
+    strictEqual((result.mark as { reason: string }).reason, "unknown");
+    // 소스는 갈아 끼웠다 — 막은 것이 아니다.
+    strictEqual(JSON.parse(await readFile(join(dir, "package.json"), "utf8")).name, "new");
+    ok(!(await readdir(dir)).includes(".zalkera"), "모르는 채로 소속을 적었다");
+});
+
 test("해제가 깨지면 **폴더가 원래대로 돌아온다** — 표식도 옛 판 그대로다", async () => {
     const dir = await workedFolder("bix", 3);
     // 앞 항목이 먼저 쓰인다 — 되돌리기가 없으면 반쪽이 남는다.

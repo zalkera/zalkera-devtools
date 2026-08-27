@@ -109,6 +109,21 @@ const WIRES = [
     //    core 쪽 계약은 시험이 직접 문다(`refreshSource.test.ts`). 여기서 무는 것은 **확장이 그
     //    합성 함수를 쓰는가** — 손으로 `fetchVerifiedSourceTar`+`replaceContents` 를 다시 엮으면
     //    표식 갱신이 빠진 채 같은 화면이 나온다.
+    // ⚠ **`siteDir()` 로 낮추면 알림이 «최악 사례에서만» 침묵한다.** 교체가 일찍 죽으면
+    //    `package.json` 이 스태시 안이라 그 술어가 거짓이 되고, 배송 문서는 「창을 열 때 알려
+    //    드립니다」를 무조건으로 약속한다. 잔재를 찾는 자리는 소스 여부를 묻지 않는다.
+    [
+        "packages/vscode/src/extension.ts",
+        "  const dir = workspaceDir();\n  if (dir === undefined) return;\n  const found = await siblingStashes(dir);",
+        "잔재 알림이 **알림이 필요한 바로 그 상태**에서 침묵한다 — 소스가 통째로 스태시에 있는 폴더다",
+    ],
+    // ⚠ **페이지를 걸면 «다른 판»을 갈아 끼운다.** 형제 받기 셋이 전량을 읽는다 — 재료가 갈리면
+    //    「소스 다운로드가 준 것과 이 문이 준 것이 다른」 날이 온다.
+    [
+        "packages/vscode/src/extension.ts",
+        "  const revisions = await api.listRevisions();\n  const picked = pickRevision(revisions);",
+        "활성 판이 목록 페이지 밖으로 밀린 사이트에서 **파괴 동사가 엉뚱한 판을 받는다**",
+    ],
     [
         "packages/vscode/src/extension.ts",
         "refreshSiteSource({",
