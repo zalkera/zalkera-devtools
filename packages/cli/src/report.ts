@@ -5,7 +5,13 @@
  * ⚠ **경로를 전량 나열하지 않는다** — 건수 + 최대 10경로 + 「외 N개」. 전량은 `--verbose`.
  * ⚠ **사실만 적고 끊지 않는다** — 다음에 할 일이 문장 안에 있어야 한다.
  */
-import {PATH_LIST_CAP, trimPaths, type PushResult, type SyncStatus} from "@zalkera/devtools-core";
+import {
+    PATH_LIST_CAP,
+    trimPaths,
+    type PushResult,
+    type StrandedPlan,
+    type SyncStatus,
+} from "@zalkera/devtools-core";
 
 /**
  * ⚠ **자르는 판정을 여기 두지 않는다.** 거절 문면은 코어가 만들고 이 파일은 상태 보고를 만드는데,
@@ -134,3 +140,34 @@ export function describePush(result: PushResult, verbose = false): string[] {
     if (result.sent > 0) lines.push("아직 사이트에 켜지지는 않았습니다 — 켜려면 콘솔에서 발행해 주세요.");
     return lines;
 }
+
+/**
+ * 버리기 전에 **무엇을 잃는지** 말한다(memo184 §2.5).
+ *
+ * 🔴 **「로컬 원본이 있어 손실이 아니다」는 A 갈래에서만 쓴다.** 초안은 그 문장을 무조건 달았고,
+ *    그것이 사장님의 유일본을 지우게 만드는 문장이다.
+ * 🔴 **「남의 드래프트」라고 쓰지 않는다.** 같은 사람이 두 표면을 쓰면 그 말이 거짓이 된다.
+ *    문면은 **「여기 없는 편집」** — 폴더 기준이라 언제나 참이다.
+ */
+export function describeStranded(plan: StrandedPlan, verbose = false): string[] {
+    const list = trimPaths(plan.paths, PATH_LIST_CAP, verbose).map((p) => `  · ${p}`);
+    if (plan.verdict === "mine") {
+        return [
+            "지금 사이트 쪽에 걸려 있는 편집은 이 폴더에서 올린 것과 같습니다.",
+            ...list,
+            "버리고 다시 올려도 이 폴더의 내용은 그대로입니다.",
+        ];
+    }
+    return [
+        "⚠ 지금 사이트 쪽에 **이 폴더에 없는 편집**이 걸려 있습니다.",
+        ...list,
+        "콘솔이나 AI 로 고친 내용일 수 있고, 버리면 되찾을 방법이 없습니다.",
+        "무엇이 걸려 있는지 콘솔의 「편집 중」에서 먼저 확인해 주세요.",
+        ...(plan.reason === "server-unreadable"
+            ? ["(지금 사이트 쪽 상태를 확인하지 못해 무엇이 걸려 있는지도 못 읽었습니다.)"]
+            : []),
+    ];
+}
+
+/** 갈래 B 에서 사람이 **직접 쳐야 하는** 문구. 한 글자 동의(y)를 받지 않는다. */
+export const DISCARD_PHRASE = "버립니다";

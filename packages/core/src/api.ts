@@ -105,6 +105,23 @@ export interface SiteRevision {
     servingObservedAt?: string | null;
 }
 
+/**
+ * `POST /draft/publish` 의 응답 — **우리가 쓰는 것**.
+ *
+ * ⚠ 형제 `publish.ts` 의 zip 발행 결과와 **다른 것**이다. 그쪽은 폴더를 묶어 올린 결과이고
+ *   이쪽은 사이트 쪽에 걸려 있던 편집이 판이 된 결과다(원장 출처가 `UPLOAD` vs `EDIT`).
+ */
+export interface DraftPublishResult {
+    /** 새로 선 판 번호. */
+    revisionNo: number;
+    /** `NEXT_SOURCE` · `STATIC`. 켜지는 방식이 갈린다 — STATIC 은 즉시, NEXT_SOURCE 는 빌드 뒤다. */
+    siteType: string;
+    /** `BUILDING`·`READY` 따위. */
+    status: string;
+    /** 서버가 덧붙이는 안내. 빈 문자열일 수 있다. */
+    capabilityNote: string;
+}
+
 /** `activate` 응답에서 **우리가 쓰는 것**. 나머지 필드는 안 본다. */
 export interface ActivateResult {
     // ⚠ **`revisionNo` 를 두지 않는다.** 화면이 쓰는 번호는 **사람이 고른 그 번호**이지 응답의
@@ -295,6 +312,21 @@ export class ZalkeraApi {
      */
     draftState(): Promise<DraftState> {
         return this.request<DraftState>("GET", "/api/partner/site-upload/draft");
+    }
+
+    /**
+     * 편집 중인 것을 **판 N+1 로 올린다**(memo184 §2.4 · `POST /draft/publish`).
+     *
+     * ⚠ **새 문을 내지 않는다** — 콘솔이 쓰는 그 문을 그대로 쓴다. 문이 둘이 되면 「발행했는가」를
+     *   두 곳에 물어야 하고, 한쪽만 고쳐지는 병이 시작된다.
+     * ⚠ **`actor` 를 본문에 안 싣는다.** 서버가 인증에서 만든다 — 실으면 아무 이름이나 박힌다.
+     *
+     * @param discardPendingChanges 게시 대기 AI 변경을 함께 버릴지. **명시 동의가 있을 때만** 참이다.
+     */
+    publishDraft(label?: string, discardPendingChanges = false): Promise<DraftPublishResult> {
+        return this.request<DraftPublishResult>("POST", "/api/partner/site-upload/draft/publish", {
+            body: {...(label === undefined ? {} : {label}), discardPendingChanges},
+        });
     }
 
     /** 이 클라이언트가 어느 사이트를 가리키는가. 장부(`sync.json`)가 소속을 적을 때 쓴다. */

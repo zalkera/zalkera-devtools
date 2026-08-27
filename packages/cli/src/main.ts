@@ -12,7 +12,11 @@ import {
     DevtoolsError,
     pullSiteSource,
     pushSiteSource,
+    planStranded,
+    publishDraft,
     rebuildBaseline,
+    rollbackRevision,
+    discardDraft,
     readLedger,
     hashWorkdir,
     PATH_LIST_CAP,
@@ -27,7 +31,8 @@ import {
 import {spawn} from "node:child_process";
 import {flagOn, flagValue, parseArgs} from "./args.ts";
 import {openAuth, openContext, version} from "./context.ts";
-import {describePush, describeStatus} from "./report.ts";
+import {confirm} from "./confirm.ts";
+import {describePush, describeStatus, describeStranded, DISCARD_PHRASE} from "./report.ts";
 import {FileTokenStore, tokenPath} from "./tokenStore.ts";
 
 const HELP = `잘커라 — 사이트 소스를 로컬에서 다루는 도구 (v${version()})
@@ -37,6 +42,9 @@ const HELP = `잘커라 — 사이트 소스를 로컬에서 다루는 도구 (v
   zalkera status                이 폴더와 사이트가 어떻게 다른지 본다
   zalkera pull                  사이트의 지금 판을 이 폴더에 받는다
   zalkera push                  이 폴더에서 고친 것을 사이트 쪽에 올린다(켜지지는 않는다)
+  zalkera publish               올린 것을 새 버전으로 만든다(그래야 손님에게 보인다)
+  zalkera rollback <판번호>      라이브를 그 버전으로 되돌린다
+  zalkera discard               사이트 쪽에서 편집 중인 것을 버린다(판은 안 옮긴다)
   zalkera baseline              기준 기록만 지금 판으로 다시 세운다(파일은 안 건드린다)
 
 옵션
@@ -45,13 +53,17 @@ const HELP = `잘커라 — 사이트 소스를 로컬에서 다루는 도구 (v
   --revision <판번호>            받을 판을 지정한다(pull · baseline)
   --discard-local                pull 이 막힐 때 고친 것을 옆 폴더로 옮기고 진행한다
   --overwrite-unseen             push 가 막힐 때 사이트 쪽 편집을 덮어쓰고 진행한다(그 편집은 사라진다)
+  --label <이름>                 publish 가 붙일 버전 이름
+  --discard-pending              publish 가 게시 대기 AI 변경을 함께 버린다
+  --discard-draft                rollback 이 편집 중인 것을 함께 버린다
+  --yes                          버리기 확인을 미리 준다(터미널이 아닐 때)
   --verbose                      경로를 전부 보여 준다
 
 로그인 정보는 ${tokenPath()} 에 **평문**으로 저장됩니다.
 그 컴퓨터를 쓸 수 있는 사람은 이 사이트를 고치고 배포할 수 있습니다.`;
 
 async function main(argv: readonly string[]): Promise<number> {
-    const {command, flags} = parseArgs(argv);
+    const {command, positional, flags} = parseArgs(argv);
     // ⚠ **판 물음이 먼저다.** 도움말 갈래가 「명령이 없으면」을 먼저 보면 `--version` 은 명령이
     //   없는 호출이라 도움말이 나온다 — 스크립트가 판을 읽으려다 도움말을 파싱하게 된다.
     if (command === "version" || flagOn(flags, "version")) {
@@ -171,6 +183,106 @@ async function main(argv: readonly string[]): Promise<number> {
             process.stdout.write(`${parts.join("\n")}\n`);
             return 0;
         }
+        case "publish": {
+            const context = await openContext(common);
+            const result = await publishDraft({
+                api: context.api,
+                folder: context.folder,
+                label: flagValue(flags, "label") ?? undefined,
+                // ⚠ **명시 동의다.** 게시 대기 AI 변경이 함께 사라진다.
+                discardPendingChanges: flagOn(flags, "discard-pending"),
+                onProgress: (message: string) => process.stderr.write(`${message}\n`),
+            });
+            const lines = [
+                `${result.revisionNo}판으로 올렸습니다.`,
+                result.siteType === "STATIC"
+                    ? "지금 바로 손님에게 보입니다."
+                    : "사이트를 다시 짓는 중입니다 — 다 지어지면 자동으로 손님에게 보입니다.",
+            ];
+            if (result.capabilityNote) lines.push(result.capabilityNote);
+            if (!result.ledgerRebuilt) {
+                lines.push(
+                    "",
+                    "다만 새 버전의 파일 목록을 읽지 못해 이 폴더의 기준 기록을 지웠습니다.",
+                    "`zalkera baseline` 을 한 번 실행해 주세요 — 폴더의 파일은 건드리지 않습니다.",
+                );
+            }
+            process.stdout.write(`${lines.join("\n")}\n`);
+            return result.ledgerRebuilt ? 0 : 1;
+        }
+        case "rollback": {
+            const target = revisionArg(positional);
+            const context = await openContext(common);
+            const result = await rollbackRevision({
+                api: context.api,
+                folder: context.folder,
+                revisionNo: target,
+                discardDraft: flagOn(flags, "discard-draft"),
+                onProgress: (message: string) => process.stderr.write(`${message}\n`),
+            });
+            const lines = [
+                result.pointerMoved
+                    ? `${result.revisionNo}판으로 되돌렸습니다.`
+                    : `이미 ${result.revisionNo}판이었습니다.`,
+            ];
+            if (result.discardedDraft) lines.push("편집 중이던 것은 함께 버렸습니다.");
+            if (result.discardedPendingChanges > 0) {
+                lines.push(`게시 대기 변경 ${result.discardedPendingChanges}건도 함께 버렸습니다.`);
+            }
+            lines.push("", "이 폴더의 파일은 건드리지 않았습니다 — 맞추려면 `zalkera pull` 을 실행하세요.");
+            if (result.differing.length > 0) {
+                lines.push(
+                    `⚠ 이 폴더의 ${result.differing.length}개 파일이 ${result.revisionNo}판과 다릅니다.`,
+                    ...trimPaths(result.differing, PATH_LIST_CAP, verbose).map((p) => `  · ${p}`),
+                    `지금 \`zalkera push\` 를 하면 이 ${result.differing.length}개가 **전부** 올라가 ${result.revisionNo}판의 내용을 덮습니다.`,
+                );
+            }
+            if (!result.ledgerRebuilt) {
+                lines.push("", "새 기준의 파일 목록을 읽지 못해 기준 기록을 지웠습니다. `zalkera baseline` 을 실행해 주세요.");
+            }
+            process.stdout.write(`${lines.join("\n")}\n`);
+            return 0;
+        }
+        case "discard": {
+            const context = await openContext(common);
+            // 🔴 **무엇을 잃는지 먼저 보여 준다.** 판정이 「여기 없는 편집」이면 한 글자 동의를 안 받는다.
+            const draft = await context.api.draftFiles().catch(() => null);
+            const plan = planStranded({ledger: await readLedger(context.folder), draft});
+            if (plan.paths.length === 0 && plan.reason === "ledger-matches") {
+                process.stdout.write("사이트 쪽에 편집 중인 것이 없습니다 — 버릴 것이 없습니다.\n");
+                return 0;
+            }
+            process.stderr.write(`${describeStranded(plan, verbose).join("\n")}\n`);
+            const agreed =
+                plan.verdict === "mine"
+                    ? await confirm({
+                          question: "버릴까요? (y/n)",
+                          given: flagOn(flags, "yes"),
+                          flag: "--yes",
+                      })
+                    : await confirm({
+                          question: `그래도 버리려면 아래를 그대로 입력해 주세요: \`${DISCARD_PHRASE}\``,
+                          phrase: DISCARD_PHRASE,
+                          given: flagValue(flags, "confirm") === DISCARD_PHRASE,
+                          flag: `--confirm ${DISCARD_PHRASE}`,
+                      });
+            if (!agreed) {
+                process.stdout.write("아무것도 버리지 않았습니다.\n");
+                return 1;
+            }
+            const result = await discardDraft({
+                api: context.api,
+                folder: context.folder,
+                onProgress: (message: string) => process.stderr.write(`${message}\n`),
+            });
+            const lines = [result.hadDraft ? "편집 중이던 것을 버렸습니다." : "버릴 편집이 없었습니다."];
+            if (result.discardedPendingChanges > 0) {
+                lines.push(`게시 대기 변경 ${result.discardedPendingChanges}건도 함께 버렸습니다.`);
+            }
+            lines.push("이 폴더의 파일은 건드리지 않았습니다.");
+            process.stdout.write(`${lines.join("\n")}\n`);
+            return 0;
+        }
         case "baseline": {
             const context = await openContext(common);
             const result = await rebuildBaseline({
@@ -212,6 +324,20 @@ async function main(argv: readonly string[]): Promise<number> {
             process.stderr.write(`모르는 명령입니다: ${command}\n\n${HELP}\n`);
             return 2;
     }
+}
+
+/** 위치 인자의 판 번호(`zalkera rollback 5`). 없거나 숫자가 아니면 **거절한다.** */
+function revisionArg(positional: readonly string[]): number {
+    const raw = positional[0];
+    const value = Number(raw);
+    if (raw === undefined || !Number.isInteger(value) || value <= 0) {
+        throw new DevtoolsError(
+            "SERVER_REJECTED",
+            `되돌릴 버전 번호를 주세요(예: \`zalkera rollback 5\`).${raw === undefined ? "" : ` 받은 값: ${raw}`}`,
+            "`zalkera status` 로 지금 켜진 버전을 볼 수 있습니다.",
+        );
+    }
+    return value;
 }
 
 /** `--revision` 을 판 번호로. 숫자가 아니면 **거절한다** — 조용히 활성 판을 받으면 엉뚱한 판이 온다. */

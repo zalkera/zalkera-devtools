@@ -285,3 +285,21 @@ export {
     type PushPlan,
 } from "./pushPlan.ts";
 export type {DraftEdit, DraftEditsResult} from "./api.ts";
+export {
+    discardDraft,
+    publishDraft,
+    rollbackRevision,
+    type DiscardOptions,
+    type DiscardOutcome,
+    type PublishDraftOptions,
+    type PublishOutcome,
+    type RollbackOptions,
+    type RollbackOutcome,
+} from "./draftLifecycle.ts";
+export {
+    planStranded,
+    type StrandedInput,
+    type StrandedPlan,
+    type StrandedVerdict,
+} from "./strandedPlan.ts";
+export type {DraftPublishResult} from "./api.ts";
