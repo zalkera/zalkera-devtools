@@ -1,0 +1,122 @@
+import {match, ok, strictEqual} from "node:assert/strict";
+import {test} from "node:test";
+import {SYNC_LEDGER_FORMAT, syncStatus, type PushResult, type SyncLedger} from "@zalkera/devtools-core";
+import {describePush, describeStatus} from "./report.ts";
+
+const ledger = (over: Partial<SyncLedger> = {}): SyncLedger => ({
+    format: SYNC_LEDGER_FORMAT,
+    tenant: "acme",
+    base: {revisionNo: 7, tarSha256: "a".repeat(64)},
+    files: {"a.tsx": {sha256: "판7", bytes: 3}},
+    server: null,
+    mine: {},
+    pulledAt: "2026-08-01T00:00:00.000Z",
+    pushedAt: null,
+    ...over,
+});
+const draft = (over: Record<string, unknown> = {}) =>
+    ({generation: null, changed: [], deleted: [], baseRevisionNo: null, strandedOnOldRevision: false, ...over}) as never;
+
+test("🔴 판이 움직였고 고친 것이 있으면 **실제 출구**를 댄다 — 두 문이 서로를 가리키면 갇힌다", () => {
+    // 실측: 「pull 하세요」로 끝내면 그 pull 이 거절하고, 그 거절은 「push 하세요」라고 답한다.
+    const out = describeStatus(
+        syncStatus({ledger: ledger(), local: {"a.tsx": {sha256: "내가-고침"}}, draft: draft(), activeRevisionNo: 9}),
+    );
+    match(out, /7판에서 9판으로 움직였습니다/);
+    match(out, /--discard-local/, `갇히는 안내다:\n${out}`);
+});
+
+test("고친 것이 없으면 그냥 «받으세요»라고 한다 — 필요 없는 경고를 안 붙인다", () => {
+    const out = describeStatus(
+        syncStatus({ledger: ledger(), local: {"a.tsx": {sha256: "판7"}}, draft: draft(), activeRevisionNo: 9}),
+    );
+    match(out, /zalkera pull/);
+    ok(!out.includes("--discard-local"), `버리라는 말을 필요 없이 붙였다:\n${out}`);
+});
+
+test("판이 그대로면 그 문단이 아예 없다", () => {
+    const out = describeStatus(
+        syncStatus({ledger: ledger(), local: {"a.tsx": {sha256: "판7"}}, draft: draft(), activeRevisionNo: 7}),
+    );
+    ok(!out.includes("움직였습니다"), out);
+});
+
+test("🔴 막힌 이유마다 **다음에 할 일**이 문장 안에 있다", () => {
+    const noLedger = describeStatus(syncStatus({ledger: null, local: {}, draft: draft(), activeRevisionNo: 7}));
+    match(noLedger, /zalkera baseline/);
+    const unreadable = describeStatus(syncStatus({ledger: ledger(), local: {}, draft: null, activeRevisionNo: 7}));
+    match(unreadable, /다시 시도/);
+    const stranded = describeStatus(
+        syncStatus({ledger: ledger(), local: {}, draft: draft({strandedOnOldRevision: true}), activeRevisionNo: 7}),
+    );
+    match(stranded, /콘솔에서/);
+    // ⚠ 없는 명령을 대면 안 된다 — 좌초는 사람이 막혀서 다음 걸음을 찾는 자리다.
+    ok(!/zalkera (discard|publish|rollback)/.test(stranded), stranded);
+});
+
+test("경로를 전량 나열하지 않는다 — 건수 + 최대 10 + 「외 N개」", () => {
+    // 장부를 비워 「새로 만든 것」 한 덩어리만 나오게 한다 — 안 그러면 「지운 것」이 섞여 산수가 흐려진다.
+    const many = Object.fromEntries(Array.from({length: 25}, (_, i) => [`f${i}.tsx`, {sha256: "새것"}]));
+    const out = describeStatus(syncStatus({ledger: ledger({files: {}}), local: many, draft: draft(), activeRevisionNo: 7}));
+    match(out, /새로 만든 것 25개/);
+    match(out, /외 15개/);
+    strictEqual(out.split("\n").filter((line) => line.startsWith("  · ")).length, 11, out);
+});
+
+test("`--verbose` 면 전부 보여 준다", () => {
+    const many = Object.fromEntries(Array.from({length: 25}, (_, i) => [`f${i}.tsx`, {sha256: "새것"}]));
+    const out = describeStatus(
+        syncStatus({ledger: ledger({files: {}}), local: many, draft: draft(), activeRevisionNo: 7}),
+        true,
+    );
+    ok(!out.includes("외 "), out);
+    strictEqual(out.split("\n").filter((line) => line.startsWith("  · ")).length, 25);
+});
+
+// ── 올리기 보고 ─────────────────────────────────────────────────────────────────
+
+const pushed = (over: Partial<PushResult> = {}): PushResult => ({
+    sent: 0,
+    removed: 0,
+    generation: null,
+    droppedByServer: [],
+    retriedAfterConflict: false,
+    reconciled: null,
+    previewUrl: null,
+    warning: null,
+    ...over,
+});
+
+test("🔴 「같습니다」와 「빼고 보냈습니다」가 함께 찍히지 않는다", () => {
+    const out = describePush(pushed({sent: 0, droppedByServer: ["dist/x.js"]})).join("\n");
+    ok(!out.includes("사이트 쪽과 같습니다"), `모순된 두 줄이 함께 찍혔다:\n${out}`);
+    match(out, /빼고 보냈습니다/);
+});
+
+test("🔴 「다시 보냈습니다」라고 **행동으로** 적지 않는다 — 요청이 0번 나가는 갈래가 있다", () => {
+    const out = describePush(pushed({reconciled: "not-applied", sent: 0})).join("\n");
+    ok(!/다시 보냈습니다/.test(out), `안 보냈는데 보냈다고 적었다:\n${out}`);
+    match(out, /사이트 쪽에 없었습니다/);
+});
+
+test("🔴 올린 것이 있을 때만 «아직 안 켜졌다»를 말한다", () => {
+    match(describePush(pushed({sent: 2, removed: 1})).join("\n"), /켜지지는 않았습니다/);
+    ok(!describePush(pushed({sent: 0})).join("\n").includes("켜지지는"), "안 올렸는데 발행하라고 한다");
+});
+
+test("🔴 두 번째 요청이 안 나간 갈래에서 「다시 보냈습니다」라고 안 한다", () => {
+    // `retriedAfterConflict` 는 **보낸 뒤에만** 참이 된다 — 그 계약을 문면 쪽에서도 못박는다.
+    const out = describePush(pushed({sent: 0, retriedAfterConflict: false})).join("\n");
+    ok(!out.includes("한 번 더 보냈습니다"), out);
+});
+
+test("경로를 전량 나열하지 않는다 · `--verbose` 면 전부", () => {
+    const many = Array.from({length: 25}, (_, i) => `f${i}.tsx`);
+    match(describePush(pushed({sent: 1, droppedByServer: many})).join("\n"), /외 15개/);
+    ok(!describePush(pushed({sent: 1, droppedByServer: many}), true).join("\n").includes("외 "));
+});
+
+test("화해 결과를 사실로 적는다", () => {
+    match(describePush(pushed({reconciled: "applied"})).join("\n"), /들어가 있었습니다/);
+    strictEqual(describePush(pushed({reconciled: null}))[0], "올릴 것이 없습니다 — 이 폴더의 내용이 사이트 쪽과 같습니다.");
+});

@@ -59,7 +59,14 @@ if (bumpAt !== -1) {
     for (let i = at + 1; i < 3; i += 1) parts[i] = 0;
     manifest.version = parts.join(".");
     writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + "\n");
-    console.log(`· 버전 ${before} → ${manifest.version}`);
+    // ⚠ **CLI 도 같이 올린다.** 둘은 한 제품이고 핸드셰이크의 최소판 게이트도 하나다 — 갈리면
+    //    CLI 가 첫 호출에서 「업데이트하세요」로 거절되고, 업데이트할 새 판은 존재하지 않는다.
+    //    `check-version-lockstep.mjs` 가 이 줄이 빠진 것을 잡는다.
+    const cliPath = join(root, "packages", "cli", "package.json");
+    const cli = JSON.parse(readFileSync(cliPath, "utf8"));
+    cli.version = manifest.version;
+    writeFileSync(cliPath, JSON.stringify(cli, null, 4) + "\n");
+    console.log(`· 버전 ${before} → ${manifest.version} (확장·CLI)`);
 }
 
 // ── 0.5 검사 게이트 ────────────────────────────────────────────────────────

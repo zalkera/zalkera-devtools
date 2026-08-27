@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { createReadStream, createWriteStream } from "node:fs";
 import { chmod, lstat, mkdir, open, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { isAbsolute, join, normalize, relative, resolve, sep } from "node:path";
@@ -6,7 +7,7 @@ import { pipeline } from "node:stream/promises";
 import { createGunzip } from "node:zlib";
 import { MAX_ENTRIES, MAX_ENTRY_BYTES, MAX_EXTRACT_BYTES } from "./limits.ts";
 import { DevtoolsError } from "./errors.ts";
-import { writeExclusive } from "./safeWrite.ts";
+import { assertNotWrittenTwice, writeExclusive, writeViaRename } from "./safeWrite.ts";
 import {assertNotSymlink, descend, safeSegments, assertNotVendored} from "./safeWrite.ts";
 
 /**
@@ -65,6 +66,21 @@ export interface UntarOptions {
      * 가드가 막으려는 바로 그 손해를 내면 안 된다.
      */
     maxEntries?: number;
+    /**
+     * 항목마다 **무엇을 할지** 정한다. 없으면 전부 `create` — 종전 동작 그대로다.
+     *
+     * ■ 왜 「덮어쓰기 전역 스위치」가 아닌가
+     *
+     * 이미 있는 파일 위에 안 쓰는 규칙([writeExclusive])은 이유가 있어 서 있다 — 고객 파일이 소리
+     * 없이 교체되면 되돌리기가 그 파일을 기준선으로 본다. 전역 `overwrite: true` 는 그 규칙을 **통째로**
+     * 끈다. `pull` 이 필요한 것은 그게 아니라 **자기가 안전하다고 판정한 경로만** 덮는 것이다
+     * (memo184 §2.2 — 깨끗하거나, 로컬 내용이 받을 내용과 이미 같은 경로).
+     *
+     * 그래서 판정을 부르는 쪽이 경로 단위로 넘긴다. 규칙의 뜻이 안 무너진다.
+     *
+     * @param path 뿌리 기준 상대 경로(`/` 구분자). [readTarGzManifest] 의 열쇠와 **같은 값**이다.
+     */
+    decide?: (path: string) => "create" | "replace" | "skip";
 }
 
 /** 버퍼 해제(사이트 소스용). 반환은 **쓴 파일 수**다(디렉터리·링크는 안 센다). */
@@ -72,10 +88,45 @@ export async function extractTarGz(gzipped: Buffer, targetDir: string, options: 
     // ⚠ `maxBytes` 를 **여기서도 쓴다**(심의 실측 · 2026-08-10). 종전에는 스트리밍 경로만 이 값을 보고
     // 버퍼 경로는 통짜 상한만 봐서, `maxBytes: 1024` 로 불러도 20,000 파일이 기록됐다. 호출부가 건 상한이
     // 경로에 따라 있다 없다 하면 그건 상한이 아니다.
-    const tar = await gunzipBuffer(gzipped, options.maxBytes);
-    const sink = await createSink(targetDir, options);
-    let offset = 0;
+    return extractTar(await gunzipBuffer(gzipped, options.maxBytes), targetDir, options);
+}
 
+/**
+ * 이미 푼 tar 를 해제한다.
+ *
+ * ⚠ **한 번만 풀기 위한 문이다.** `pull` 은 같은 아카이브를 두 번 본다(판정용 읽기 → 쓰기). 각자
+ *   `gunzip` 하면 산출물 크기만큼을 **두 번** 램에 올린다.
+ *
+ * ■ 실측 (300MB 로 부푸는 tar.gz · 파일 30개)
+ *   · 두 번 풀 때 — peak RSS **1,071MB**(심의 실측)
+ *   · 한 번 풀 때 — peak RSS **934MB**
+ *   · 대조군: 이 문을 안 쓰는 기존 경로 `extractTarGz` 단독 — **934MB**(같다)
+ *
+ *   즉 **두 번 푸는 대가만** 없앴다. 남은 산출물 3배는 [extractTarGz] 가 통짜 Buffer 로 도는 성질이고
+ *   이 트랜치 이전부터 있던 것이다 — 줄이려면 스트리밍이어야 하는데, 그러면 「무엇을 할지 정한 뒤에
+ *   쓴다」(`pull.ts` 의 순서 계약)가 성립하지 않는다. **여기서 해결했다고 적지 않는다.**
+ *
+ *   재현: `node scratchpad/실전/mem.mjs` · `node scratchpad/실전/mem2.mjs`
+ *   (`VmHWM` 을 읽는다. 두 스크립트가 같은 300MB 픽스처를 쓴다.)
+ */
+export async function extractTar(tar: Buffer, targetDir: string, options: UntarOptions = {}): Promise<number> {
+    const sink = await createSink(targetDir, options);
+    await forEachBufferedEntry(tar, (meta, data) => sink.consume(meta, data));
+    return sink.fileCount();
+}
+
+/**
+ * 버퍼 tar 를 항목 단위로 훑는다. **이 파일의 버퍼 경로는 전부 여기를 지난다.**
+ *
+ * ⚠ 파서 사본을 만들지 않으려고 뽑아낸 자리다. 종전에 이 루프가 [extractTarGz] 안에 인라인이었고,
+ *   스트리밍 경로와 갈려 **한쪽만 잘린 데이터를 거절하던** 실측 드리프트가 있었다. 매니페스트 읽기가
+ *   자기 루프를 또 쓰면 같은 일이 다시 난다.
+ */
+async function forEachBufferedEntry(
+    tar: Buffer,
+    consume: (meta: Entry, data: Buffer) => Promise<void>,
+): Promise<void> {
+    let offset = 0;
     while (offset + BLOCK <= tar.length) {
         const header = tar.subarray(offset, offset + BLOCK);
         if (isEndOfArchive(header)) break;
@@ -89,9 +140,86 @@ export async function extractTarGz(gzipped: Buffer, targetDir: string, options: 
         }
         const data = tar.subarray(offset, offset + meta.size);
         offset += Math.ceil(meta.size / BLOCK) * BLOCK;
-        await sink.consume(meta, data);
+        await consume(meta, data);
     }
-    return sink.fileCount();
+}
+
+/** [readTarGzManifest] 가 돌려주는 한 항목. `bytes` 는 **푼 뒤**의 크기다. */
+export interface TarManifestEntry {
+    sha256: string;
+    bytes: number;
+}
+
+/**
+ * tar.gz 를 **디스크에 안 쓰고** 경로별 sha 로 읽는다(memo184 §2.2 — pull 의 「받을 매니페스트」).
+ *
+ * ■ 왜 해제와 따로인가
+ *
+ * pull 은 **무엇을 할지 정한 뒤에** 쓴다. 세 집합 분류가 끝나기 전에 파일을 하나라도 쓰면 「충돌이라
+ * 아무것도 안 했습니다」가 거짓이 된다. 그래서 판정용 읽기가 먼저고 쓰기는 [extractTarGz] 의
+ * `decide` 로 나중이다 — gz 를 두 번 푸는 값을 치르고 **부분 적용을 안 만든다.**
+ *
+ * ■ 열쇠는 [safeSegments] 를 지난 값이다
+ *
+ * 해제 쪽 판정과 **같은 표기**여야 계획이 그대로 먹는다. 조각 검사도 여기서 같이 걸리므로, 폴더 밖을
+ * 가리키는 아카이브는 파일을 하나도 안 쓴 채로 거절된다.
+ *
+ * 디렉터리·심볼릭 링크·하드링크는 목록에 없다 — 매니페스트는 **파일의 목록**이다.
+ */
+export async function readTarGzManifest(
+    gzipped: Buffer,
+    options: TarManifestOptions = {},
+): Promise<Record<string, TarManifestEntry>> {
+    return readTarManifest(await gunzipBuffer(gzipped, options.maxBytes), options);
+}
+
+export interface TarManifestOptions {
+    maxBytes?: number;
+    maxEntries?: number;
+    rejectVendored?: boolean;
+}
+
+/** 이미 푼 tar 의 매니페스트. gz 를 한 번만 풀려는 부르는 쪽을 위한 문이다([extractTar] 와 같은 이유). */
+export async function readTarManifest(
+    tar: Buffer,
+    options: TarManifestOptions = {},
+): Promise<Record<string, TarManifestEntry>> {
+    const manifest: Record<string, TarManifestEntry> = {};
+    // 디스크를 안 만지므로 뿌리는 **가상**이다. [safeSegments] 는 순수 문자열 계산이고, 파일시스템
+    // 뿌리(`/`)를 그대로 쓰면 `root + sep` 가 `//` 가 되어 **정상 경로가 전부 거절된다.**
+    const root = resolve(sep, "zalkera-manifest-root");
+    let entries = 0;
+    const entryCap = Math.min(options.maxEntries ?? MAX_ENTRIES, MAX_ENTRIES);
+    const names = createNameResolver();
+
+    await forEachBufferedEntry(tar, async (meta, data) => {
+        entries += 1;
+        if (entries > entryCap) {
+            throw new DevtoolsError(
+                "SERVER_REJECTED",
+                `받은 파일의 항목이 너무 많습니다(${entryCap}개 초과).`,
+                "잘못 받은 상태로 진행하지 않았습니다. 잘커라에 문의해 주세요.",
+            );
+        }
+        const resolved = names.resolve(meta, data);
+        if (!resolved) return;
+        const {name} = resolved;
+        // 🔴 **모르는 형식은 여기서 끊는다.** 종전에는 읽기가 조용히 건너뛰고 해제기만 던졌다 —
+        //    그러면 그런 항목을 **뒤에 단** 아카이브가 앞부분을 디스크에 내려놓은 뒤에 죽는다.
+        //    「거절이 쓰기보다 앞」이 불변식이 되려면 두 훑기가 **같은 것을 거절**해야 한다(심의 지적).
+        assertKnownEntryType(meta.type, name);
+        // 디렉터리(`5`)·심볼릭 링크(`2`)·하드링크(`1`)는 매니페스트에 없다 — **파일의 목록**이다.
+        if (meta.type !== "0" && meta.type !== "\0") return;
+        const segments = safeSegments(root, name);
+        // 🔴 **거절은 쓰기보다 앞이어야 한다.** 이 검사를 해제 쪽에만 두면 아카이브 앞부분이 이미
+        //    디스크에 내려앉은 **뒤에** 던진다 — 실측: `.env` 를 덮은 뒤 `node_modules` 에서 던졌다.
+        //    읽기 훑기는 아무것도 안 쓰므로, 여기서 걸리면 폴더가 그대로다.
+        if (options.rejectVendored === true) assertNotVendored(segments, name);
+        const path = segments.join("/");
+        if (path === "") return;
+        manifest[path] = {sha256: createHash("sha256").update(data).digest("hex"), bytes: meta.size};
+    });
+    return manifest;
 }
 
 /**
@@ -210,6 +338,59 @@ function parseHeader(header: Buffer): Entry {
 }
 
 /**
+ * 긴 이름 헤더를 풀어 **이 항목의 실제 이름**을 준다. `null` 이면 그 항목은 헤더일 뿐 실물이 아니다.
+ *
+ * ⚠ **이 해석을 두 벌로 두지 마라.** 해제 쪽과 매니페스트 쪽이 각자 이 분기를 베끼면, 한쪽만 `g`(pax
+ *   전역)를 다루거나 한쪽만 빈 `path=` 를 걸러 **같은 아카이브가 두 경로에서 다른 이름으로 읽힌다.**
+ *   pull 은 그 둘을 대조해 무엇을 덮을지 정하므로, 이름이 갈리면 계획이 엉뚱한 파일에 적용된다.
+ *   이 파일은 파서를 갈랐다가 실제로 드리프트를 낸 적이 있다([forEachBufferedEntry] 주석).
+ */
+function createNameResolver() {
+    /** 앞선 `L`/`x` 헤더가 지정한 다음 항목의 이름. 쓰고 나면 비운다. */
+    let pendingName: string | null = null;
+    /** 앞선 `K` 헤더가 지정한 다음 항목의 링크 대상(100바이트를 넘는 링크). */
+    let pendingLink: string | null = null;
+
+    return {
+        resolve(entry: Entry, data: Buffer): {name: string; linkTarget: string} | null {
+            if (entry.type === "L") {
+                pendingName = cstring(data);
+                return null;
+            }
+            // pax 확장 헤더 — `path=` 레코드가 다음 항목의 이름이다.
+            if (entry.type === "x" || entry.type === "g") {
+                const path = parsePaxPath(data);
+                if (path) pendingName = path;
+                return null;
+            }
+            // GNU 긴 링크 이름 — 다음 항목의 **링크 대상**이 이 데이터다.
+            if (entry.type === "K") {
+                pendingLink = cstring(data);
+                return null;
+            }
+            const name = pendingName ?? entry.name;
+            pendingName = null;
+            const linkTarget = pendingLink ?? entry.linkTarget;
+            pendingLink = null;
+            return {name, linkTarget};
+        },
+    };
+}
+
+/**
+ * 다룰 수 있는 항목 형식인가. **두 훑기가 같은 문을 지난다** — 한쪽만 거절하면 「거절이 쓰기보다
+ * 앞」이 술어별로만 서고, 거절되는 항목을 아카이브 **뒤쪽에** 두는 것만으로 반쯤 적용이 난다.
+ */
+function assertKnownEntryType(type: string, name: string): void {
+    if (type === "0" || type === "\0" || type === "5" || type === "2" || type === "1") return;
+    throw new DevtoolsError(
+        "SERVER_REJECTED",
+        `받은 파일에 다룰 수 없는 항목이 있습니다(형식 ${type}): ${name}`,
+        "잘커라에 문의해 주세요. 잘못 받은 상태로 진행하지 않았습니다.",
+    );
+}
+
+/**
  * 항목을 디스크에 반영하는 쪽. 버퍼·스트리밍 두 경로가 **같은 판정**을 쓰게 묶어 둔다.
  *
  * 🔴 **경로 판정은 물리(physical)여야 한다**(심의 차단 · 2026-08-03 · 실제로 뚫렸다).
@@ -253,14 +434,17 @@ async function createSink(targetDir: string, options: UntarOptions) {
     const preserveMode = options.preserveMode === true;
     let count = 0;
     /**
-     * **이번 해제에서 우리가 쓴 경로들.** `writeExclusive` 가 「원래 있던 고객 파일」과 「아카이브가
+     * **이번 해제에서 우리가 쓴 경로들.** 이름을 `written` 과 가른다 — 이 파일에는 「쓴 **바이트**
+     * 수」를 뜻하는 `written` 이 따로 있고, 두 뜻이 한 이름을 쓰면 읽는 사람도 검사기도 헷갈린다. `writeExclusive` 가 「원래 있던 고객 파일」과 「아카이브가
      * 같은 경로를 두 번 담음」을 가르는 데 쓴다 — 다음에 할 일이 정반대라 뭉치면 안 된다.
      */
-    const written = new Set<string>();
-    /** 앞선 `L`/`x` 헤더가 지정한 다음 항목의 이름. 쓰고 나면 비운다. */
-    let pendingName: string | null = null;
-    /** 앞선 `K` 헤더가 지정한 다음 항목의 링크 대상(100바이트를 넘는 링크). */
-    let pendingLink: string | null = null;
+    const writtenPaths = new Set<string>();
+    /**
+     * 위의 것을 **소문자로 접은** 사본. 대소문자를 안 가리는 파일시스템에서 같은 파일이 되는 짝을
+     * 잡는 데만 쓴다 — 「안 덮는」 갈래는 그 짝을 `EEXIST` 로 잡지만 「골라 덮는」 갈래는 못 잡는다.
+     */
+    const foldedPaths = new Set<string>();
+    const names = createNameResolver();
 
     return {
         fileCount: () => count,
@@ -273,32 +457,19 @@ async function createSink(targetDir: string, options: UntarOptions) {
                 );
             }
             // GNU 긴 이름 — 이 항목의 **데이터가 다음 항목의 이름**이다.
-            if (entry.type === "L") {
-                pendingName = cstring(data);
-                return;
-            }
-            // pax 확장 헤더 — `path=` 레코드가 다음 항목의 이름이다.
-            if (entry.type === "x" || entry.type === "g") {
-                const path = parsePaxPath(data);
-                if (path) pendingName = path;
-                return;
-            }
-            // GNU 긴 링크 이름 — 다음 항목의 **링크 대상**이 이 데이터다.
-            if (entry.type === "K") {
-                pendingLink = cstring(data);
-                return;
-            }
-
-            const name = pendingName ?? entry.name;
-            pendingName = null;
-            const linkTarget = pendingLink ?? entry.linkTarget;
-            pendingLink = null;
+            const resolved = names.resolve(entry, data);
+            if (!resolved) return;
+            const {name, linkTarget} = resolved;
 
             const segments = safeSegments(root, name);
             if (options.rejectVendored === true) assertNotVendored(segments, name);
 
 
             if (entry.type === "5") {
+                // ⚠ `decide` 가 있으면 **빈 폴더를 미리 만들지 않는다.** 부르는 쪽은 파일 몇 개만
+                //   골라 쓰는 중이고, 안 쓸 경로의 폴더까지 만들면 「손대지 않았다」가 거짓이 된다.
+                //   쓸 파일의 부모는 아래 [descend] 가 필요할 때 만든다.
+                if (options.decide) return;
                 await descend(root, segments, verified);
                 return;
             }
@@ -314,25 +485,44 @@ async function createSink(targetDir: string, options: UntarOptions) {
             // 순서 의존이 붙는데, 정작 쓰이지 않는다.
             if (entry.type === "1") return;
 
-            if (entry.type !== "0" && entry.type !== "\0") {
-                throw new DevtoolsError(
-                    "SERVER_REJECTED",
-                    `받은 파일에 다룰 수 없는 항목이 있습니다(형식 ${entry.type}).`,
-                    "잘커라에 문의해 주세요. 잘못 받은 상태로 진행하지 않았습니다.",
-                );
-            }
+            assertKnownEntryType(entry.type, name);
 
             const leaf = segments[segments.length - 1];
             if (!leaf) throw new DevtoolsError("SERVER_REJECTED", `받은 파일에 이상한 경로가 있습니다: ${name}`);
+            // 판정은 **조각 검사를 통과한 경로**로 묻는다. tar 가 신고한 이름으로 물으면 `./a` 와 `a` 가
+            // 갈려, 부르는 쪽이 「건드리지 마라」고 한 파일이 다른 표기로 들어와 덮인다.
+            const verdict = options.decide?.(segments.join("/")) ?? "create";
+            if (verdict === "skip") return;
             const parent = await descend(root, segments.slice(0, -1), verified);
             const path = join(parent, leaf);
             // 마지막 조각이 이미 심링크면 **쓰기가 그 링크를 따라간다** — 조각 검사의 마지막 칸이다.
             await assertNotSymlink(path, name);
-            // ⚠ **이미 있는 파일 위에 쓰지 않는다.** 「빈 폴더」 판정은 `.vscode` 같은 편집기
-            //    산물을 일부러 통과시키고 도움말도 「있어도 괜찮습니다」라고 말한다. 아카이브가
-            //    같은 경로를 담고 있으면 고객 파일이 소리 없이 교체되고, 롤백은 그 파일을
-            //    기준선으로 봐서 못 되감는다 — 화면은 「지금 폴더는 바뀌지 않습니다」라고 한다.
-            await writeExclusive(path, data, name, written);
+            // ⚠ **기본은 「이미 있는 파일 위에 쓰지 않는다」**(아래 `else` 가지). 「빈 폴더」 판정은
+            //    `.vscode` 같은 편집기 산물을 일부러 통과시키고 도움말도 「있어도 괜찮습니다」라고
+            //    말한다. 아카이브가 같은 경로를 담고 있으면 고객 파일이 소리 없이 교체되고, 롤백은
+            //    그 파일을 기준선으로 봐서 못 되감는다 — 화면은 「지금 폴더는 바뀌지 않습니다」라고 한다.
+            //
+            //    `replace` 가지는 그 규칙의 **예외가 아니라 위임**이다: 부르는 쪽이 그 경로 하나하나에
+            //    대해 「덮어도 잃을 것이 없다」를 이미 판정했다([UntarOptions.decide] 참조).
+            //    판정 없이 오는 길에서는 이 가지가 안 열린다.
+            if (verdict === "replace") {
+                // 부르는 쪽이 「이 경로는 덮어도 잃을 것이 없다」를 이미 판정했다. 그래도 **같은 해제에서
+                // 두 번 나오는 것**은 여전히 사고다 — 그 판정은 [assertNotWrittenTwice] 한 벌이 한다.
+                assertNotWrittenTwice(path, name, writtenPaths);
+                // 🔴 **대소문자만 다른 짝도 잡는다.** macOS·Windows 에서 `App.tsx` 와 `app.tsx` 는
+                //    같은 파일이다. 「안 덮는」 갈래는 그 자리에서 `EEXIST` 로 걸렸는데, 이 갈래는
+                //    맨 `writeFile` 이라 **조용히 뒤엣것으로 교체된다** — 그리고 장부에는 둘 다
+                //    남아 한쪽이 영영 안 맞는다(실측). 정본 tar 에 그런 짝이 있는 것 자체가 결함이다.
+                assertNotWrittenTwice(path.toLowerCase(), name, foldedPaths);
+                // 🔴 **맨 `writeFile` 을 쓰지 않는다.** 잎이 **하드링크**면 그 쓰기가 대상에 그대로
+                //    가서 **폴더 밖 파일이 서버 내용으로 교체된다**(심의 실측). `lstat` 는 하드링크를
+                //    못 본다 — 경계는 `rename` 이다([writeViaRename]).
+                await writeViaRename(path, data, preserveMode && (entry.mode & 0o111) !== 0 ? 0o755 : 0o644);
+                writtenPaths.add(path);
+                foldedPaths.add(path.toLowerCase());
+            } else {
+                await writeExclusive(path, data, name, writtenPaths);
+            }
             if (preserveMode && (entry.mode & 0o111) !== 0) {
                 // 실행 비트가 있던 것만 되살린다. 전체 mode 를 그대로 쓰지 않는 이유는 아카이브가 정한
                 // 권한(예: 0777·setuid)을 고객 디스크에 그대로 옮기지 않기 위해서다.
@@ -426,6 +616,14 @@ function parseOctal(buffer: Buffer): number {
  */
 export function resolveCap(maxBytes?: number): number {
     return maxBytes ?? MAX_EXTRACT_BYTES;
+}
+
+/**
+ * gz 를 푼다. **부르는 쪽이 한 번만 풀 수 있게** 내보낸다 — 같은 아카이브를 두 번 보는 길
+ * (`pull` 의 판정 → 쓰기)이 각자 풀면 산출물만큼을 두 번 램에 올린다([extractTar] 참조).
+ */
+export async function gunzipTar(input: Buffer, maxBytes?: number): Promise<Buffer> {
+    return gunzipBuffer(input, maxBytes);
 }
 
 /** 압축 폭탄 방어 — 무제한 해제는 확장 호스트를 OOM 으로 죽이고, 그러면 다른 확장까지 함께 죽는다. */

@@ -1,0 +1,15 @@
+{
+    // **시험까지 타입을 본다.** 빌드용(`tsconfig.json`)과 나눈 이유는 형제 core 와 같다 — 그쪽은
+    // `dist` 로 굽고, 시험을 포함시키면 `dist/*.test.js` 가 발행 꾸러미에 섞여 나간다.
+    //
+    // ⚠ `rootDir` 을 넓히는 이유: 시험이 형제 core 의 임시폴더 도우미를 **한 벌만** 쓰기 위해서다.
+    //   사본을 두면 회수 규율이 갈리는데, 그 도우미의 KDoc 이 못박은 문장이 정확히 「자리마다 손으로
+    //   적으면 하나씩 빠진다」이다. `noEmit` 이라 넓혀도 산출물에 영향이 없다.
+    "extends": "./tsconfig.json",
+    "compilerOptions": {
+        "noEmit": true,
+        "rootDir": ".."
+    },
+    "include": ["src/**/*.ts"],
+    "exclude": []
+}

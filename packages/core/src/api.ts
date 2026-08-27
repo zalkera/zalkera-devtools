@@ -118,6 +118,47 @@ export interface ActivateResult {
     discardedPendingChanges?: number;
 }
 
+/**
+ * 보낼 편집 하나. 서버 `SiteDraftEditsRequest.Edit` 의 **우리가 쓰는 모양**이다.
+ *
+ * ⚠ 우리는 `content` 와 `remove` 만 쓴다. `replacements`(부분 치환)는 **모델이 토큰을 아끼려고**
+ *   쓰는 모양이고, 로컬 도구는 파일 전체를 이미 손에 들고 있다 — 치환으로 보내면 서버가 그것을
+ *   적용한 결과가 내 작업본과 같다는 보장이 없다.
+ */
+export interface DraftEdit {
+    path: string;
+    /** 「내가 읽은 그 내용 위에 얹는다」. 신설이면 생략한다. */
+    baseSha256?: string;
+    /** 올릴 내용(UTF-8 문자열). 삭제면 없다. */
+    content?: string;
+    remove?: boolean;
+}
+
+/** `POST /draft/edits` 의 응답. */
+export interface DraftEditsResult {
+    /** 불투명 세대. 편집이 비면 `null`. */
+    generation: string | null;
+    /** 얹힌 결과. `newSha256` 이 `null` 이면 지운 것이다. */
+    files: Array<{path: string; newSha256: string | null; removed: boolean}>;
+    warning: string | null;
+    previewUrl: string | null;
+}
+
+/**
+ * `GET /draft/files` 의 응답(memo184 T0-②).
+ *
+ * ⚠ [strandedOnOldRevision] 이 참이면 그 편집은 **발행도 열람도 막혀 있고 되돌리기만 남는다.**
+ *   그래도 [changed] 는 무엇이 들어 있었는지를 말한다 — 좌초 반출이 그 자리다.
+ */
+export interface DraftFiles {
+    /** 불투명 세대. 편집이 없으면 `null`. */
+    generation: string | null;
+    changed: Array<{path: string; sha256: string}>;
+    deleted: string[];
+    baseRevisionNo: number | null;
+    strandedOnOldRevision: boolean;
+}
+
 /** `GET /draft` 에서 **우리가 쓰는 것**. */
 export interface DraftState {
     /** 되돌리기가 지목하는 판. **편집이 없으면 `null`** 이다(그때 답은 활성 행이다). */
@@ -256,6 +297,42 @@ export class ZalkeraApi {
         return this.request<DraftState>("GET", "/api/partner/site-upload/draft");
     }
 
+    /** 이 클라이언트가 어느 사이트를 가리키는가. 장부(`sync.json`)가 소속을 적을 때 쓴다. */
+    tenantCode(): string {
+        return this.options.tenantCode();
+    }
+
+    /**
+     * 소스 여러 파일을 **한 번에** 고친다(memo184 T0-① · `POST /draft/edits`).
+     *
+     * ⚠ **한 요청이 계약이다.** 파일마다 따로 부르면 드래프트 세대가 N 개 생기고, 그 중간 세대가
+     *   다른 문(발행·되돌리기)의 대상이 될 수 있다 — 의도한 변경의 **반쪽이 원장에 영구히 서는**
+     *   형상이다. 나눠 보내지 마라.
+     *
+     * ⚠ 거절은 **어느 경로가** 걸렸는지를 `errors[].field` 로 준다([DevtoolsError.paths]).
+     *   문면을 뜯지 마라 — 서버의 한국어 문구가 계약이 된다.
+     */
+    editDraft(edits: readonly DraftEdit[]): Promise<DraftEditsResult> {
+        return this.request<DraftEditsResult>("POST", "/api/partner/site-upload/draft/edits", {
+            body: {edits},
+        });
+    }
+
+    /**
+     * 지금 편집 중인 것이 **무엇을 바꿔 놓았는가**(memo184 T0-② · `GET /draft/files`).
+     *
+     * ⚠ **선행조건의 정본이 이 문이다.** 로컬 도구는 다음 편집의 base sha 를 자기 장부가 아니라
+     *   여기서 받는다. 장부로 폴백하면 memo184 🔴1(남이 되돌린 뒤에도 「이미 반영됨」이라 말하는
+     *   거짓 성공)이 그대로 되살아난다.
+     * ⚠ `generation` 은 **불투명**하다. 값을 해석하거나 순서를 매기지 않는다 — 서버 내부 토큰이
+     *   클라이언트로 새지 않게 그렇게 정했다.
+     *
+     * 편집이 없으면 **빈 목록**이다(404 가 아니다 — 「없다」와 「못 물어봤다」를 가른다).
+     */
+    draftFiles(): Promise<DraftFiles> {
+        return this.request<DraftFiles>("GET", "/api/partner/site-upload/draft/files");
+    }
+
     /** 업로드 presign — zip 을 S3 로 **직접** 올린다(백엔드 미경유). */
     presignArchive(fileName: string, byteSize: number): Promise<PresignedUpload> {
         return this.request<PresignedUpload>("POST", "/api/partner/site-archive/presign", {
@@ -372,8 +449,13 @@ export class ZalkeraApi {
 async function toError(response: Response): Promise<DevtoolsError> {
     let serverMessage = "";
     let errorCode = "";
+    let paths: string[] = [];
     try {
-        const body = (await response.json()) as { message?: string; errorCode?: string };
+        const body = (await response.json()) as {
+            message?: string;
+            errorCode?: string;
+            errors?: Array<{field?: unknown}>;
+        };
         // 서버 메시지를 그대로 알림창에 넘기면 35KB 문자열이 그대로 뜬다(실측 · 백엔드 차단의 대칭).
         // 길이만으로는 부족하다 — 알림 본문은 링크를 렌더하고 그 링크는 명령을 실행할 수 있다.
         serverMessage = plainNotice(body.message, MAX_SERVER_MESSAGE);
@@ -382,6 +464,13 @@ async function toError(response: Response): Promise<DevtoolsError> {
         //    `errors.ts` 의 `humanMessage` 를 타고 **같은 비-모달 알림**으로 나간다(재심의 실증).
         //    인증된 모든 실패 응답이 지나는 경로다.
         errorCode = plainNotice(body.errorCode ?? "", MAX_ERROR_CODE);
+        // ⚠ **같은 소독을 지난다.** 이 값들도 서버가 정하고, 문면에 실려 같은 알림으로 나간다.
+        //    그리고 **개수를 죈다** — 배치 상한이 500 이라 거절 하나가 500줄을 실어 올 수 있고,
+        //    부르는 쪽은 그것을 목록으로 그린다.
+        paths = (Array.isArray(body.errors) ? body.errors : [])
+            .map((row) => (typeof row?.field === "string" ? plainNotice(row.field, MAX_PATH) : ""))
+            .filter((path) => path !== "")
+            .slice(0, MAX_REJECTED_PATHS);
     } catch {
         /* 본문이 JSON 이 아닐 수 있다 — 상태코드로만 판단한다. */
     }
@@ -402,6 +491,7 @@ async function toError(response: Response): Promise<DevtoolsError> {
         errorCode ? `오류 코드: ${errorCode}` : undefined,
         undefined,
         errorCode || undefined,
+        paths,
     );
 }
 
@@ -555,6 +645,13 @@ export function revisionWhen(createdAt: unknown): string {
 
 const MAX_SERVER_MESSAGE = 300;
 const MAX_ERROR_CODE = 64;
+/** 경로 하나의 상한 — 백엔드 매니페스트 `path` 컬럼 폭과 같은 값이다(V81 · 1024). */
+const MAX_PATH = 1024;
+/**
+ * 거절이 짚어 줄 수 있는 경로 수. 배치 상한이 500 이라 거절 하나가 그만큼 실어 올 수 있고,
+ * 부르는 쪽은 그것을 **목록으로 그린다** — 죄지 않으면 화면 하나가 터미널을 통째로 덮는다.
+ */
+const MAX_REJECTED_PATHS = 500;
 
 function withTrailingSlash(base: string): string {
     return base.endsWith("/") ? base : `${base}/`;

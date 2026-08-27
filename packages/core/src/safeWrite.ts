@@ -151,6 +151,22 @@ export async function writeOwnFile(path: string, data: string | Uint8Array, mode
             "이 파일은 확장이 만들어 주는 자리입니다. 링크를 지우고 다시 시도해 주세요.",
         );
     }
+    await writeViaRename(path, data, mode);
+}
+
+/**
+ * **`rename` 으로 자리를 바꿔 쓴다.** 고지(`lstat`)는 안 한다 — 부르는 쪽이 이미 했거나, 그 자리의
+ * 문면이 다른 경우를 위한 문이다.
+ *
+ * ⚠ **이것이 경계다.** `lstat` 로 막는 것은 세 가지를 못 한다(형제 [writeOwnFile] KDoc 이 실측으로
+ *   적어 둔 것): ⑴ 하드링크는 그대로 통과해 **대상에 그대로 쓰인다** ⑵ `lstat` 와 쓰기 사이에 자리가
+ *   바뀔 수 있다 ⑶ 막을 자리를 손으로 열거해야 한다. `rename` 은 **디렉터리 항목만** 바꾸므로
+ *   링크를 안 따라가고 열거도 필요 없다.
+ *
+ * ⚠ 해제기의 「골라 덮는」 갈래가 이 문을 지나야 하는 이유가 바로 ⑴이다 — 맨 `writeFile` 이면
+ *   사이트 폴더 안의 하드링크 하나로 **폴더 밖 파일이 서버 내용으로 교체된다**(심의 실측).
+ */
+export async function writeViaRename(path: string, data: string | Uint8Array, mode = 0o644): Promise<void> {
     const tmp = `${path}.zalkera-${randomBytes(6).toString("hex")}.tmp`;
     try {
         // `wx` — 이미 있으면 실패한다. 남의 파일을 우연히 덮지 않는다.
@@ -256,19 +272,31 @@ export async function writeExclusive(
         written?.add(path);
     } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-        if (written?.has(path)) {
-            throw new DevtoolsError(
-                "SERVER_REJECTED",
-                `받은 꾸러미가 같은 파일을 두 번 담고 있습니다: ${entryName}`,
-                "받은 것이 잘못됐습니다 — 빈 폴더로 다시 받아도 같은 자리에서 멈춥니다. 잘커라에 알려 주세요.",
-            );
-        }
+        assertNotWrittenTwice(path, entryName, written);
         throw new DevtoolsError(
             "SERVER_REJECTED",
             `받은 꾸러미가 이미 있는 파일을 덮으려 합니다: ${entryName}`,
             "그 파일은 이 폴더에 원래 있던 것입니다. 빈 폴더를 새로 만들어 다시 받아 주세요.",
         );
     }
+}
+
+/**
+ * **아카이브가 같은 경로를 두 번 담았는가.** 담았으면 던진다.
+ *
+ * ⚠ **판정과 문면이 여기 한 벌만 있다.** 이 사실은 「덮지 않고 쓰는」 길과 「골라서 덮는」 길
+ *   ([UntarOptions.decide])이 **둘 다** 물어야 하는데, 각자 자기 자리에서 물으면 한쪽만 고쳐진다 —
+ *   이 레포가 되풀이해 겪은 병이다.
+ * ⚠ 문면이 「빈 폴더로 다시 받아도 같은 자리에서 멈춥니다」인 이유: 이쪽은 **받은 것이 잘못된**
+ *   경우다. 「빈 폴더를 만드세요」라고 말하면 사람은 그 말을 따르고 또 실패하는 고리에 갇힌다.
+ */
+export function assertNotWrittenTwice(path: string, entryName: string, written?: Set<string>): void {
+    if (!written?.has(path)) return;
+    throw new DevtoolsError(
+        "SERVER_REJECTED",
+        `받은 꾸러미가 같은 파일을 두 번 담고 있습니다: ${entryName}`,
+        "받은 것이 잘못됐습니다 — 빈 폴더로 다시 받아도 같은 자리에서 멈춥니다. 잘커라에 알려 주세요.",
+    );
 }
 
 /**
