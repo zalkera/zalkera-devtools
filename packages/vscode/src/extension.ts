@@ -3452,19 +3452,28 @@ async function chooseTenant(force = false): Promise<string> {
           .showQuickPick(
             tenants.map((t) => ({
               label: t.name,
-              description: t.code,
+              // ⚠ **지금 작업 중이라는 사실은 `description` 으로 간다.** 형제 화면
+              //    (`describeOption`)이 세운 규칙과 같다 — `detail` 줄은 **경로 한 가지**만
+              //    말한다. 종전에는 이 표시가 `detail` 을 차지해, 지금 열려 있는 사이트만
+              //    **경로가 안 보였다** — 목록에서 유일하게 「어느 폴더인지」를 확인할 수 없는
+              //    줄이 하필 자기가 서 있는 줄이었다.
+              description: t.code === current ? `${t.code} (작업 중)` : t.code,
               // ⚠ **어디가 열릴지 고르기 전에 보여 준다.** 종전에는 고른 **뒤에** 토스트로
               //    물었는데, 그 알림은 사라지고 경로도 안 보였다 — 잘못 골랐는지 알 방법이 없었다.
-              detail:
-                t.code === current
-                  ? "지금 작업 중"
-                  : (confirmedFolderFor(t.code) ?? undefined),
+              //
+              // ⚠ **지금 사이트도 레지스트리에서 읽는다.** 「지금 열린 창의 폴더」로 지으면,
+              //    소속을 안 적은 폴더에서 열었을 때 그 경로가 남의 사이트 줄에 붙는다 —
+              //    [confirmedFolderFor] 는 그 폴더가 **스스로 그 사이트라고 말할 때만** 답한다.
+              detail: confirmedFolderFor(t.code) ?? undefined,
+              // 🔴 **고른 것을 표시 문자열로 되찾지 않는다.** 종전에는 `description` 이 곧
+              //    사이트 코드라 그것으로 찾았는데, 그 줄에 한 글자라도 덧붙이는 순간 조회가
+              //    빗나가 **모든 선택이 「사이트를 고르지 않았습니다」로 죽는다.** 표시는 언제든
+              //    다듬는 자리다 — 식별자를 거기에 실으면 문면 수정이 기능을 깬다.
+              tenant: t,
             })),
             { title: "어느 사이트로 작업할까요?" },
           )
-          .then((choice) =>
-            tenants.find((t) => t.code === choice?.description),
-          );
+          .then((choice) => choice?.tenant);
   if (!picked)
     throw new DevtoolsError("CANCELLED", "사이트를 고르지 않았습니다.");
 

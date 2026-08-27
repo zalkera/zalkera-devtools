@@ -40,6 +40,7 @@ import {
 } from "./api.ts";
 import {DevtoolsError} from "./errors.ts";
 import {rebuildBaseline} from "./baseline.ts";
+import {plausibleRevisionNo} from "./localMark.ts";
 import {rm} from "node:fs/promises";
 import {readLedger, writeLedger} from "./pull.ts";
 import {SYNC_LEDGER_PATH} from "./syncLedger.ts";
@@ -206,7 +207,13 @@ export async function rollbackRevision(options: RollbackOptions): Promise<Rollba
     //    실패할 때 **이미 옮겨진 라이브**를 「확인 못 했습니다 · 잠시 뒤 다시 시도해 주세요」로
     //    보고하고, 그 안내를 따른 재시도가 같은 내용의 판을 하나 더 세운다(심의 실측).
     //    형제 `publishDraft` 는 판이 선 뒤로는 아무것도 안 던진다 — 규율을 맞춘다.
-    const landed = result.revisionNo ?? (await activeRevisionNo(options.api).catch(() => null));
+    // ⚠ **서버 값이라 런타임 검사가 없다.** `request<T>` 는 캐스트일 뿐이다 — 형 선언만 믿으면
+    //   판 번호가 아닌 값이 그대로 장부에 적히고, 그 장부는 다음 `push` 를 영구히 막는다.
+    //   잣대는 표식 입구와 **같은 것**을 쓴다(`plausibleRevisionNo`) — 둘이 갈리면 화면이
+    //   「정수만 싣는다」고 적어 놓고 한쪽으로는 아닌 것을 싣는다.
+    const landed =
+        plausibleRevisionNo(result.revisionNo) ??
+        (await activeRevisionNo(options.api).catch(() => null));
     if (landed === null) {
         // 구서버(번호 미탑재) + 조회 실패. **판은 이미 옮겨졌다** — 던지면 거짓말이다.
         await forgetLedger(root);

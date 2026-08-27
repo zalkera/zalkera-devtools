@@ -417,6 +417,21 @@ test("🔴 판이 옮겨진 **뒤에는 던지지 않는다** — 배포 사건�
     strictEqual(out.pointerMoved, true);
 });
 
+test("🔴 서버가 준 착지 번호도 **잣대를 지난다** — 그 값엔 런타임 검사가 없다", async () => {
+    // `request<T>` 는 캐스트일 뿐이다. 판이 아닌 값을 그대로 장부에 적으면 그 폴더는 다음
+    // `push` 부터 영구히 막힌다 — 표식 입구가 이미 같은 잣대로 막아 둔 자리다.
+    for (const bogus of [0, -3, 1e21, 2_147_483_648, 1.5]) {
+        const s = server({
+            active: 9, landsOn: 10, revisionsFailAfterActivate: true,
+            activate: {revisionNo: bogus, pointerMoved: true, discardedDraft: false, discardedPendingChanges: 0},
+        });
+        const out = await rollbackRevision({
+            api: s.api, folder: await site({}), revisionNo: 5, fetchImpl: s.fetchImpl,
+        });
+        strictEqual(out.revisionNo, null, `판이 아닌 값(${bogus})을 그대로 실었다`);
+    }
+});
+
 test("🔴 번호를 **끝내 모르면** 그 사실을 말하고 던지지는 않는다", async () => {
     // 구서버(응답에 번호 미탑재) + 조회 실패. 판은 이미 옮겨졌다 — 던지면 거짓말이다.
     const s = server({
