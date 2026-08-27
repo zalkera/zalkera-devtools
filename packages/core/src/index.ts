@@ -94,6 +94,8 @@ export { runDoctor, type DoctorCheck, type DoctorOptions } from "./doctor.ts";
 export {
   downloadSourceZip,
   fetchSiteSource,
+  refreshSiteSource,
+  type RefreshSourceResult,
   fetchVerifiedSourceTar,
   findProjectRoot,
   type FetchSourceOptions,
@@ -103,7 +105,7 @@ export {
 } from "./fetchSource.ts";
 export { extractZip, listZipEntries, type UnzipResult } from "./unzip.ts";
 export { decideImportPlan, readZipFile, type ImportPlan } from "./importZip.ts";
-export { keepNames, replaceContents, type ReplaceResult } from "./replaceDir.ts";
+export { STASH_PREFIX, keepNames, replaceContents, stashLeftovers, type ReplaceResult } from "./replaceDir.ts";
 export {
   PROVENANCE_PATH,
   buildProvenance,

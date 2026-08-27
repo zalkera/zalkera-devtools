@@ -45,6 +45,33 @@ import { isExcludedEntry } from "./zip.ts";
 const REGENERABLE = new Set(["node_modules", ".next", "dist", "out", ".turbo", ".vercel", "__macosx", ".ds_store"]);
 
 /**
+ * 갈아 끼우는 동안 원래 소스를 치워 두는 폴더의 **이름 접두**.
+ *
+ * ⚠ **만드는 자리와 찾는 자리가 이 상수 하나를 쓴다.** 값을 옮겨 적으면 접두를 바꾼 날 감지기가
+ *   **영원히 조용히 빈손**이 된다(fail-open) — 잔재는 그대로 남는데 아무도 말하지 않는 상태다.
+ *   이 레포는 손으로 복제한 목록이 갈리는 사고를 되풀이해 겪었다.
+ */
+export const STASH_PREFIX = ".zalkera-stash-";
+
+/**
+ * 소스 폴더의 **형제들** 중 지난 갈아 끼우기가 남긴 것.
+ *
+ * ■ 왜 남나
+ *   [replaceContents] 는 던진 예외에서 되돌리고, 되돌리기까지 실패하면 이 폴더의 자리를 말한다.
+ *   그런데 **프로세스가 즉사하면**(창 닫기·전원·강제 종료) 그 둘 다 안 돈다 — 원래 소스가 여기
+ *   남은 채, 그 사실을 아는 사람이 아무도 없다.
+ *
+ * ⚠ **찾기만 한다 — 지우지 않는다.** 이 폴더는 **원본의 유일한 사본일 수 있다**(중단 시점에 따라
+ *   소스 폴더 쪽이 반쪽이다). 지우는 것은 제스처가 있어도 새 파괴면이고, 되돌리는 것은 그 자체가
+ *   또 한 번의 갈아 끼우기(같은 기계·같은 실패면)다. 사람이 탐색기에서 한다.
+ *
+ * 순수 함수다 — 부르는 쪽이 `readdir` 한 이름을 넘긴다(활성화 구간에 I/O 를 더하지 않는다).
+ */
+export function stashLeftovers(entryNames: readonly string[]): string[] {
+    return entryNames.filter((n) => n.startsWith(STASH_PREFIX)).sort();
+}
+
+/**
  * 갱신이 **안 건드릴** 이름들. `dir` 바로 아래에서 고른다.
  *
  * ⚠ **손으로 열거하지 마라.** 포장기가 zip 에서 빼는 것과 여기 남기는 것이 **같은 술어**여야
@@ -111,7 +138,7 @@ export async function replaceContents(
 
   const real = await realpath(dir);
   const before = new Set(await readdir(real));
-  const stash = await mkdtemp(join(dirname(real), ".zalkera-stash-"));
+  const stash = await mkdtemp(join(dirname(real), STASH_PREFIX));
   const kept = [...before].filter((n) => skip.has(n));
   // ⚠ **«옮긴 것»과 «원래 있던 것»은 다르다.** 되돌릴 때 지우면 안 되는 것은 «옮기다 실패해
   //   자리에 남은 것»뿐이다. 원래 있던 이름 전부를 건너뛰면, 새 소스가 같은 이름을 쓸 때

@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { createWriteStream } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { mkdir, mkdtemp, readdir, rm } from "node:fs/promises";
 import { meaningfulEntries, removeAdded, snapshotEntries } from "./emptyDir.ts";
 import { tmpdir } from "node:os";
@@ -12,6 +13,9 @@ import { DevtoolsError } from "./errors.ts";
 import { noRevisionError, pickRevision } from "./fetchTarget.ts";
 import { downloadBounded } from "./download.ts";
 import { extractTarGz } from "./untar.ts";
+import { keepNames, replaceContents } from "./replaceDir.ts";
+import { SOURCE_MARK_PATH, parseSourceMark, writeSourceMarkTo } from "./localMark.ts";
+import { decideImportBinding, type WorkspaceLink } from "./siteBinding.ts";
 import { packProject } from "./zip.ts";
 
 // 해제기 본체는 `untar.ts` 로 옮겼다(페이로드 스트리밍 경로와 **같은 파서**를 쓰기 위해 · §13.10.6).
@@ -173,6 +177,115 @@ export async function fetchSiteSource(options: FetchSourceOptions): Promise<Fetc
     }
     report(`${fileCount}개 파일을 받았습니다.`);
     return { revisionNo, fileCount, sha256 };
+}
+
+/** 「서버 판으로 교체」의 결과. [FetchSourceResult] 에 **갈아 끼우기**의 사실을 더한다. */
+export interface RefreshSourceResult extends FetchSourceResult {
+    /** 새 소스 «위에» 되살린 경로. */
+    preserved: string[];
+    /** 자리에 그대로 둔 이름(치우지도 지우지도 않았다). */
+    kept: string[];
+    /**
+     * 표식을 새 판으로 다시 썼는가 — 못 썼으면 **옛 표식이 그대로** 있고 그 사유.
+     *
+     * ⚠ **못 쓴 것을 던지지 않는다.** 소스는 이미 새 판인데 여기서 던지면 사람은 「실패했다」로
+     *   읽고 다시 누른다. 옛 표식이 남으면 소속은 안 잃고, 다음 발행이 낡은 기반을 선언해
+     *   **동의를 한 번 더** 받는 데서 끝난다 — 막다른 길이 아니다.
+     */
+    mark: { written: true } | { written: false; reason: string };
+}
+
+export interface RefreshSourceOptions {
+    api: ZalkeraApi;
+    /** 갈아 끼울 폴더. **비어 있지 않아도 된다** — 그것이 이 문의 존재 이유다. */
+    targetDir: string;
+    tenant: string;
+    /** 창의 워크스페이스 링크. 표식이 없을 때 소속 판정이 쓴다. */
+    link: WorkspaceLink;
+    revisionNo?: number;
+    onProgress?: (message: string) => void;
+    fetchImpl?: typeof fetch;
+}
+
+/**
+ * **폴더를 서버 정본으로 갈아 끼운다** — 「소스 다운로드」가 거절하는 «비어 있지 않은» 폴더가
+ * 이 문의 대상이다.
+ *
+ * ■ 왜 「소스 zip 다운로드 → zip 으로 교체」로는 안 되나 — **결과가 틀린다**
+ *   zip 은 표식(`.zalkera/source.json`)을 안 싣고(`EXCLUDED_PATHS`), 「zip 으로 교체」는 옛 표식을
+ *   `preserve` 로 되살린다. 그래서 판 N 폴더를 두 걸음으로 판 M 에 맞추면 **표식이 여전히 N 을
+ *   선언한다** — 다음 발행마다 「남이 올린 판이 있습니다」 동의가 뜬다. 자기가 방금 받아 온 판을
+ *   두고. **거짓 경보를 습관으로 누르게 하면 진짜 경보도 눌러 버린다.**
+ *
+ *   조합으로는 원리상 못 고친다: zip 문은 **판 번호를 모른다**(`Provenance` 에 그 칸이 없다).
+ *   이 함수는 번호와 sha 를 아는 자리에서 교체하므로 표식을 옳게 다시 쓸 수 있다.
+ *
+ * ■ **네트워크 먼저, 파괴는 나중**
+ *   전송(최대 15분)과 sha 대조가 **끝난 뒤에야** 폴더에 손댄다. 그래서 받는 동안 창을 닫으면
+ *   **폴더는 그대로 남는다.** 이 문에도 전송 취소 손잡이는 없지만(형제 받기와 같은 한계),
+ *   순서가 이미 안전한 쪽이라 그 부재의 대가가 작다.
+ *
+ * ■ 표식 쓰기는 **여기** 산다
+ *   확장 배선에 두면 시험도 검사기도 못 닿는다 — 그리고 이 축의 고장은 **멀리서** 난다(잊어도
+ *   기능은 다 되는 것처럼 보이고, 증상은 몇 판 뒤의 「발행마다 409 동의」다).
+ */
+export async function refreshSiteSource(options: RefreshSourceOptions): Promise<RefreshSourceResult> {
+    const report = options.onProgress ?? (() => {});
+
+    // ⚠ **폴더에 손대기 전에 표식을 읽는다.** 갈아 끼운 뒤에는 그 파일이 새 소스의 것이거나
+    //    `preserve` 로 되살아난 것이라, 「원래 이 폴더가 무엇이었나」를 묻는 자리가 아니다.
+    const before = parseSourceMark(await readTextQuietly(join(options.targetDir, SOURCE_MARK_PATH)));
+    const binding = decideImportBinding(before, options.link, options.tenant);
+
+    const got = await fetchVerifiedSourceTar(options);
+    const { revisionNo, buffer, sha256 } = got;
+
+    const keep = await keepNames(options.targetDir);
+    let fileCount = 0;
+    const { preserved, kept } = await replaceContents(
+        options.targetDir,
+        // 표식을 되살린다 — 아래 쓰기가 실패해도 **소속을 안 잃는다.**
+        [SOURCE_MARK_PATH],
+        keep,
+        async () => {
+            // ⚠ **형제 `fetchSiteSource` 와 똑같이 푼다.** 같은 서버 산출물을 두 문이 다르게
+            //    다루면 갈린다 — 감싸기 흡수 같은 것을 이쪽에만 붙이지 않는다(설계 §11 R1).
+            fileCount = await extractTarGz(buffer, options.targetDir, {
+                rejectVendored: true,
+                maxBytes: MAX_SOURCE_EXTRACT_BYTES,
+            });
+        },
+    );
+    report(`${fileCount}개 파일로 갈아 끼웠습니다.`);
+
+    // ⚠ **남의 소속은 안 덮는다.** `keep`(다른 사이트의 표식)·`unknown`(못 읽음)이면 안 쓴다 —
+    //    「모른다」로 막지는 않되, 모르는 채로 **적지도** 않는다.
+    if (binding.kind !== "bind") {
+        return { revisionNo, fileCount, sha256, preserved, kept, mark: { written: false, reason: binding.kind } };
+    }
+    const done = await writeSourceMarkTo(options.targetDir, {
+        tenant: options.tenant,
+        revisionNo,
+        sha256,
+        fetchedAt: new Date().toISOString(),
+    });
+    return {
+        revisionNo,
+        fileCount,
+        sha256,
+        preserved,
+        kept,
+        mark: done.ok ? { written: true } : { written: false, reason: done.reason },
+    };
+}
+
+/** 없으면 `null` — **못 읽은 것과 없는 것을 여기서 가르지 않는다**(둘 다 「표식 없음」으로 판정에 넘긴다). */
+async function readTextQuietly(path: string): Promise<string | null> {
+    try {
+        return await readFile(path, "utf8");
+    } catch {
+        return null;
+    }
 }
 
 /** 「소스 zip 다운로드」의 결과. 두 해시가 **다른 물건의 것**이라 이름으로 갈라 둔다. */

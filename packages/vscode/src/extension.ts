@@ -47,6 +47,8 @@ import {
   BUSY,
   createReentrancyGuard,
   pickRevision,
+  stashLeftovers,
+  refreshSiteSource,
   decideErrorNotice,
   decideBlocked,
   idleStatusPlan,
@@ -107,7 +109,7 @@ import {
   type SourceMark,
 } from "@zalkera/devtools-core";
 import { lstatSync, readFileSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { existsSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
@@ -413,6 +415,15 @@ export function activate(context: vscode.ExtensionContext): void {
   helpUri = vscode.Uri.joinPath(context.extensionUri, "media", "help.md");
   sidebar = new ZalkeraSidebar();
   void refreshSidebar();
+  // ⚠ **비정상 상태가 조용해지지 않게 한다.** 갈아 끼우다 편집기가 죽으면 원래 소스가 형제
+  //    자리의 숨은 폴더에 남는데, 그 사실을 아는 사람이 아무도 없다 — 지우지는 않고 **어디
+  //    있는지만** 말한다(그 폴더가 원본의 유일한 사본일 수 있다).
+  //
+  // ⚠ **억제 상태를 저장하지 않는다.** 「한 번 말했으니 그만」으로 두면 잔재는 그대로인데 화면만
+  //    조용해진다. 잔재가 있는 한 창을 열 때마다 말한다 — 치우면 저절로 멎는다.
+  //
+  // ⚠ **동기 구간에 I/O 를 안 더한다.** `void` 로 띄워 활성화를 안 붙든다.
+  void announceStashLeftovers();
   // ⚠ **여는 제스처가 기억을 되살린다.** 레지스트리는 계정 자료라 로그아웃이 통째로 버리는데,
   //    디스크의 폴더는 그대로 남는다. 그 상태로 다시 로그인하면 로컬본이 있는데도 「받기」를
   //    권하게 된다 — 소속은 폴더 안 표식이 알고 있으므로, 그 폴더를 연 것만으로 되살린다.
@@ -466,6 +477,7 @@ export function activate(context: vscode.ExtensionContext): void {
     register("zalkera.site.open", () => openSite()),
     register("zalkera.site.importZip", importZipCommand),
     register("zalkera.site.updateZip", updateZipCommand),
+    register("zalkera.site.updateFromServer", updateFromServerCommand),
     register("zalkera.export", exportZipCommand),
     register("zalkera.folder.change", changeFolder),
     register("zalkera.site.link", linkFolder),
@@ -1863,6 +1875,129 @@ async function updateZipCommand(): Promise<void> {
 
   await vscode.window.showInformationMessage(
     ours("소스를 갈아 끼웠습니다. 「미리보기 시작」으로 확인한 뒤 「새 버전 배포」로 올리세요."),
+  );
+}
+
+/**
+ * 잔재를 찾으면 말한다 — 창이 열릴 때마다, 치울 때까지.
+ *
+ * ⚠ **`say` 가 아니다.** 그 모듈은 **사이트** 문면의 자리이고 「전부 사이트 이름을 담는다」가
+ *   그 요점인데, 이 알림은 **폴더** 이야기다 — 경로가 이미 모호하지 않아 사이트 이름은 장식이고,
+ *   그 장식을 위해 `captureTenant` 자리를 하나 더 여는 것은 브랜드의 뜻을 흐린다(그 함수는 값이
+ *   **API 에 묶이는 순간**을 표시한다 — 여기엔 API 가 없다). 형제 `warnProtectedPath` 와 같은 층이다.
+ *
+ * ⚠ **지워 주지 않는다.** 그 폴더는 **원본의 유일한 사본일 수 있다**(중단 시점에 따라 소스 폴더
+ *   쪽이 반쪽이다). 어디 있는지 말하고 사람이 한다.
+ */
+async function announceStashLeftovers(): Promise<void> {
+  const dir = siteDir();
+  if (dir === null) return;
+  const found = await siblingStashes(dir);
+  if (found.length === 0) return;
+  void vscode.window.showWarningMessage(
+    ours("지난 갈아 끼우기가 중간에 끊긴 흔적이 있습니다: ") +
+      plainNotice(found.join(" · "), 512) +
+      ours(" — 원래 소스가 그 안에 있을 수 있습니다. 옮기실 것을 옮기신 뒤 그 폴더를 지우시면 됩니다."),
+  );
+}
+
+/**
+ * 이 소스 폴더의 **형제들** 중 지난 갈아 끼우기가 남긴 것.
+ *
+ * ⚠ **판정은 core 가 한다**(`stashLeftovers`) — 확장 안에 접두를 또 적으면 만드는 쪽과 갈리고,
+ *   갈린 날 감지기가 **영원히 조용히 빈손**이 된다.
+ *
+ * 못 읽으면 **빈 목록**이다 — 부모 폴더를 못 읽는 것으로 갈아 끼우기를 막지 않는다(모른다로 막지
+ * 않는다). 그 대가는 「말해 줄 수 있었는데 안 한 것」 하나뿐이다.
+ */
+async function siblingStashes(dir: string): Promise<string[]> {
+  try {
+    const real = await realpath(dir);
+    return stashLeftovers(await readdir(dirname(real)));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * **「서버 판으로 교체」** — 이 폴더를 서버 정본으로 갈아 끼운다.
+ *
+ * ■ 왜 「소스 zip 다운로드 → zip 으로 교체」로 대신하지 않나 — **결과가 틀린다**
+ *   zip 은 표식을 안 싣고 「zip 으로 교체」는 옛 표식을 되살린다. 그래서 두 걸음으로 맞추면
+ *   **표식이 옛 판을 선언한 채** 남고, 다음 발행마다 「남이 올린 판이 있습니다」 동의가 뜬다 —
+ *   자기가 방금 받아 온 그 판을 두고. 조합으로는 원리상 못 고친다(zip 문은 판 번호를 모른다).
+ *
+ * ■ **네트워크 먼저, 파괴는 나중**
+ *   `refreshSiteSource` 가 전송·sha 대조를 마친 **뒤에야** 폴더를 비운다. 그래서 받는 동안 창을
+ *   닫으면 **폴더는 그대로 남는다.** 이 문에도 전송 취소 손잡이는 없지만(형제 받기와 같은 한계)
+ *   순서가 이미 안전한 쪽이라 그 부재의 대가가 작다.
+ */
+async function updateFromServerCommand(): Promise<void> {
+  const dir = siteDir();
+  if (dir === null) {
+    throw new DevtoolsError(
+      "NOT_A_SITE",
+      "지금 창에 사이트 소스가 열려 있지 않습니다.",
+      "갈아 끼울 폴더를 먼저 여세요 — 새로 시작하는 것이면 「소스 다운로드」입니다.",
+    );
+  }
+  const {api, tenant} = await ensureApiFor();
+
+  // ⚠ **판을 여기서 고른다 — 받기 셋과 같은 판정으로.** 새 문만 다르게 고르면 「소스 다운로드가
+  //    준 것과 이 문이 준 것이 다른」 날이 온다.
+  const revisions = await api.listRevisions(REFLECT_PAGE);
+  const picked = pickRevision(revisions);
+  if (picked === null) throw noRevisionError(revisions);
+
+  // ⚠ **되돌릴 수 없는 조작이라 재료를 «확인 앞»에 모은다.** 사람이 동의할 때 「어느 판에서
+  //    어느 판으로」·「무엇이 남는가」·「지난 잔재가 있는가」를 이미 알고 있어야 한다.
+  const keep = await keepNames(dir);
+  const from = declaredBaseRevisionNo(readSourceMarkAt(dir), String(tenant));
+  const leftovers = await siblingStashes(dir);
+  const ask = say.serverReplaceConfirm(tenant, picked.revisionNo, dir, from, keep, leftovers);
+  const answer = await vscode.window.showWarningMessage(
+    ask.message,
+    {modal: true, detail: ask.detail},
+    ask.action,
+    ask.exportFirst,
+  );
+  if (answer === ask.exportFirst) {
+    // ⚠ **이어 붙이지 않는다.** 내보내기를 부르고 여기서 끝낸다 — 「내보낸 뒤 자동으로 교체」는
+    //    사람이 저장 대화상자를 취소했을 때 무엇을 할지부터 갈리는 상태기계다. 다시 누르면 된다.
+    await vscode.commands.executeCommand("zalkera.export");
+    return;
+  }
+  if (answer !== ask.action) return;
+
+  // ⚠ **먼저 멈춘다.** 미리보기가 파일을 물고 있으면 지우기가 실패하고, 그 실패는 갈아 끼우기
+  //    한복판에서 난다 — 형제 `updateZipCommand` 와 같은 순서다.
+  await stopPreview();
+
+  const result = await whileExtracting(() =>
+    vscode.window.withProgress(
+      {location: vscode.ProgressLocation.Notification, title: "서버 판으로 갈아 끼우는 중"},
+      () =>
+        refreshSiteSource({
+          api,
+          targetDir: dir,
+          tenant: String(tenant),
+          link: workspaceLinkState(dir),
+          revisionNo: picked.revisionNo,
+          onProgress: log,
+        }),
+    ),
+  );
+  if (result === BUSY) return;
+
+  log(`파일 ${count(result.fileCount)}개로 갈아 끼웠습니다: ${dir}`);
+  if (result.kept.length > 0) log(`그대로 둔 ${count(result.kept.length)}개: ${result.kept.join(", ")}`);
+  // ⚠ **표식을 못 쓴 것을 로그에만 남기지 않는다.** 아래 알림이 그 사실을 사람에게 말한다 —
+  //    다음 발행에서 뜰 동의 창의 «이유»가 여기 있기 때문이다.
+  if (!result.mark.written) log(`버전 표시를 갱신하지 못했습니다(${result.mark.reason}).`);
+  await refreshSidebar();
+
+  await vscode.window.showInformationMessage(
+    say.serverReplaced(tenant, result.revisionNo, result.mark.written),
   );
 }
 

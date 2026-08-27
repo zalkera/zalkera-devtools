@@ -19,7 +19,7 @@
  *   ⚠ 여기 어느 함수에도 "현재 테넌트를 읽는" 기능을 넣지 마라. 그 순간 존재 이유가 사라진다.
  */
 import type {ActivateResult} from "./api.ts";
-import {ours, plainNotice, countJosa} from "./notice.ts";
+import {ours, plainNotice, count, countJosa} from "./notice.ts";
 
 /**
  * **캡처된** 테넌트 코드. 라이브로 읽은 값과 타입으로 구분된다.
@@ -431,6 +431,59 @@ export const say = {
                 "계속하면 그 변경은 사라집니다. 되돌릴 수 없습니다.",
             action: "버리고 계속",
         };
+    },
+    /**
+     * **서버 판으로 갈아 끼우기 확인** — 되돌릴 수 없는 문이다.
+     *
+     * ⚠ **이름이 「어느 판인지」를 안 담는다.** 명령 라벨은 「서버 판으로 교체」인데 그 「서버 판」이
+     *   활성 판인지 최신 판인지는 이름에서 안 보인다 — 그래서 **이 문면이 판 번호로** 말한다.
+     *   이름에서 덜어 낸 부담이 여기로 온 것이고, 여기서도 안 말하면 아무 데서도 안 말한다.
+     *
+     * ⚠ **표식이 없으면 그 줄을 «생략»한다.** 없는 것을 「모르는 판에서 왔습니다」로 지어내지
+     *   않는다 — 결여는 관용한다.
+     *
+     * ⚠ 인자에 기본값이 있는 이유: 문면 전수 스위프가 모든 `say` 항목을 `(tenant, revisionNo)`
+     *   **둘로만** 부른다. 기본값이 없으면 그 스위프가 여기서 죽어 **나머지 표면까지 무검사**가 된다.
+     *
+     * @param from 이 폴더가 선언하던 판. 모르면 `null` — 그 줄을 안 낸다.
+     */
+    serverReplaceConfirm(
+        tenant: CapturedTenant,
+        revisionNo: number,
+        dir = "",
+        from: number | null = null,
+        keep: readonly string[] = [],
+        leftovers: readonly string[] = [],
+    ): { message: string; detail: string; action: string; exportFirst: string } {
+        // 중간 변수로 감싸지 않는다 — 소독 검사기는 **보간되는 이름**을 보므로, 한 번 감싸면
+        // `countJosa`·`plainNotice` 가 검사 밖으로 사라진다.
+        return {
+            message: `「${shown(tenant)}」 이 폴더를 서버의 버전 ${countJosa(revisionNo, "으로/로")} 갈아 끼웁니다. 지금 내용은 사라집니다.`,
+            detail:
+                (from === null ? "" : `버전 ${countJosa(from, "이/가")} 담긴 폴더로 표시돼 있습니다.\n`) +
+                `${plainNotice(dir, 512)}\n\n` +
+                `그대로 두는 것: ${keep.length > 0 ? plainNotice(keep.join(" · "), 512) : "없습니다"}` +
+                (leftovers.length === 0
+                    ? ""
+                    : `\n\n지난 갈아 끼우기가 중간에 끊긴 흔적이 ${count(leftovers.length)}개 있습니다: ` +
+                      `${plainNotice(leftovers.join(" · "), 512)}`),
+            action: `버전 ${countJosa(revisionNo, "으로/로")} 갈아 끼우기`,
+            /** 지금 내용을 먼저 챙기는 문. 누르면 내보내기로 가고 **진행하지 않는다.** */
+            exportFirst: "zip 으로 내보내기 먼저",
+        };
+    },
+    /**
+     * 갈아 끼운 결과.
+     *
+     * ⚠ **표식을 못 썼으면 그 사실을 말한다.** 소스는 새 판인데 표식이 옛 판을 든 상태라, 다음
+     *   발행이 낡은 기반을 선언해 동의를 한 번 더 받는다 — 미리 알면 그 창을 「내가 아는 이유」로 읽는다.
+     */
+    serverReplaced(tenant: CapturedTenant, revisionNo: number, markWritten = true): string {
+        return markWritten
+            ? `「${shown(tenant)}」 폴더를 버전 ${countJosa(revisionNo, "으로/로")} 갈아 끼웠습니다. ` +
+                  `「미리보기 시작」으로 확인한 뒤 「새 버전 배포」로 올리세요.`
+            : `「${shown(tenant)}」 폴더를 버전 ${countJosa(revisionNo, "으로/로")} 갈아 끼웠습니다. ` +
+                  `다만 이 폴더의 버전 표시를 갱신하지 못했습니다 — 다음에 올리실 때 확인 창이 한 번 더 뜰 수 있습니다.`;
     },
     /**
      * 전환이 **무엇을 했는지**. 종전에는 한 문장이라, 판이 안 움직인 경우에도 「바꿨습니다」라고

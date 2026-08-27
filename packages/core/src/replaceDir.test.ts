@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { chmod, mkdir, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { keepNames, replaceContents } from "./replaceDir.ts";
+import { keepNames, replaceContents, stashLeftovers } from "./replaceDir.ts";
 import { tempDir } from "./testing/tempDir.ts";
 
 /** `{parent}/site` 를 만들고 돌려준다. 형제 판정이 이 `parent` 안에서 관찰된다. */
@@ -160,6 +160,34 @@ test("⑩ 보존 파일을 못 되살리면 원래 소스가 어디 있는지 �
     /원래 소스는 .*\.zalkera-stash-/,
   );
   assert.equal((await stashes(parent)).length, 1, "실패했으면 치운 자리를 남겨 사람이 찾게 한다");
+
+  // ⚠ **감지기를 «실제로 생긴» 잔재에 물린다.** 이 시험이 없으면 [STASH_PREFIX] 를 손으로 복제한
+  //    둘째 값이 생겨도 아무도 모른다 — 만드는 쪽만 바뀌고 찾는 쪽은 옛 접두를 든 채 **영원히
+  //    조용히 빈손**이 된다(fail-open). 감지기의 단위 시험만으로는 그 갈림을 못 본다.
+  const found = stashLeftovers(await readdir(parent));
+  assert.equal(found.length, 1, `감지기가 실물 잔재를 못 찾았다: ${(await readdir(parent)).join("·")}`);
+  assert.ok(found[0]?.startsWith(".zalkera-stash-"), found[0]);
+});
+
+test("⑩-b 잔재 감지는 «찾기만» 한다 — 지우지 않는다", async () => {
+  // 이 폴더는 **원본의 유일한 사본일 수 있다**(중단 시점에 따라 소스 폴더 쪽이 반쪽이다).
+  const { dir, parent } = await tree({ ".zalkera/source.json": '{"tenant":"t"}' });
+  await assert.rejects(
+    replaceContents(dir, [".zalkera/source.json"], [], async () => {
+      await writeFile(join(dir, ".zalkera"), "파일이다");
+    }),
+  );
+  const before = (await readdir(parent)).sort();
+  stashLeftovers(before);
+  assert.deepEqual((await readdir(parent)).sort(), before, "감지기가 디스크를 만졌다");
+});
+
+test("⑩-c 형제 이름 중 잔재만 고른다 — 남의 점 폴더를 잔재라고 하지 않는다", async () => {
+  assert.deepEqual(
+    stashLeftovers([".git", ".zalkera-stash-abc123", "site", ".zalkera", ".zalkera-stash-Zz9"]),
+    [".zalkera-stash-Zz9", ".zalkera-stash-abc123"],
+  );
+  assert.deepEqual(stashLeftovers([".git", "site"]), []);
 });
 
 test("⑪ 보존 파일을 못 «읽으면» 갈아 끼우지 않는다 — 부재로 읽으면 소속이 조용히 풀린다", async () => {

@@ -102,6 +102,34 @@ const WIRES = [
         "{ location: vscode.ProgressLocation.Notification, title: \"올리는 중\", cancellable: true },",
         "「올리는 중」에 취소 버튼이 사라진다 — 시작하면 끝날 때까지 못 멈춘다(실사용 요청)",
     ],
+    // ⚠ **「서버 판으로 교체」의 급소는 이것 하나다.** 표식을 안 다시 쓰면 기능은 다 되는 것처럼
+    //    보이고(소스는 새 판이고 미리보기도 뜬다), 증상은 몇 판 뒤 **「발행마다 남이 올린 판이
+    //    있습니다 동의」**로 «멀리서» 난다. 그 거리 때문에 원인을 못 찾는다.
+    //
+    //    core 쪽 계약은 시험이 직접 문다(`refreshSource.test.ts`). 여기서 무는 것은 **확장이 그
+    //    합성 함수를 쓰는가** — 손으로 `fetchVerifiedSourceTar`+`replaceContents` 를 다시 엮으면
+    //    표식 갱신이 빠진 채 같은 화면이 나온다.
+    [
+        "packages/vscode/src/extension.ts",
+        "refreshSiteSource({",
+        "확장이 표식 계약을 **우회해** 손으로 엮으면, 갈아 끼운 폴더가 옛 판을 선언한 채 남는다 — " +
+            "다음 발행마다 자기가 방금 받아 온 판을 두고 동의 창이 뜬다",
+    ],
+    // ⚠ **모달 뒤에 멈춘다 — 순서를 뒤집지 마라.** 미리보기가 파일을 물고 있으면 지우기가
+    //    갈아 끼우기 «한복판»에서 실패한다. 형제 `updateZipCommand` 와 같은 자리다.
+    [
+        "packages/vscode/src/extension.ts",
+        "  await stopPreview();\n\n  const result = await whileExtracting(() =>",
+        "미리보기가 파일을 문 채로 갈아 끼우기가 시작된다 — 되돌리기가 도는 자리지만 애초에 " +
+            "거기까지 안 가는 편이 낫다. 줄머리 고정이라 가드를 앞에 못 붙인다",
+    ],
+    // ⚠ **잔재 알림이 활성화를 안 붙들게 한다.** `await` 로 바꾸면 부모 폴더 `readdir` 이 창이
+    //    뜨는 길목에 선다 — 느린 디스크·네트워크 드라이브에서 그 비용이 사람에게 보인다.
+    [
+        "packages/vscode/src/extension.ts",
+        "  void announceStashLeftovers();",
+        "지난 갈아 끼우기의 잔재를 **아무도 말하지 않게** 된다 — 그 폴더가 원본의 유일한 사본일 수 있다",
+    ],
     [
         "packages/vscode/src/extension.ts",
         "signal: stop.signal,",
@@ -407,10 +435,12 @@ const WIRES = [
         "const provNotice = provenanceNotice(verdict",
         "판정을 내고도 안 보여 주면 사람이 동의할 재료가 없다 — 확인 창이 이 게이트의 표면이다",
     ],
+    // 두 자리다 — 「zip 으로 교체」와 「서버 판으로 교체」. 재료만 다르고 «무엇을 남기는지»를 세는 술어는 하나여야 한다.
     [
         "packages/vscode/src/extension.ts",
         "const keep = await keepNames(dir);",
         "손 목록으로 열거하면 포장기가 빼는 것과 갈린다 — 갈린 쪽이 영구 삭제된다",
+        2,
     ],
     [
         "packages/vscode/src/extension.ts",
@@ -447,6 +477,7 @@ const WIRES = [
         "...engineArgs",
         "Node 없는 컴퓨터에서 미리보기 첫 화면이 500 으로 돌아간다(Turbopack 이 PATH 에서 node 를 못 찾는다)",
     ],
+    // 넷이다 — 받기·zip 시작·zip 교체·서버 교체. 폴더에 아카이브를 푸는 문이 하나 늘면 여기도 는다.
     [
         // ⚠ **등록부가 아니라 «푸는 구간»을 센다.** 진입점에서 잡던 시절, 답하지 않은 알림·파일
         //    대화상자 하나가 가드를 영영 붙들어 형제 명령 둘이 창이 죽을 때까지 막혔다(실사용
@@ -455,15 +486,16 @@ const WIRES = [
         "packages/vscode/src/extension.ts",
         "await whileExtracting(() =>",
         "소스 받기·zip 시작·zip 교체가 겹쳐 돌아 두 꾸러미가 같은 폴더에 섞이고, 한쪽 롤백이 다른 쪽 파일을 지운다",
-        3,
+        4,
     ],
     [
+    // 위와 같은 넷. BUSY 로 물러난 뒤 계속 진행하면 두 번째 해제가 그대로 들어간다.
         // ⚠ **효과를 센다.** 가드를 부르고도 [BUSY] 를 무시하면, 이미 누가 풀고 있는 폴더에
         //    두 번째 해제가 그대로 들어간다 — 부르는 줄만 세는 검사는 그것을 못 본다.
         "packages/vscode/src/extension.ts",
         "if (result === BUSY) return;",
         "가드가 「이미 푸는 중」이라고 답해도 그대로 밀고 들어가, 가드가 장식이 된다",
-        3,
+        4,
     ],
     [
         "packages/vscode/src/extension.ts",
@@ -673,13 +705,14 @@ const WIRES = [
         "if (!choice) throw noRevisionError(revisions);",
         "공개 API 로 판을 안 주고 부르면 BUILDING·FAILED 판을 받으러 가고, 「없다」 문면도 옛 사본이 나온다",
     ],
+    // 셋이다 — 받기·서버 교체·(zip 경로). 소스 꾸러미는 node_modules 를 담을 수 없다.
     [
         "packages/core/src/fetchSource.ts",
         "rejectVendored: true",
         "받은 소스가 `node_modules` 를 담고 있어도 그대로 풀린다",
         // 폴더로 푸는 쪽과 zip 으로 다시 싸는 쪽 — 해제가 두 자리라 가드도 두 자리다.
         // 한쪽만 걸면 그쪽으로 받은 소스만 안전해지고, 그 차이는 아무 데도 안 보인다.
-        2,
+        3,
     ],
 ];
 

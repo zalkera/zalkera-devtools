@@ -60,6 +60,11 @@
         "category": "잘커라"
       },
       {
+        "command": "zalkera.site.updateFromServer",
+        "title": "서버 판으로 교체",
+        "category": "잘커라"
+      },
+      {
         "command": "zalkera.export",
         "title": "zip 으로 내보내기",
         "category": "잘커라"
