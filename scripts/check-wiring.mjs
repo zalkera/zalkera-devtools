@@ -298,6 +298,29 @@ const WIRES = [
         "「말할 것이 생겼을 때만 다시 그린다」가 빠지면 두 방향으로 깨진다 — 조건을 좁히면 판이 " +
             "있는 사이트(이 고지가 설 자리)를 통째로 건너뛰고, 없애면 흔한 칸에서 포커스가 첫 칸으로 튄다",
     ],
+    // ⚠ **판정에 재료를 싣는 쪽만 박으면 절반이다.** 위 셋이 다 서 있어도 「보여 주는 끝」
+    //    (조회 포획 → 재그리기 신호 → 렌더)은 전건 초록인 채 죽었다 — 3축이 변이 넷으로 실측했다.
+    //    그중 하나는 침묵이 아니라 **거짓말**이었다(번호 둘을 맞바꾸면 되돌린 사이트에서 방향이
+    //    뒤집혀 뜨는데 초록). 그래서 여기서는 문면 **전문**을 박는다.
+    [
+        "packages/vscode/src/extension.ts",
+        'return { fetchable: "yes", serverRevisionNo: picked.revisionNo };',
+        "**커밋이 고친 「번호 버리기」가 그대로 되살아난다.** 위 배선은 `.then` 의 구조분해 문면만 " +
+            "박으므로, 이 자리에서 `null` 을 내면 화면은 늘 침묵인데 전건 초록이다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        'const drift = options.some((o) => o.kind === "open" && o.drift !== null);',
+        "재그리기 신호가 상수로 굳으면 가드 줄(`note === null && !drift`)은 그대로 남아 초록인데, " +
+            "판이 **있는** 사이트 — 곧 이 고지가 설 자리 — 에서 다시 그리는 일이 영영 안 일어난다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "`버전 ${option.drift.held} · 서버는 버전 ${option.drift.server} — 「서버 판으로 교체」로 맞출 수 있습니다`",
+        "**문면이 오너 확정본이고 순서가 뜻이다.** 이 줄을 지우면 재료를 다 모으고도 영영 안 그리고, " +
+            "`held`·`server` 를 맞바꾸면 되돌린 사이트에서 방향이 **뒤집혀** 뜬다 — 침묵이 아니라 거짓말이라 " +
+            "「방향을 단정하지 않는다」가 지키는 것 없이 서 있게 된다",
+    ],
     [
         "packages/vscode/src/extension.ts",
         "quick.items = optionItems(options);",

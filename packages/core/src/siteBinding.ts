@@ -8,6 +8,7 @@
  * ⚠ **판정이 여기 사는 이유.** 확장 안 조건문은 시험도 검사기도 못 문다. 이 파일의 함수가
  *   순수하기 때문에 「사이트 선택이 남의 폴더 링크를 덮는다」가 시험 한 줄로 고정된다.
  */
+import {plausibleRevisionNo} from "./localMark.ts";
 import type {SourceMark} from "./localMark.ts";
 
 /**
@@ -202,6 +203,9 @@ export interface ElsewhereInput {
      *
      * ⚠ **받기 문 셋·「서버 판으로 교체」와 같은 판정이어야 한다.** 여기서 갈리면 「화면이 말한
      *   번호와 교체가 받는 번호가 다른」 날이 온다.
+     *
+     * 판 번호로 안 통하는 값(0·음수·Int32 초과·정수 아님)은 **모름으로 접는다**
+     * ([plausibleRevisionNo]) — `heldRevisionNo` 도 같다.
      */
     serverRevisionNo?: number | null;
 }
@@ -226,8 +230,13 @@ export function elsewhereOptions(input: ElsewhereInput): {
         // ⚠ **둘 다 알고 다를 때만 말한다.** 하나라도 모르면 침묵 — 없는 소식을 지어내지 않는다.
         //    같을 때도 침묵이다: 「서버와 같습니다」는 **사본 주장**으로 읽히는데 우리가 아는 것은
         //    기반뿐이고, 그건 없는 소식이다.
-        const held = input.heldRevisionNo ?? null;
-        const server = input.serverRevisionNo ?? null;
+        //
+        // ⚠ **정수만 싣는다 — 그 잣대를 여기서 세운다.** 화면은 「이 줄에 서버 문자열이 오면
+        //    QuickPick 라벨 소독 구멍을 넓힌다」고 적어 뒀는데, 서버 번호는 `request<T>` 의
+        //    **캐스트**로 와서 형 선언만 있고 런타임 검사가 없다. 배선 한 줄로 지키면 그 줄을
+        //    지운 판이 전건 초록으로 나간다(3축 실측). 판정 자리에서 접어야 시험이 문다.
+        const held = plausibleRevisionNo(input.heldRevisionNo);
+        const server = plausibleRevisionNo(input.serverRevisionNo);
         const drift = held !== null && server !== null && held !== server ? {held, server} : null;
         options.push({kind: "open", dir: input.confirmedDir, drift});
     }

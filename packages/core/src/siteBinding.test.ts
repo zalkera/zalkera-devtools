@@ -178,7 +178,7 @@ test("조회에 실패했으면 받기를 **남긴다** — 모르는 것으로 
 
 test("확증된 로컬본이 있으면 **열기가 첫 항목** — 순서가 곧 권고다", () => {
   const { options } = elsewhereOptions({ confirmedDir: "/w/alpha", fetchable: "yes" });
-  // 판을 안 넘겼으므로  는 null 이다 — 모르면 침묵이 이 자리의 계약이다.
+  // 판을 안 넘겼으므로 `drift` 는 null 이다 — 모르면 침묵이 이 자리의 계약이다.
   assert.deepEqual(options[0], { kind: "open", dir: "/w/alpha", drift: null });
   assert.deepEqual(
     options.map((o) => o.kind),
@@ -409,6 +409,44 @@ test("하나라도 모르면 침묵한다 — 표식 없음·조회 실패·구 
             openOf({confirmedDir: "/w/bix", fetchable: "yes", heldRevisionNo: held, serverRevisionNo: server})?.drift,
             null,
             `${why} 인데 말했다`,
+        );
+    }
+});
+
+test("판 번호로 안 통하는 값은 «모름»으로 접는다 — 서버 값은 캐스트라 런타임 검사가 없다", () => {
+    // ⚠ **서버 쪽이 하중을 받는다.** `request<T>` 는 형만 주장하고 검사하지 않으므로, 이 자리는
+    //    「형이 number 라고 적혀 있으니 정수일 것이다」에 기대면 안 된다. 실제로 그 값이 문면에
+    //    실려 QuickPick 으로 나간다.
+    const bad: Array<[string, unknown]> = [
+        ["0", 0],
+        ["음수", -1],
+        ["Int32 초과", 2_147_483_648],
+        ["소수", 3.5],
+        ["NaN", Number.NaN],
+        ["무한대", Number.POSITIVE_INFINITY],
+        ["문자열(캐스트가 통과시킨다)", "9"],
+        ["객체", {revisionNo: 9}],
+    ];
+    for (const [why, value] of bad) {
+        assert.equal(
+            openOf({
+                confirmedDir: "/w/bix",
+                fetchable: "yes",
+                heldRevisionNo: 3,
+                serverRevisionNo: value as number,
+            })?.drift,
+            null,
+            `서버 값이 ${why} 인데 말했다`,
+        );
+        assert.equal(
+            openOf({
+                confirmedDir: "/w/bix",
+                fetchable: "yes",
+                heldRevisionNo: value as number,
+                serverRevisionNo: 9,
+            })?.drift,
+            null,
+            `로컬 값이 ${why} 인데 말했다`,
         );
     }
 });
