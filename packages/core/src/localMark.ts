@@ -74,6 +74,24 @@ export type SourceMark = FetchedMark | PublishedMark | LinkedMark;
 const MAX_REVISION_NO = 2_147_483_647;
 
 /**
+ * **판 번호로 통할 수 있는 값인가** — 통하면 그 번호, 아니면 `null`.
+ *
+ * ■ 왜 술어가 밖에 나와 있나
+ *   판 번호는 **두 입구**로 들어온다 — 폴더 안 표식(사람이 고칠 수 있는 파일)과 서버 응답
+ *   (`request<T>` 의 캐스트라 런타임 검사가 **없다**). 두 입구가 각자 다른 잣대를 쓰면 화면이
+ *   「정수만 싣는다」고 적어 놓고 한쪽으로는 아닌 것을 싣는다. 잣대를 하나만 둔다.
+ *
+ * ⚠ **`unknown` 을 받는다.** 형을 믿고 좁게 받으면 이 함수가 막으려는 바로 그 자리
+ *   (형 선언만 있고 검사는 없는 서버 값)를 **컴파일러가 통과시킨다.**
+ *
+ * ■ 상한이 왜 Int32 인가
+ *   서버 컬럼이 `Int` 라 넘는 값은 역직렬화에서 **409 가 아니라 400** 이 된다. 0·음수도 판이 아니다.
+ */
+export function plausibleRevisionNo(no: unknown): number | null {
+    return typeof no === "number" && Number.isSafeInteger(no) && no > 0 && no <= MAX_REVISION_NO ? no : null;
+}
+
+/**
  * 이 표식이 **선언할 기반 판**을 아는가 — 안다면 그 번호.
  *
  * ■ 선언의 뜻은 「폴더 내용이 판 N 과 같다」가 아니다
@@ -98,14 +116,11 @@ const MAX_REVISION_NO = 2_147_483_647;
 export function declaredBaseRevisionNo(mark: SourceMark | null, tenant: string): number | null {
     if (!mark || mark.tenant !== tenant) return null;
     if ("origin" in mark && mark.origin === "linked") return null;
-    // ⚠ **범위를 본다.** 표식은 폴더 안 파일이라 손으로 고칠 수 있다. Int32 밖 값(`1e21` 등)은 서버
-    //    역직렬화에서 **409 가 아니라 400** 이 되고, 그러면 `isUploadBaseMoved` 가 거짓이라 「그대로
-    //    올리기」가 **안 열린다** — 표식은 발행 성공에서만 갱신되므로 그 폴더는 다시 못 올린다.
-    //    이 방어가 없애려던 영구 막다른길이 표식 쪽 입구로 되돌아오는 자리다. 0·음수도 판이 아니다.
-    const no = mark.revisionNo;
-    return typeof no === "number" && Number.isSafeInteger(no) && no > 0 && no <= MAX_REVISION_NO
-        ? no
-        : null;
+    // ⚠ **범위를 본다.** 표식은 폴더 안 파일이라 손으로 고칠 수 있다. Int32 밖 값(`1e21` 등)이
+    //    실리면 `isUploadBaseMoved` 가 거짓이라 「그대로 올리기」가 **안 열리고**, 표식은 발행
+    //    성공에서만 갱신되므로 그 폴더는 다시 못 올린다 — 이 방어가 없애려던 영구 막다른길이
+    //    표식 쪽 입구로 되돌아오는 자리다.
+    return plausibleRevisionNo(mark.revisionNo);
 }
 
 export function buildSourceMark(input: Omit<FetchedMark, "format">): string {

@@ -178,7 +178,8 @@ test("조회에 실패했으면 받기를 **남긴다** — 모르는 것으로 
 
 test("확증된 로컬본이 있으면 **열기가 첫 항목** — 순서가 곧 권고다", () => {
   const { options } = elsewhereOptions({ confirmedDir: "/w/alpha", fetchable: "yes" });
-  assert.deepEqual(options[0], { kind: "open", dir: "/w/alpha" });
+  // 판을 안 넘겼으므로 `drift` 는 null 이다 — 모르면 침묵이 이 자리의 계약이다.
+  assert.deepEqual(options[0], { kind: "open", dir: "/w/alpha", drift: null });
   assert.deepEqual(
     options.map((o) => o.kind),
     ["open", "fetch", "pick-folder", "import-zip"],
@@ -367,4 +368,96 @@ test("보인 폴더가 아직 그 폴더인가 — 사라진 것과 달라진 �
         folderStillShown(null, null as unknown as string), false,
         "보인 것도 없는데 같다고 답했다",
     );
+});
+
+// ── 로컬본이 서버와 «다를 때만» 말한다 ──────────────────────────────────────
+//
+// ⚠ **이 절의 절반은 침묵이다.** 하나라도 모르면 말하지 않고, 같아도 말하지 않는다 —
+//   「서버와 같습니다」는 **사본 주장**으로 읽히는데 우리가 아는 것은 기반뿐이다.
+//
+// ⚠ **방향을 단정하지 않는다.** 되돌린 사이트에서는 로컬이 서버보다 **앞**이라 「낡았다」가
+//   거짓이 된다. 그래서 판정은 「다르다」까지만 하고 번호 둘을 그대로 싣는다.
+
+const openOf = (input: Parameters<typeof elsewhereOptions>[0]) =>
+    elsewhereOptions(input).options.find((o) => o.kind === "open") as
+        | {kind: "open"; dir: string; drift: {held: number; server: number} | null}
+        | undefined;
+
+test("둘 다 알고 다르면 번호 둘을 싣는다", () => {
+    const open = openOf({confirmedDir: "/w/bix", fetchable: "yes", heldRevisionNo: 3, serverRevisionNo: 9});
+    assert.deepEqual(open?.drift, {held: 3, server: 9});
+});
+
+test("되돌린 사이트 — 로컬이 «앞»이어도 그대로 싣는다(방향을 단정하지 않는다)", () => {
+    const open = openOf({confirmedDir: "/w/bix", fetchable: "yes", heldRevisionNo: 9, serverRevisionNo: 3});
+    assert.deepEqual(open?.drift, {held: 9, server: 3}, "「낡음」으로 접으면 이 칸에서 거짓이 된다");
+});
+
+test("같으면 침묵한다 — 「서버와 같습니다」는 사본 주장이라 우리가 못 하는 말이다", () => {
+    assert.equal(openOf({confirmedDir: "/w/bix", fetchable: "yes", heldRevisionNo: 7, serverRevisionNo: 7})?.drift, null);
+});
+
+test("하나라도 모르면 침묵한다 — 표식 없음·조회 실패·구 서버", () => {
+    const cases: Array<[string, number | null | undefined, number | null | undefined]> = [
+        ["로컬 모름(표식 없음·링크만)", null, 9],
+        ["서버 모름(조회 실패·시한)", 3, null],
+        ["둘 다 모름", null, null],
+        ["안 넘김(구 호출부)", undefined, undefined],
+    ];
+    for (const [why, held, server] of cases) {
+        assert.equal(
+            openOf({confirmedDir: "/w/bix", fetchable: "yes", heldRevisionNo: held, serverRevisionNo: server})?.drift,
+            null,
+            `${why} 인데 말했다`,
+        );
+    }
+});
+
+test("판 번호로 안 통하는 값은 «모름»으로 접는다 — 서버 값은 캐스트라 런타임 검사가 없다", () => {
+    // ⚠ **서버 쪽이 하중을 받는다.** `request<T>` 는 형만 주장하고 검사하지 않으므로, 이 자리는
+    //    「형이 number 라고 적혀 있으니 정수일 것이다」에 기대면 안 된다. 실제로 그 값이 문면에
+    //    실려 QuickPick 으로 나간다.
+    const bad: Array<[string, unknown]> = [
+        ["0", 0],
+        ["음수", -1],
+        ["Int32 초과", 2_147_483_648],
+        ["소수", 3.5],
+        ["NaN", Number.NaN],
+        ["무한대", Number.POSITIVE_INFINITY],
+        ["문자열(캐스트가 통과시킨다)", "9"],
+        ["객체", {revisionNo: 9}],
+    ];
+    for (const [why, value] of bad) {
+        assert.equal(
+            openOf({
+                confirmedDir: "/w/bix",
+                fetchable: "yes",
+                heldRevisionNo: 3,
+                serverRevisionNo: value as number,
+            })?.drift,
+            null,
+            `서버 값이 ${why} 인데 말했다`,
+        );
+        assert.equal(
+            openOf({
+                confirmedDir: "/w/bix",
+                fetchable: "yes",
+                heldRevisionNo: value as number,
+                serverRevisionNo: 9,
+            })?.drift,
+            null,
+            `로컬 값이 ${why} 인데 말했다`,
+        );
+    }
+});
+
+test("로컬본이 없으면 그 항목 자체가 없다 — 없는 폴더의 판을 말하지 않는다", () => {
+    assert.equal(openOf({confirmedDir: null, fetchable: "yes", heldRevisionNo: 3, serverRevisionNo: 9}), undefined);
+});
+
+test("고지가 «열기»를 막지 않는다 — 모른다로도, 달라도 막지 않는다", () => {
+    for (const [held, server] of [[3, 9], [null, null]] as Array<[number | null, number | null]>) {
+        const opts = elsewhereOptions({confirmedDir: "/w/bix", fetchable: "yes", heldRevisionNo: held, serverRevisionNo: server}).options;
+        assert.equal(opts[0]?.kind, "open", "열기가 첫 항목이 아니다 — 순서를 바꿨다");
+    }
 });
