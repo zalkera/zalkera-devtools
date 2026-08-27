@@ -13,7 +13,7 @@
 | 패키지 | 무엇 | 상태 |
 |---|---|---|
 | [`packages/core`](packages/core) | 러너 — 자격증명 획득 · 환경 조립 · 개발 서버 기동 · 패킹 · 발행 | **구현됨** · 내부 패키지(npm 미발행) |
-| [`packages/cli`](packages/cli) | `zalkera` — 터미널에서 쓰는 길 | **구현됨** · npm 이름 `zalkera`(발행 대기) |
+| [`packages/cli`](packages/cli) | `@zalkera/cli` — 터미널에서 쓰는 길(명령은 `zalkera`) | **npm 발행됨** |
 | [`packages/vscode`](packages/vscode) | VS Code 확장 — 터미널 없이 쓰는 길 | **마켓플레이스 배포됨** |
 
 셋은 **같은 코어**를 쓴다. 어느 길로 오든 동작이 같다.
@@ -44,7 +44,7 @@ VS Code 확장은 **마켓플레이스에 올라 있다** — [zalkera.zalkera-d
 | **코어** | 자격증명 · 의존성 · env 조립 · 개발 서버 · 패킹 · 발행 | ✅ |
 | **확장** | 로그인 → 소스 받기(예제·내 사이트) → 미리보기 → 발행 → 롤백 | ✅ 배포됨 |
 | 소스 MCP 연동 | 에이전트가 발행·롤백·상태를 도구로 부른다 | ✅ |
-| CLI | `npx zalkera` — 받기·올리기·발행·되돌리기·버리기 · 상태 | 배포 경로 **섰다**(`npm run pack:cli`) · 첫 발행 대기 · 미리보기·로컬 MCP 는 아직 |
+| CLI | `npx @zalkera/cli` — 받기·올리기·발행·되돌리기·버리기 · 상태 | ✅ npm 발행 · 미리보기·로컬 MCP 는 아직 |
 
 `packages/core` 는 확장이 쓰는 **내부 패키지**라 npm 에 올리지 않는다. 확장 VSIX 안에 번들로 실린다.
 
