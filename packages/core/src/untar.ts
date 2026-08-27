@@ -618,7 +618,6 @@ export function resolveCap(maxBytes?: number): number {
     return maxBytes ?? MAX_EXTRACT_BYTES;
 }
 
-/** 압축 폭탄 방어 — 무제한 해제는 확장 호스트를 OOM 으로 죽이고, 그러면 다른 확장까지 함께 죽는다. */
 /**
  * gz 를 푼다. **부르는 쪽이 한 번만 풀 수 있게** 내보낸다 — 같은 아카이브를 두 번 보는 길
  * (`pull` 의 판정 → 쓰기)이 각자 풀면 산출물만큼을 두 번 램에 올린다([extractTar] 참조).
@@ -627,6 +626,7 @@ export async function gunzipTar(input: Buffer, maxBytes?: number): Promise<Buffe
     return gunzipBuffer(input, maxBytes);
 }
 
+/** 압축 폭탄 방어 — 무제한 해제는 확장 호스트를 OOM 으로 죽이고, 그러면 다른 확장까지 함께 죽는다. */
 async function gunzipBuffer(input: Buffer, maxBytes?: number): Promise<Buffer> {
     const { gunzip: gunzipCb } = await import("node:zlib");
     const { promisify } = await import("node:util");
