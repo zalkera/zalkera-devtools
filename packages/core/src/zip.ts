@@ -171,6 +171,12 @@ function isValueLessTemplate(lower: string): boolean {
  * ⚠ **완전하지 않다.** 고엔트로피 문자열 일반은 안 본다 — 그래서 이 함수가 하는 말은
  *   「알려진 형식의 살아 있는 열쇠가 값 자리에 있다」이지 「비밀이 없다」가 아니다.
  */
+// ⚠ **이 표가 보는 종.** 형제 백엔드의 `scripts/checks/detect-credential-parity.py` 가 이 선언을
+//   자기 표와 대사한다 — 사본이 낡는 것을 사람 눈이 아니라 검사기가 본다. 표를 넓히면 여기도
+//   같이 넓혀라(안 넓히면 그 검사기가 red 다).
+//   ⚠ 줄 처음에서만 읽히고 **둘 이상이면 거절**된다 — 옛 줄을 주석으로 남기지 마라.
+export const SPECIES = ["aws", "github", "stripe", "slack", "google", "npm", "oqsk", "pem"];
+
 const LIVE_SECRET: ReadonlyArray<readonly [string, RegExp]> = [
     ["잘커라 스토어프론트 키", /\boqsk_[0-9A-Za-z_-]{8,}/],
     ["AWS 액세스키", /\bAKIA[0-9A-Z]{16}\b/],
