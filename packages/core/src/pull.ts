@@ -39,6 +39,7 @@ import {
     type SyncLedger,
 } from "./syncLedger.ts";
 import {extractTar, gunzipTar, readTarManifest} from "./untar.ts";
+import {writeSourceMarkTo} from "./localMark.ts";
 import {hashWorkdir, resolveExisting} from "./workdir.ts";
 import {isExcludedEntry} from "./zip.ts";
 
@@ -199,6 +200,17 @@ export async function pullSiteSource(options: PullOptions): Promise<PullResult> 
         pushedAt: ledger?.pushedAt ?? null,
     };
     const ledgerWritten = await writeLedger(root, next);
+    // 🔴 **소속 표식도 남긴다.** 장부(`sync.json`)가 이 폴더의 **유일한** 소속 기록이면, 장부를
+    //    잊는 순간(발행이 새 매니페스트를 못 읽는 경우) 폴더가 **소속까지 잃어 모든 동사가 막힌다**
+    //    — `--site` 를 손으로 붙이지 않으면 복구 동사(`baseline`)조차 못 돈다(실측).
+    //    그리고 이 표식은 확장이 읽는 자리이기도 하다: 안 남기면 CLI 로 받은 폴더가 확장에서
+    //    **소속 없는 폴더**로 보인다.
+    await writeSourceMarkTo(root, {
+        tenant: options.api.tenantCode(),
+        revisionNo: tar.revisionNo,
+        sha256: tar.sha256,
+        fetchedAt: next.pulledAt,
+    }).catch(() => undefined);
 
     return {
         revisionNo: tar.revisionNo,

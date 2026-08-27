@@ -8,6 +8,7 @@ import {DevtoolsError} from "./errors.ts";
 import {pullSiteSource, readLedger, SAVED_SUFFIX} from "./pull.ts";
 import {rebuildBaseline} from "./baseline.ts";
 import {SYNC_LEDGER_FORMAT, SYNC_LEDGER_PATH, serializeSyncLedger, type SyncLedger} from "./syncLedger.ts";
+import {SOURCE_MARK_PATH, parseSourceMark} from "./localMark.ts";
 import {tempDir} from "./testing/tempDir.ts";
 
 function header(name: string, size: number, type = "0"): Buffer {
@@ -456,4 +457,32 @@ test("🔴 `baseline` 도 배제 목록을 지난다 — 안 지나면 다음 pu
     strictEqual(result.files, 1, "배제 경로가 장부에 실렸다");
     deepEqual(result.serverExcluded, [".env.example/keys.txt", "apps/web/node_modules/left-pad/index.js"]);
     deepEqual(Object.keys((await readLedger(dir))?.files ?? {}), ["a.tsx"]);
+});
+
+test("🔴 받기가 **소속 표식**도 남긴다 — 장부가 유일한 소속 기록이면 잊는 순간 폴더가 막힌다", async () => {
+    // 실측: 발행이 새 매니페스트를 못 읽어 장부를 잊자 폴더가 소속까지 잃었고, `--site` 를 손으로
+    // 붙이지 않으면 복구 동사(`baseline`)조차 못 돌았다 — 모든 동사가 막혔다.
+    const dir = await site({});
+    await run(dir, tarGz({"a.tsx": "가"}));
+    const mark = parseSourceMark(await readFile(join(dir, SOURCE_MARK_PATH), "utf8").catch(() => null));
+    strictEqual(mark?.tenant, "acme");
+    strictEqual(mark && "revisionNo" in mark ? mark.revisionNo : null, 7);
+});
+
+test("🔴 `baseline` 도 소속 표식을 남긴다 — 복구 동사라 특히 그렇다", async () => {
+    const dir = await site({});
+    const payload = tarGz({"a.tsx": "가"});
+    await rebuildBaseline({api: fakeApi(payload), folder: dir, fetchImpl: serve(payload)} as never);
+    const mark = parseSourceMark(await readFile(join(dir, SOURCE_MARK_PATH), "utf8").catch(() => null));
+    strictEqual(mark?.tenant, "acme");
+});
+
+test("표식을 못 써도 받기는 성공이다 — 파일은 이미 새 판이다", async () => {
+    const dir = await site({});
+    // `.zalkera` 를 링크로 만들어 표식 쓰기를 막는다(장부 쓰기도 함께 막힌다).
+    const outside = join(dir, "..", `${basename(dir)}-바깥`);
+    await mkdir(outside, {recursive: true});
+    await symlink(outside, join(dir, ".zalkera"));
+    const result = await run(dir, tarGz({"a.tsx": "가"}));
+    strictEqual(result.revisionNo, 7, "표식을 못 써서 받기가 실패했다");
 });
