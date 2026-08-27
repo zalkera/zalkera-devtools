@@ -7,7 +7,7 @@ import { pipeline } from "node:stream/promises";
 import { createGunzip } from "node:zlib";
 import { MAX_ENTRIES, MAX_ENTRY_BYTES, MAX_EXTRACT_BYTES } from "./limits.ts";
 import { DevtoolsError } from "./errors.ts";
-import { assertNotWrittenTwice, writeExclusive } from "./safeWrite.ts";
+import { assertNotWrittenTwice, writeExclusive, writeViaRename } from "./safeWrite.ts";
 import {assertNotSymlink, descend, safeSegments, assertNotVendored} from "./safeWrite.ts";
 
 /**
@@ -452,10 +452,14 @@ async function createSink(targetDir: string, options: UntarOptions) {
             const path = join(parent, leaf);
             // 마지막 조각이 이미 심링크면 **쓰기가 그 링크를 따라간다** — 조각 검사의 마지막 칸이다.
             await assertNotSymlink(path, name);
-            // ⚠ **이미 있는 파일 위에 쓰지 않는다.** 「빈 폴더」 판정은 `.vscode` 같은 편집기
-            //    산물을 일부러 통과시키고 도움말도 「있어도 괜찮습니다」라고 말한다. 아카이브가
-            //    같은 경로를 담고 있으면 고객 파일이 소리 없이 교체되고, 롤백은 그 파일을
-            //    기준선으로 봐서 못 되감는다 — 화면은 「지금 폴더는 바뀌지 않습니다」라고 한다.
+            // ⚠ **기본은 「이미 있는 파일 위에 쓰지 않는다」**(아래 `else` 가지). 「빈 폴더」 판정은
+            //    `.vscode` 같은 편집기 산물을 일부러 통과시키고 도움말도 「있어도 괜찮습니다」라고
+            //    말한다. 아카이브가 같은 경로를 담고 있으면 고객 파일이 소리 없이 교체되고, 롤백은
+            //    그 파일을 기준선으로 봐서 못 되감는다 — 화면은 「지금 폴더는 바뀌지 않습니다」라고 한다.
+            //
+            //    `replace` 가지는 그 규칙의 **예외가 아니라 위임**이다: 부르는 쪽이 그 경로 하나하나에
+            //    대해 「덮어도 잃을 것이 없다」를 이미 판정했다([UntarOptions.decide] 참조).
+            //    판정 없이 오는 길에서는 이 가지가 안 열린다.
             if (verdict === "replace") {
                 // 부르는 쪽이 「이 경로는 덮어도 잃을 것이 없다」를 이미 판정했다. 그래도 **같은 해제에서
                 // 두 번 나오는 것**은 여전히 사고다 — 그 판정은 [assertNotWrittenTwice] 한 벌이 한다.
@@ -465,7 +469,10 @@ async function createSink(targetDir: string, options: UntarOptions) {
                 //    맨 `writeFile` 이라 **조용히 뒤엣것으로 교체된다** — 그리고 장부에는 둘 다
                 //    남아 한쪽이 영영 안 맞는다(실측). 정본 tar 에 그런 짝이 있는 것 자체가 결함이다.
                 assertNotWrittenTwice(path.toLowerCase(), name, foldedPaths);
-                await writeFile(path, data);
+                // 🔴 **맨 `writeFile` 을 쓰지 않는다.** 잎이 **하드링크**면 그 쓰기가 대상에 그대로
+                //    가서 **폴더 밖 파일이 서버 내용으로 교체된다**(심의 실측). `lstat` 는 하드링크를
+                //    못 본다 — 경계는 `rename` 이다([writeViaRename]).
+                await writeViaRename(path, data, preserveMode && (entry.mode & 0o111) !== 0 ? 0o755 : 0o644);
                 writtenPaths.add(path);
                 foldedPaths.add(path.toLowerCase());
             } else {

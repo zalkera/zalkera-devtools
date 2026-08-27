@@ -145,3 +145,17 @@ export function applyAfterDiscard(
     }
     return {writes: writes.sort(), deletes: deletes.sort()};
 }
+
+/**
+ * 경로 목록을 사람에게 보일 만큼 줄인다(memo184 §2.9).
+ *
+ * ⚠ **「외 N개」가 붙는 자리는 여기 하나여야 한다.** 종전에는 CLI 의 보고 쪽과 코어의 거절 문면이
+ *   각자 잘랐고, 사용자는 그 둘을 **같은 터미널에서** 봤다 — 상한이 갈리면 같은 목록이 자리마다
+ *   다르게 잘린다.
+ */
+export const PATH_LIST_CAP = 10;
+
+export function trimPaths(paths: readonly string[], cap = PATH_LIST_CAP, all = false): string[] {
+    if (all || paths.length <= cap) return [...paths];
+    return [...paths.slice(0, cap), `외 ${paths.length - cap}개`];
+}

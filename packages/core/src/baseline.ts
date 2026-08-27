@@ -14,16 +14,17 @@
  * ⚠ **`files` 를 「직전 작업본」으로 추정하지 않는다.** 서버가 경로 정규화·제외 목록을 적용하므로
  *   추정은 조용히 어긋난다. 판의 tar 를 받아 **다시 읽는다.**
  */
-import {mkdir, readFile, writeFile} from "node:fs/promises";
-import {dirname, join, resolve} from "node:path";
+import {readFile} from "node:fs/promises";
+import {join, resolve} from "node:path";
 import type {ZalkeraApi} from "./api.ts";
+import {DevtoolsError} from "./errors.ts";
 import {fetchVerifiedSourceTar} from "./fetchSource.ts";
+import {writeLedger} from "./pull.ts";
 import {MAX_EXTRACT_BYTES} from "./limits.ts";
 import {
     SYNC_LEDGER_FORMAT,
     SYNC_LEDGER_PATH,
     parseSyncLedger,
-    serializeSyncLedger,
     type SyncLedger,
 } from "./syncLedger.ts";
 import {readTarGzManifest} from "./untar.ts";
@@ -83,8 +84,17 @@ export async function rebuildBaseline(options: BaselineOptions): Promise<Baselin
         pushedAt: previous?.pushedAt ?? null,
     };
 
-    await mkdir(join(root, dirname(SYNC_LEDGER_PATH)), {recursive: true});
-    await writeFile(join(root, SYNC_LEDGER_PATH), serializeSyncLedger(ledger));
+    // ⚠ 장부 쓰기는 **한 문**을 지난다([writeLedger]) — 여기만 맨 `writeFile` 이면 심링크 방어와
+    //   git 배제가 이 동사에서만 빠진다. `baseline` 은 장부를 **처음 세우는 복구 동사**라 그 둘이
+    //   특히 필요하다(심의 지적).
+    const written = await writeLedger(root, ledger);
+    if (!written) {
+        throw new DevtoolsError(
+            "LEDGER_UNKNOWN",
+            "기준 기록을 쓰지 못했습니다.",
+            "폴더의 `.zalkera` 자리가 링크이거나 쓸 수 없는 상태인지 확인해 주세요.",
+        );
+    }
 
     return {revisionNo: tar.revisionNo, files: Object.keys(manifest).length, replaced: previous !== null};
 }

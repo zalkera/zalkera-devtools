@@ -390,13 +390,27 @@ const EXCLUDED_PATHS = new Set([".zalkera/source.json", SYNC_LEDGER_PATH, PROVEN
 /**
  * **접두로 빼는 자리.** 정확일치·세그먼트 이름으로는 안 걸리는 것들이다.
  *
- * ⚠ `.zalkera/saved/2026…/foo.tsx` 같은 「치워 두는 자리」가 그렇다 — 어느 갈래에도 안 걸려
- *   **정본에 실린다.** 본선 방어는 그 자리를 **트리 밖 형제 디렉터리**로 두는 것이고, 이것은
- *   옛 판이 만든 폴더가 남아 있을 때를 위한 **둘째 겹**이다.
+ * ⚠ `.zalkera/saved/2026…/foo.tsx` 같은 「치워 두는 자리」가 그렇다. 본선 방어는 그 자리를
+ *   **트리 밖 형제 디렉터리**로 두는 것이고(`pull.ts` 의 `setAside`), 이것은 둘째 겹이다 —
+ *   사람이 그 폴더를 프로젝트 안으로 옮겨 놓는 것을 막을 길이 없기 때문이다.
  * ⚠ **`.zalkera/` 를 통째로 넣지 마라** — 같은 폴더의 `ASSETS-LICENSE.md`·`pack.json` 은
  *   배송 문서가 가리키는 실물이다.
  */
 const EXCLUDED_PREFIXES = [".zalkera/saved/"];
+
+/**
+ * **경로로 빼는 판정 — 한 벌.**
+ *
+ * 🔴 종전에는 [packProject] 의 훑기가 `EXCLUDED_PATHS` 만 인라인으로 보고 [EXCLUDED_PREFIXES] 는
+ *    안 봤다. 그래서 접두 배제가 「둘째 겹」이라 적혀 있었는데도 **정본 zip 을 만드는 경로에는
+ *    아예 안 닿았다** — 치워 둔 옛 작업이 프로젝트 안에 있으면 그대로 실려 나갔다(심의 실측).
+ *    두 자리가 각자 목록을 보면 이런 갈림이 조용히 산다.
+ *
+ * @param path 프로젝트 뿌리 기준 상대 경로. 구분자·대소문자는 부르는 쪽이 이미 골랐다고 본다.
+ */
+function isExcludedPath(path: string): boolean {
+    return EXCLUDED_PATHS.has(path) || EXCLUDED_PREFIXES.some((prefix) => path.startsWith(prefix));
+}
 
 /**
  * ⚠ **이 목록은 열거다 — 그리고 열거로 끝날 수밖에 없다.**
@@ -429,8 +443,7 @@ const EXCLUDED_PREFIXES = [".zalkera/saved/"];
  */
 export function isExcludedEntry(entryPath: string): boolean {
     const path = entryPath.split(sep).join("/").toLowerCase();
-    if (EXCLUDED_PATHS.has(path)) return true;
-    if (EXCLUDED_PREFIXES.some((prefix) => path.startsWith(prefix))) return true;
+    if (isExcludedPath(path)) return true;
     // 이름 기준 제외는 **어느 층에 있든** 걸린다 — 뿌리의 `node_modules` 만 보면 중첩된 것이 샌다.
     const segments = path.split("/").filter((s) => s !== "");
     if (segments.some((segment) => ALWAYS_EXCLUDED.has(segment))) return true;
@@ -471,8 +484,9 @@ export async function packProject(options: PackOptions): Promise<PackResult> {
             if (item.isDirectory()) {
                 await walk(full);
             } else if (item.isFile()) {
-                // 경로로 빼는 것(위 `EXCLUDED_PATHS`) — 이름으로 빼면 폴더가 통째로 사라지는 자리다.
-                if (EXCLUDED_PATHS.has(relative(options.projectDir, full).split(sep).join("/").toLowerCase())) {
+                // 경로로 빼는 것 — 이름으로 빼면 폴더가 통째로 사라지는 자리다. 판정은
+                // [isExcludedPath] 한 벌을 쓴다(형제 `isExcludedEntry` 와 같은 문).
+                if (isExcludedPath(relative(options.projectDir, full).split(sep).join("/").toLowerCase())) {
                     continue;
                 }
                 const info = await stat(full);

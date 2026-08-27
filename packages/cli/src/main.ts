@@ -14,6 +14,8 @@ import {
     rebuildBaseline,
     readLedger,
     hashWorkdir,
+    PATH_LIST_CAP,
+    trimPaths,
     ledgerCorrection,
     writeLedger,
     syncStatus,
@@ -23,8 +25,8 @@ import {
 } from "@zalkera/devtools-core";
 import {spawn} from "node:child_process";
 import {flagOn, flagValue, parseArgs} from "./args.ts";
-import {openContext, version} from "./context.ts";
-import {describeStatus, trim} from "./report.ts";
+import {openAuth, openContext, version} from "./context.ts";
+import {describeStatus} from "./report.ts";
 import {FileTokenStore, tokenPath} from "./tokenStore.ts";
 
 const HELP = `잘커라 — 사이트 소스를 로컬에서 다루는 도구 (v${version()})
@@ -69,8 +71,11 @@ async function main(argv: readonly string[]): Promise<number> {
 
     switch (command) {
         case "login": {
-            const context = await openContext(common);
-            await login(context.auth, context.store, {openBrowser});
+            // ⚠ **로그인은 사이트를 안 묻는다.** 빈 폴더에서 처음 쓰는 사람이 여기서 「어느 사이트의
+            //   것인지 알 수 없습니다」로 막히면, README 가 적은 첫 순서(`login` → `pull`)가 돌지
+            //   않는다 — 그리고 사이트를 고르려면 로그인이 먼저다(심의 지적).
+            const auth = await openAuth(common);
+            await login(auth.auth, auth.store, {openBrowser});
             process.stdout.write(`로그인했습니다. 로그인 정보는 ${tokenPath()} 에 있습니다.\n`);
             return 0;
         }
@@ -111,6 +116,7 @@ async function main(argv: readonly string[]): Promise<number> {
                 folder: context.folder,
                 revisionNo,
                 discardLocal: flagOn(flags, "discard-local"),
+                listAll: verbose,
                 onProgress: (message: string) => process.stderr.write(`${message}\n`),
             });
             const parts = [
@@ -122,12 +128,20 @@ async function main(argv: readonly string[]): Promise<number> {
             if (result.foreignLedger) {
                 parts.push("이 폴더에 다른 사이트의 기준 기록이 있어 쓰지 않았습니다. 지금은 이 사이트 것으로 되어 있습니다.");
             }
+            // ⚠ **조용히 넘기지 않는다.** 이 회차에는 「사이트가 지운 파일을 여기서도 지운다」가
+            //   못 돌았다 — 그 사실을 안 말하면 남은 파일이 다음 올리기에서 되살아난다.
+            if (result.deletionsUnknown) {
+                parts.push(
+                    "이 폴더에는 기준 기록이 없었습니다. 그래서 사이트에서 지워진 파일이 여기 남아 있어도 이번에는 지우지 못했습니다.",
+                    "지금 남아 있는 것 중 사이트에 없는 파일이 있는지 `zalkera status` 로 확인해 주세요.",
+                );
+            }
             // ⚠ **조용히 빼지 않는다.** 정본에 이것들이 실려 오는 것 자체가 서버 쪽 결함 신호다 —
             //    말하지 않으면 아무도 그 사실을 모른다.
             if (result.serverExcluded.length > 0) {
                 parts.push(
                     `사이트가 보낸 것 중 ${result.serverExcluded.length}개는 이 도구가 다루지 않는 파일이라 받지 않았습니다.`,
-                    ...trim(result.serverExcluded, 10, verbose).map((p) => `  · ${p}`),
+                    ...trimPaths(result.serverExcluded, PATH_LIST_CAP, verbose).map((p) => `  · ${p}`),
                 );
             }
             if (!result.ledgerWritten) {
@@ -171,22 +185,37 @@ function revisionOf(flags: ReturnType<typeof parseArgs>["flags"]): number | unde
 }
 
 /**
- * 브라우저를 연다. **열지 못했으면 던진다** — 조용히 넘어가면 브라우저는 안 열렸는데 콜백을
- * 기다리며 매달린다(코어 [LoginOptions] KDoc 이 못박은 자리).
+ * 브라우저를 연다. **열지 못하면 주소를 내주고 계속 기다린다.**
+ *
+ * ⚠ 코어의 [LoginOptions] 는 「열지 못했으면 `CANCELLED` 로 던져라」고 적는다. **여기는 일부러
+ *   벗어난다** — 그 규율은 확장의 형상을 두고 쓴 것이다. 거기서는 호스트가 「외부 사이트를
+ *   여시겠습니까?」를 띄우고 사람이 **거절할 수 있어서**, 안 던지면 열리지도 않은 브라우저의
+ *   콜백을 기다리며 매달린다.
+ *
+ *   터미널은 다르다. 원격 셸·컨테이너·SSH 에는 브라우저가 **없는 것이 정상**이고, 거기서 던지면
+ *   로그인 길이 아예 없어진다. 그래서 주소를 찍고 기다린다 — 사람이 다른 기계에서 그 주소를 열면
+ *   루프백 수신기가 코드를 받는다. 정말 못 하면 타임아웃이 끝낸다.
  */
 async function openBrowser(url: string): Promise<void> {
-    const command =
-        process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open";
+    // 🔴 **윈도에서 `shell: true` 를 쓰지 않는다.** Node 는 그때 인자를 **따옴표 없이** 이어 붙여
+    //    `cmd /d /s /c "…"` 로 넘기는데, `/s` 가 바깥 따옴표를 벗기면 authorize URL 의 `&` 가
+    //    명령 구분자로 남는다 — 브라우저는 `client_id` 까지만 받고(=인가 실패) 나머지 조각은
+    //    cmd 가 명령으로 실행한다. 질의 인자가 일곱이라 `&` 는 **항상** 있다.
+    //    `cmd /c start "" <url>` 를 **인자 배열**로 넘기면 그 결합이 아예 안 일어난다.
+    const [command, args] =
+        process.platform === "darwin"
+            ? ["open", [url]]
+            : process.platform === "win32"
+              ? ["cmd", ["/c", "start", "", url]]
+              : ["xdg-open", [url]];
     await new Promise<void>((resolve, reject) => {
-        const child = spawn(command, [url], {stdio: "ignore", detached: true, shell: process.platform === "win32"});
+        const child = spawn(command as string, args as string[], {stdio: "ignore", detached: true});
         child.on("error", reject);
         child.on("spawn", () => {
             child.unref();
             resolve();
         });
     }).catch(() => {
-        // 던지지 않고 **주소를 내준다.** 원격 셸·컨테이너에는 브라우저가 없는 것이 정상이고,
-        // 거기서 "실패"라고 끝내면 로그인 길이 아예 없다.
         process.stderr.write(`브라우저를 열지 못했습니다. 이 주소를 직접 열어 주세요:\n${url}\n`);
     });
 }

@@ -239,15 +239,16 @@ export {
     type SyncLedger,
 } from "./syncLedger.ts";
 export {
+    PATH_LIST_CAP,
     applyAfterDiscard,
     planPull,
+    trimPaths,
     type Conflict as PullConflict,
     type LocalFile,
     type PullInput,
     type PullPlan,
 } from "./pullPlan.ts";
 export {
-    CONFLICT_LIST_CAP,
     SAVED_SUFFIX,
     pullSiteSource,
     readLedger,

@@ -1,6 +1,6 @@
 import {deepEqual, match, ok, rejects, strictEqual} from "node:assert/strict";
 import {createHash} from "node:crypto";
-import {mkdir, readFile, readdir, symlink, writeFile} from "node:fs/promises";
+import {link, mkdir, readFile, readdir, symlink, writeFile} from "node:fs/promises";
 import {basename, join} from "node:path";
 import {test} from "node:test";
 import {gzipSync} from "node:zlib";
@@ -10,22 +10,24 @@ import {rebuildBaseline} from "./baseline.ts";
 import {SYNC_LEDGER_FORMAT, SYNC_LEDGER_PATH, serializeSyncLedger, type SyncLedger} from "./syncLedger.ts";
 import {tempDir} from "./testing/tempDir.ts";
 
-function header(name: string, size: number): Buffer {
+function header(name: string, size: number, type = "0"): Buffer {
     const h = Buffer.alloc(512);
     h.write(name.slice(0, 100), 0);
     h.write("0000644\0", 100); h.write("0000000\0", 108); h.write("0000000\0", 116);
     h.write(size.toString(8).padStart(11, "0") + "\0", 124);
-    h.write("00000000000\0", 136); h.write("        ", 148); h.write("0", 156);
+    h.write("00000000000\0", 136); h.write("        ", 148); h.write(type, 156);
     let sum = 0; for (const b of h) sum += b;
     h.write(sum.toString(8).padStart(6, "0") + "\0 ", 148);
     return h;
 }
-function tarGz(files: Record<string, string>): Buffer {
+/** @param extra `[이름, tar 타입]` — 해제기가 다룰 수 없는 항목을 **뒤에** 달 때 쓴다. */
+function tarGz(files: Record<string, string>, extra: ReadonlyArray<readonly [string, string, string]> = []): Buffer {
     const blocks: Buffer[] = [];
     for (const [name, body] of Object.entries(files)) {
         const data = Buffer.from(body, "utf8");
         blocks.push(header(name, data.length), data, Buffer.alloc((512 - (data.length % 512)) % 512));
     }
+    for (const [name, type] of extra) blocks.push(header(name, 0, type));
     blocks.push(Buffer.alloc(1024));
     return gzipSync(Buffer.concat(blocks));
 }
@@ -313,4 +315,100 @@ test("🔴 남의 사이트 장부는 판정에 안 쓴다 — 엉뚱한 이유�
     strictEqual(result.untracked, 1, "남의 장부의 파일을 이 판이 아는 것으로 셌다");
     strictEqual(await readFile(join(dir, "기밀.tsx"), "utf8"), "남의 사이트 파일", "남의 파일을 지웠다");
     strictEqual((await readLedger(dir))?.tenant, "acme");
+});
+
+test("🔴 하드링크에 쓰지 않는다 — `lstat` 는 하드링크를 못 보고 맨 쓰기는 대상에 그대로 간다", async () => {
+    const dir = await site({}, {"app.ts": "원본"});
+    const victim = join(dir, "..", `${basename(dir)}-피해자.txt`);
+    await writeFile(victim, "원본");
+    await link(victim, join(dir, "app.ts"));
+    const result = await run(dir, tarGz({"app.ts": "서버가-덮었다"}));
+    strictEqual(await readFile(victim, "utf8"), "원본", "폴더 밖 파일이 서버 내용으로 교체됐다");
+    strictEqual(await readFile(join(dir, "app.ts"), "utf8"), "서버가-덮었다");
+    strictEqual(result.written, 1);
+});
+
+test("🔴 부모 조각이 바로가기여도 **쓰기 전에** 멈춘다 — 잎만 보면 통과한다", async () => {
+    const dir = await site({}, {"먼저.ts": "가"});
+    await writeFile(join(dir, "먼저.ts"), "가");
+    const outside = join(dir, "..", `${basename(dir)}-바깥`);
+    await mkdir(outside, {recursive: true});
+    await symlink(outside, join(dir, "app"));
+    await rejects(() => run(dir, tarGz({"먼저.ts": "나", "app/victim.ts": "덮어썼다"})), (e: unknown) => {
+        ok(e instanceof DevtoolsError);
+        strictEqual(e.code, "PULL_WOULD_OVERWRITE", `거절 사유가 다르다: ${e.code}`);
+        return true;
+    });
+    strictEqual(await readFile(join(dir, "먼저.ts"), "utf8"), "가", "거절인데 앞 파일이 이미 바뀌었다");
+    strictEqual(await readFile(join(outside, "victim.ts"), "utf8").catch(() => null), null);
+});
+
+test("🔴 로컬과 이름이 대소문자만 다르면 거절한다 — 이름을 접는 파일시스템에서 한쪽이 사라진다", async () => {
+    const dir = await site({"readme.md": "고객이 쓴 것"});
+    await rejects(() => run(dir, tarGz({"README.md": "서버 것"})), (e: unknown) => {
+        ok(e instanceof DevtoolsError);
+        strictEqual(e.code, "PULL_WOULD_OVERWRITE");
+        return true;
+    });
+    strictEqual(await readFile(join(dir, "readme.md"), "utf8"), "고객이 쓴 것");
+});
+
+test("🔴 `.zalkera` 가 바로가기면 장부를 폴더 밖에 안 쓴다 — 그런데 성공을 보고했다", async () => {
+    const dir = await site({});
+    const outside = join(dir, "..", `${basename(dir)}-바깥`);
+    await mkdir(outside, {recursive: true});
+    await symlink(outside, join(dir, ".zalkera"));
+    const result = await run(dir, tarGz({"a.tsx": "가"}));
+    strictEqual(result.ledgerWritten, false, "폴더 밖에 쓰고 성공이라 말했다");
+    strictEqual(await readFile(join(outside, "sync.json"), "utf8").catch(() => null), null, "폴더 밖에 장부가 생겼다");
+});
+
+test("🔴 치워 둔 삭제도 「지운 것」으로 센다 — 안 세면 한 일과 보고가 어긋난다", async () => {
+    const dir = await site({"gone.tsx": "내가-고침", "a.tsx": "가"}, {"gone.tsx": "나", "a.tsx": "가"});
+    const result = await run(dir, tarGz({"a.tsx": "가"}), {discardLocal: true});
+    strictEqual(result.deleted, 1, "치우면서 없어진 경로를 안 셌다");
+    strictEqual(await readFile(join(result.savedTo!, "gone.tsx"), "utf8"), "내가-고침");
+});
+
+test("🔴 기준 기록 없이 «이미 파일이 있는» 폴더를 받으면 그 사실을 말한다", async () => {
+    // 삭제 전파가 통째로 못 돈다 — 「유일한 방어」가 이 회차에 없었다는 사실을 조용히 넘기면
+    // 남은 파일이 다음 올리기에서 되살아난다.
+    const dir = await site({"옛것.tsx": "판에 있던 것"});
+    const withFiles = await run(dir, tarGz({"a.tsx": "가"}));
+    strictEqual(withFiles.deletionsUnknown, true);
+    const empty = await site({});
+    strictEqual((await run(empty, tarGz({"a.tsx": "가"}))).deletionsUnknown, false, "빈 폴더는 지울 것이 없다");
+});
+
+test("🔴 거절 문면이 **없는 명령**을 다음 걸음으로 대지 않는다", async () => {
+    const dir = await site({"a.tsx": "내가-고침"}, {"a.tsx": "가"});
+    await rejects(() => run(dir, tarGz({"a.tsx": "서버것"})), (e: unknown) => {
+        ok(e instanceof DevtoolsError);
+        ok(!/zalkera (push|publish|discard|rollback)/.test(e.humanMessage), `없는 명령을 댔다: ${e.humanMessage}`);
+        ok(/--discard-local/.test(e.humanMessage), "탈출구를 안 알려 준다");
+        return true;
+    });
+});
+
+test("`--verbose` 가 거절 목록에도 닿는다 — 사람이 잘림을 가장 자주 만나는 자리다", async () => {
+    const many = Object.fromEntries(Array.from({length: 15}, (_, i) => [`f${i}.tsx`, "가"]));
+    const dirty = Object.fromEntries(Object.keys(many).map((p) => [p, "내가-고침"]));
+    const dir = await site(dirty, many);
+    const catchIt = (opts: Record<string, unknown>) =>
+        run(dir, tarGz(Object.fromEntries(Object.keys(many).map((p) => [p, "서버것"]))), opts)
+            .then(() => "", (e: DevtoolsError) => e.message);
+    ok(/외 5개/.test(await catchIt({})), "기본이 안 잘렸다");
+    ok(!/외 5개/.test(await catchIt({listAll: true})), "--verbose 인데 잘렸다");
+});
+
+test("🔴 쓰기가 도중에 죽어도 장부는 **옛것 그대로**다 — 이 순서가 재실행의 전제다", async () => {
+    // 심의 실측: 종전 시험은 관용 1 만 재고 있었고, `writeLedger` 를 앞으로 옮겨도 전부 초록이었다.
+    // 여기서는 해제를 실제로 중간에 죽인다 — tar 마지막 항목을 다룰 수 없는 형식으로.
+    const dir = await site({"a.tsx": "가"}, {"a.tsx": "가"});
+    const before = await readFile(join(dir, SYNC_LEDGER_PATH), "utf8");
+    const broken = tarGz({"a.tsx": "새것"}, [["나쁜것", "3", ""]]);
+    await rejects(() => run(dir, broken), DevtoolsError);
+    strictEqual(await readFile(join(dir, SYNC_LEDGER_PATH), "utf8"), before, "죽었는데 장부가 새 판을 선언했다");
+    // 그리고 재실행이 이어받는다 — 이미 옮겨진 파일이 자기 잔해로 스스로를 막지 않는다.
+    strictEqual((await run(dir, tarGz({"a.tsx": "새것"}))).written, 1);
 });

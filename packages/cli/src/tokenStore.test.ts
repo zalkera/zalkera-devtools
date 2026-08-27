@@ -18,6 +18,23 @@ test("🔴 상대 `XDG_CONFIG_HOME` 은 무시한다 — 작업 폴더(=소스 �
     strictEqual(tokenPath({XDG_CONFIG_HOME: ""}, "/home/u"), "/home/u/.config/zalkera/auth.json");
 });
 
+test("🔴 **절대경로여도 홈 밖이면** 무시한다 — `XDG_CONFIG_HOME=$PWD/.config` 는 CI 의 실재 관례다", () => {
+    // 그 값을 그대로 쓰면 refresh 토큰이 소스 폴더 안에 떨어지고, 그 폴더는 zip 으로 유통된다.
+    // 「내 사이트 소스 보내 주세요」 한 번에 발행 권한이 넘어간다.
+    for (const outside of ["/srv/사이트/.config", "/tmp/cfg", "/home/다른사람/.config", "/home/u2/.config"]) {
+        strictEqual(
+            tokenPath({XDG_CONFIG_HOME: outside}, "/home/u"),
+            "/home/u/.config/zalkera/auth.json",
+            `${outside} 를 그대로 썼다`,
+        );
+    }
+});
+
+test("홈 아래 절대경로는 존중한다 — 규율이 아니라 감옥이 되면 안 된다", () => {
+    strictEqual(tokenPath({XDG_CONFIG_HOME: "/home/u/cfg"}, "/home/u"), "/home/u/cfg/zalkera/auth.json");
+    strictEqual(tokenPath({XDG_CONFIG_HOME: "/home/u"}, "/home/u"), "/home/u/zalkera/auth.json");
+});
+
 test("🔴 파일 권한이 0600 이다", async () => {
     const dir = await tempDir("zalkera-token-");
     const path = join(dir, "깊이", "auth.json");

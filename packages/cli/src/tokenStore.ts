@@ -25,18 +25,30 @@
  *    소스 보내 주세요」 한 번으로 발행 권한이 통째로 넘어간다. 그래서 자리는 홈 아래로 고정하고,
  *    호출부가 자리를 정하게 두지 않는다.
  */
-import {chmod, mkdir, readFile, rm, writeFile} from "node:fs/promises";
+import {chmod, readFile, rm} from "node:fs/promises";
 import {homedir} from "node:os";
-import {dirname, join} from "node:path";
-import type {StoredTokens, TokenStore} from "@zalkera/devtools-core";
+import {basename, dirname, isAbsolute, join, resolve, sep} from "node:path";
+import {ensureOwnDir, writeOwnFile, type StoredTokens, type TokenStore} from "@zalkera/devtools-core";
 
-/** 보관 자리. `XDG_CONFIG_HOME` 을 존중하되 **홈 아래로 고정**한다. */
+/**
+ * 보관 자리. `XDG_CONFIG_HOME` 을 존중하되 **홈 아래로 고정**한다.
+ *
+ * 🔴 **절대경로라고 다 받으면 안 된다**(심의 실측). `XDG_CONFIG_HOME=$PWD/.config` 는 CI·devcontainer·
+ *    direnv 에서 실재하는 관례고, 이 도구는 스스로 「스크립트·CI 에서 돌릴 때를 위한 것」이라 적는다.
+ *    그 값을 그대로 쓰면 refresh 토큰이 **소스 폴더 안**에 떨어지고, 그 폴더는 zip 으로 포장돼
+ *    유통되는 경로다 — 「내 사이트 소스 보내 주세요」 한 번에 발행 권한이 넘어간다.
+ *
+ * ⚠ 그래서 판정은 「절대경로인가」가 아니라 **「홈 아래인가」**다. 아니면 조용히 기본 자리로 되돌린다 —
+ *   여기서 던지면 남의 환경 설정 하나로 도구가 아예 안 뜬다.
+ */
 export function tokenPath(env: NodeJS.ProcessEnv = process.env, home = homedir()): string {
+    const fallback = join(home, ".config");
     const base = env.XDG_CONFIG_HOME;
-    // ⚠ 상대 경로는 **쓰지 않는다**(XDG 명세도 절대경로만 유효하다고 적는다). 상대값을 받아들이면
-    //   프로세스의 작업 폴더 — 즉 **소스 폴더** — 아래에 토큰이 떨어진다.
-    const root = base && base.startsWith("/") ? base : join(home, ".config");
-    return join(root, "zalkera", "auth.json");
+    const inside =
+        base !== undefined &&
+        isAbsolute(base) &&
+        (resolve(base) === resolve(home) || resolve(base).startsWith(resolve(home) + sep));
+    return join(inside ? resolve(base!) : fallback, "zalkera", "auth.json");
 }
 
 /** 평문 0600 파일 보관소. */
@@ -78,13 +90,24 @@ export class FileTokenStore implements TokenStore {
     }
 
     async write(tokens: StoredTokens): Promise<void> {
-        await mkdir(dirname(this.path), {recursive: true, mode: 0o700});
-        // ⚠ **권한을 만들 때 준다.** 먼저 쓰고 나중에 `chmod` 하면 그 사이에 0644 로 존재하는 창이
-        //   생기고, 그 창은 다중 사용자 기계에서 실재하는 창이다.
-        await writeFile(this.path, JSON.stringify(tokens), {mode: 0o600});
-        // 파일이 이미 있었으면 `mode` 는 무시된다 — 그래서 한 번 더 죈다.
-        // ⚠ 이 둘은 **짝이다.** 시험은 최종 권한만 잴 수 있어 한쪽만 빼면 안 깨진다(변이 실측).
-        //    그래도 위의 `mode` 를 남기는 이유는 **창을 안 만들기** 위해서다 — 아래 줄에 이르기
+        // ⚠ **조각마다 링크를 본다.** `mkdir(recursive)` 는 이미 있으면 무동작이고 「이미 있다」에
+        //   심링크가 포함된다 — 그러면 토큰이 그 링크가 가리키는 폴더에 씌고 우리는 성공을 보고한다
+        //   (심의 실측). 그리고 쓰기는 `rename` 경계를 지난다: 잎이 **하드링크**면 `lstat` 는 못 보고
+        //   맨 `writeFile` 은 대상에 그대로 쓴다.
+        const dir = await ensureOwnDir(dirname(dirname(this.path)), basename(dirname(this.path)));
+        // ⚠ **만든 뒤에 죈다.** [ensureOwnDir] 은 `mkdir` 기본 모드로 만들고, 그것은 umask 를 타
+        //   보통 0775 다(실측). 만들 때 모드를 줄 손잡이가 그 함수에 없으므로 여기서 명시한다 —
+        //   같은 기계의 다른 사용자가 이 폴더를 들여다볼 이유가 없다.
+        await chmod(dir, 0o700).catch(() => {});
+        await writeOwnFile(this.path, JSON.stringify(tokens), 0o600);
+        // 임시 파일에 준 `mode` 는 `rename` 을 타고 그대로 오지만, **이미 있던 파일을 바꾸는**
+        // 경우에도 확실히 죄기 위해 한 번 더 부른다.
+        // ⚠ 이 둘은 **짝이 아니다.** 아래 `chmod` 는 「이미 있던 헐거운 파일」 시험이 단독으로
+        //    잡고, 위의 `mode` 는 어떤 시험도 단독으로 못 잡는다 — 시험은 **최종 권한**만 잴 수
+        //    있는데 `chmod` 가 그것을 맞춰 놓기 때문이다(심의 재실측 · 재현:
+        //    `node --test --experimental-strip-types packages/cli/src/tokenStore.test.ts` 를
+        //    각 줄을 지운 채로 돌린다 — `mode` 만 지우면 6 통과, `chmod` 만 지우면 1 실패).
+        //    그래도 위의 `mode` 를 남기는 이유는 **창을 안 만들기** 위해서다 — 이 줄에 이르기
         //    전까지 파일이 0644 로 존재하는 순간이 있고, 다중 사용자 기계에서 그 창은 실재한다.
         await chmod(this.path, 0o600);
     }

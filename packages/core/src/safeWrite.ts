@@ -151,6 +151,22 @@ export async function writeOwnFile(path: string, data: string | Uint8Array, mode
             "이 파일은 확장이 만들어 주는 자리입니다. 링크를 지우고 다시 시도해 주세요.",
         );
     }
+    await writeViaRename(path, data, mode);
+}
+
+/**
+ * **`rename` 으로 자리를 바꿔 쓴다.** 고지(`lstat`)는 안 한다 — 부르는 쪽이 이미 했거나, 그 자리의
+ * 문면이 다른 경우를 위한 문이다.
+ *
+ * ⚠ **이것이 경계다.** `lstat` 로 막는 것은 세 가지를 못 한다(형제 [writeOwnFile] KDoc 이 실측으로
+ *   적어 둔 것): ⑴ 하드링크는 그대로 통과해 **대상에 그대로 쓰인다** ⑵ `lstat` 와 쓰기 사이에 자리가
+ *   바뀔 수 있다 ⑶ 막을 자리를 손으로 열거해야 한다. `rename` 은 **디렉터리 항목만** 바꾸므로
+ *   링크를 안 따라가고 열거도 필요 없다.
+ *
+ * ⚠ 해제기의 「골라 덮는」 갈래가 이 문을 지나야 하는 이유가 바로 ⑴이다 — 맨 `writeFile` 이면
+ *   사이트 폴더 안의 하드링크 하나로 **폴더 밖 파일이 서버 내용으로 교체된다**(심의 실측).
+ */
+export async function writeViaRename(path: string, data: string | Uint8Array, mode = 0o644): Promise<void> {
     const tmp = `${path}.zalkera-${randomBytes(6).toString("hex")}.tmp`;
     try {
         // `wx` — 이미 있으면 실패한다. 남의 파일을 우연히 덮지 않는다.

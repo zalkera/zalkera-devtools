@@ -8,7 +8,7 @@
  *
  * ■ 소속은 **폴더가 안다**
  *
- * 사이트 코드는 ⑴ `--tenant`, ⑵ 폴더의 표식(`.zalkera/source.json`), ⑶ 장부(`sync.json`) 순으로
+ * 사이트 코드는 ⑴ `--site`, ⑵ 폴더의 표식(`.zalkera/source.json`), ⑶ 장부(`sync.json`) 순으로
  * 찾는다. 셋 다 없으면 **묻지 않고 멈춘다** — 아무 사이트나 골라 주면 남의 사이트에 올린다.
  */
 import {readFileSync} from "node:fs";
@@ -71,6 +71,17 @@ export async function tenantOf(folder: string, explicit?: string): Promise<strin
     if (mark) return mark.tenant;
     const text = await readFile(join(folder, SYNC_LEDGER_PATH), "utf8").catch(() => null);
     return text === null ? null : (parseSyncLedger(text)?.tenant ?? null);
+}
+
+/**
+ * **인증만** 세운다 — 사이트 소속을 안 묻는다.
+ *
+ * `login` 이 이 문을 쓴다. 소속을 먼저 물으면 빈 폴더에서 처음 쓰는 사람이 로그인조차 못 하고,
+ * 정작 소속을 고르려면 로그인이 먼저다.
+ */
+export async function openAuth(options: ContextOptions = {}): Promise<{auth: AuthConfig; store: TokenStore}> {
+    const handshake = await fetchHandshake(serverUrlOf(options.env ?? process.env), version());
+    return {auth: handshake.auth, store: options.store ?? new FileTokenStore()};
 }
 
 /** 명령 하나가 쓸 것을 모두 세운다. */
