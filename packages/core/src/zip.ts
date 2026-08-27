@@ -447,7 +447,37 @@ export function isExcludedEntry(entryPath: string): boolean {
     // 이름 기준 제외는 **어느 층에 있든** 걸린다 — 뿌리의 `node_modules` 만 보면 중첩된 것이 샌다.
     const segments = path.split("/").filter((s) => s !== "");
     if (segments.some((segment) => ALWAYS_EXCLUDED.has(segment))) return true;
-    return segments.some((segment) => isSecretFile(segment));
+    // 🔴 **마지막 조각만 파일이다.** 앞 조각은 전부 폴더인데 종전에는 전부 파일로 물었고, 그래서
+    //    `.env.example` 이라는 **폴더**가 서식 예외를 받아 그 아래가 통째로 통과했다(심의 실측:
+    //    `.env.sample/keys.txt` 에 담긴 라이브 열쇠가 그대로 실렸다). 형제 `packProject` 는 이미
+    //    `isDirectory` 를 넘기고 있었고 이 자리만 안 넘겼다.
+    return segments.some((segment, at) => isSecretFile(segment, at < segments.length - 1));
+}
+
+/**
+ * **이름으로 서식 예외를 받은 파일이 그 전제를 깨뜨렸는가.** 깨뜨렸으면 사유, 아니면 `null`.
+ *
+ * ■ 왜 이름 예외에 내용 문턱이 필요한가
+ *
+ * 서식(`.env.example`)을 통과시킨 근거는 「값이 없다」이다. 값이 들어 있으면 그 전제가 깨진 것이고,
+ * 그 파일은 이름만 서식인 **비밀 파일**이다. 막지 말고 **빼고 이름을 댄다** — 규칙을 느슨하게 하는
+ * 쪽이 더 나쁘고, 조용히 빼는 쪽도 더 나쁘다.
+ *
+ * ⚠ **스캔 상한을 넘는 것도 전제가 깨진 것이다.** 앞부분만 보고 전체를 실으면 못 본 뒤쪽이 그대로
+ *   나간다(심의 실증). 서식치고 큰 것은 서식이 아니다.
+ *
+ * ⚠ **이 판정을 두 벌로 두지 마라.** zip 레인(`packProject`)과 올리기 레인(`push` 의 `bodyOf`)이
+ *   같은 폴더를 다르게 다루면, 한쪽으로는 막히고 다른 쪽으로는 나가는 비밀이 생긴다 —
+ *   실제로 그랬다(심의 실측: 채워 넣은 `.env.example` 이 zip 에서는 빠지고 push 로는 나갔다).
+ *
+ * @param name 파일 이름(경로 아님 — 서식 판정은 이름으로 한다).
+ */
+export function templateBreach(name: string, data: Buffer): string | null {
+    if (!isValueLessTemplate(name.toLowerCase())) return null;
+    if (data.byteLength > TEMPLATE_SCAN_BYTES) return "서식치고 너무 큽니다";
+    const text = decodeTemplate(data);
+    if (text === null) return "글자로 읽히지 않습니다";
+    return templateHoldsSecret(text);
 }
 
 /** 프로젝트를 zip 으로 묶는다. 제외 규칙은 위 목록 + 호출부 추가분. */
@@ -519,21 +549,10 @@ export async function packProject(options: PackOptions): Promise<PackResult> {
                 // ⚠ **이름으로 받은 예외에 내용 문턱을 단다.** 서식은 「값이 없어」 허용한 것이므로,
                 //    값이 들어 있으면 그 전제가 깨진 것이다. 막지 말고 **빼고 이름을 댄다** —
                 //    규칙을 느슨하게 하는 쪽이 더 나쁘고, 조용히 빼는 쪽도 더 나쁘다.
-                if (isValueLessTemplate(item.name.toLowerCase())) {
-                    // ⚠ **전제가 깨지면 싣지 않는다.** 예외의 근거는 「서식은 작고 값이 없다」이다.
-                    //    스캔 상한을 넘는 파일은 앞부분만 보고 **전체를 싣게** 되므로, 못 본 뒤쪽이
-                    //    그대로 나간다(심의 실증). 서식치고 큰 것은 서식이 아니다.
-                    const text = info.size > TEMPLATE_SCAN_BYTES ? null : decodeTemplate(data);
-                    const found =
-                        text === null
-                            ? info.size > TEMPLATE_SCAN_BYTES
-                                ? "서식치고 너무 큽니다"
-                                : "글자로 읽히지 않습니다"
-                            : templateHoldsSecret(text);
-                    if (found !== null) {
-                        dropped.push(`${relative(options.projectDir, full)} (${found})`);
-                        continue;
-                    }
+                const breach = templateBreach(item.name, data);
+                if (breach !== null) {
+                    dropped.push(`${relative(options.projectDir, full)} (${breach})`);
+                    continue;
                 }
                 entries.push({
                     path: relative(options.projectDir, full).split(sep).join("/"),

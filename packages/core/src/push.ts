@@ -30,25 +30,37 @@
  * **「아마 올라갔을 겁니다」라고 말하지 않는다.** 세대를 모름으로 두고 끝내고, 다음 실행이
  * `GET /draft/files` 로 화해한다([reconcile]).
  */
-import {readFile} from "node:fs/promises";
-import {join, resolve} from "node:path";
+import {readFile, stat} from "node:fs/promises";
+import {basename, join, resolve} from "node:path";
 import type {DraftEdit, DraftFiles, ZalkeraApi} from "./api.ts";
 import {DevtoolsError} from "./errors.ts";
+import {plainNotice} from "./notice.ts";
 import {readLedger, writeLedger} from "./pull.ts";
 import {PATH_LIST_CAP, trimPaths} from "./pullPlan.ts";
 import {planPush, type DraftView, type PushEdit, type PushPlan} from "./pushPlan.ts";
 import {SYNC_LEDGER_FORMAT, type SyncLedger} from "./syncLedger.ts";
 import {hashWorkdir} from "./workdir.ts";
+import {templateBreach} from "./zip.ts";
 
 /**
- * 상한 셋. **서버 값과 같은 수**다(`SiteDraftService` 의 `MAX_DRAFT_ENTRIES`·`MAX_FILE_BYTES`·
- * `MAX_DRAFT_BYTES`).
+ * 상한 — **가장 좁은 실물**에 맞춘다.
  *
- * ⚠ 여기서 먼저 재는 이유는 **왕복을 아끼려는 것이 아니다.** 16MiB 를 실어 보내고 거절당하면 그
- *   바이트가 이미 회선을 지났고, 상용 파트너 평면의 본문 상한 필터가 그것을 세고 있다. 그리고
- *   거절 문면이 「무엇을 하라」를 말하려면 **어느 파일이 큰지** 알아야 하는데, 그것은 여기만 안다.
- * ⚠ 서버가 값을 바꾸면 여기가 낡는다. 낡으면 **우리 쪽이 더 좁아** 정상 요청을 막거나, 더 넓어
- *   서버가 거절한다 — 둘 다 서버 문면이 최종 판정이므로 조용한 오작동은 아니다.
+ * ■ 서버에는 상한이 여러 겹이고, 요청이 먼저 만나는 것은 16MiB 가 아니다
+ *
+ * | 겹 | 값 | 무엇을 재나 |
+ * |---|---|---|
+ * | `RequestBodyLimitFilter.DEFAULT_MAX_BYTES` | **4MiB** | `/api/partner` **전 경로의 HTTP 본문** |
+ * | `SiteDraftService.MAX_DRAFT_BYTES` | 16MiB | 요청 총량 **그리고** 드래프트 총량 |
+ * | `SiteDraftService.MAX_FILE_BYTES` | 1MiB | 파일 하나 |
+ * | `SiteDraftService.MAX_DRAFT_ENTRIES` | 500 | 요청 개수 **그리고** 드래프트 총 항목 수 |
+ *
+ * ⚠ **16MiB 로 재면 그 선에 닿지 않는다**(심의 실측). 4–16MiB 구간은 필터가 `sendError(413)` 로
+ *   끊는데 그 응답에는 `message` 도 `errorCode` 도 없어, 사람은 「서버가 요청을 거절했습니다
+ *   (HTTP 413)」만 보고 **무엇을 하면 되는지 모른다.** 900KB 파일 다섯이면 닿는다.
+ *
+ * ⚠ **드래프트 쪽 상한은 여기서 못 잰다.** 이미 400항목인 드래프트에 200개를 올리면 우리는
+ *   통과시키고 서버가 거절한다 — 로컬은 드래프트 총량을 모른다. 그때 문면은 서버 것이고,
+ *   그것이 정직한 상태다.
  */
 export const MAX_PUSH_ENTRIES = 500;
 /**
@@ -58,8 +70,19 @@ export const MAX_PUSH_ENTRIES = 500;
  *   거짓이 된다(실측: 배제 + 선행조건이 겹쳐 세 번 나갔다).
  */
 export const MAX_PUSH_ATTEMPTS = 3;
+
+/** 서버가 준 미리보기 주소의 표시 상한. 주소가 이보다 길면 그것은 주소가 아니라 다른 것이다. */
+const MAX_PREVIEW_URL = 2048;
+/** 서버가 준 안내 문구의 표시 상한. 형제 `api.ts` 의 오류 문면 상한과 같은 뜻이다. */
+const MAX_WARNING = 300;
 export const MAX_PUSH_FILE_BYTES = 1024 * 1024;
-export const MAX_PUSH_BYTES = 16 * 1024 * 1024;
+/**
+ * 한 요청에 실을 **원본 바이트** 총량. 4MiB(HTTP 본문 상한)에서 봉투 몫을 뺀 값이다.
+ *
+ * ⚠ **원본 바이트는 요청 크기가 아니다.** JSON 이스케이프·경로·기준 해시가 더 붙는다. 여기서
+ *   조금 좁게 잡아 **413 이라는 알 수 없는 벽** 대신 우리 문면이 나오게 한다.
+ */
+export const MAX_PUSH_BYTES = 3 * 1024 * 1024;
 
 export interface PushOptions {
     api: ZalkeraApi;
@@ -77,7 +100,13 @@ export interface PushOptions {
 }
 
 export interface PushResult {
-    /** 실제로 보낸 편집 수. 0 이면 이미 반영돼 있었다. */
+    /**
+     * 실제로 보낸 편집 수.
+     *
+     * ⚠ **0 이 곧 「폴더와 사이트가 같다」는 아니다.** [droppedByServer] 가 비어 있지 않으면 그
+     *   경로들은 **올라가지 않았고** 폴더와 사이트는 다르다. 부르는 쪽은 둘을 함께 보고 말해야 한다 —
+     *   따로 읽으면 「같습니다」와 「N개를 빼고 보냈습니다」가 나란히 찍힌다(심의 실측).
+     */
     sent: number;
     /** 그중 삭제. */
     removed: number;
@@ -108,6 +137,18 @@ export async function pushSiteSource(options: PushOptions): Promise<PushResult> 
 
     report("사이트 쪽 상태를 확인하는 중입니다…");
     let draft = await readDraft(options.api);
+    // 🔴 **판이 움직였는지 본다.** 이 폴더의 기준 판은 장부가 정하는데, 그 사이 남이 발행하면
+    //    장부는 옛 판을 가리킨 채로 남는다 — 그러면 `effectiveSha` 의 셋째 줄(판 매니페스트)이
+    //    **낡은 값**이 되고, 보낼 것이 없다는 판정이 「폴더와 사이트가 같다」로 잘못 읽힌다.
+    //    그것이 🔴1(거짓 동기화)의 판 쪽 갈래다(심의 실측).
+    //
+    // ⚠ **드래프트의 `baseRevisionNo` 로는 못 잰다.** 편집이 없으면 그 칸이 `null` 이고(백엔드
+    //   `draftFiles` 실물), 판만 움직인 경우가 정확히 그 형상이다. 활성 판을 따로 묻는다.
+    // ⚠ **못 읽으면 올리지 않는다.** 기준 판은 모든 선행조건의 바탕이라, 그것이 지금 것인지
+    //   모르는 채 보내면 낡은 매니페스트 위에서 계산한 값을 보내게 된다. 「모른다」가 「같다」로
+    //   변하는 자리를 하나도 남기지 않는다.
+    const active = await activeRevisionNo(options.api);
+    if (active > ledger.base.revisionNo) throw baseMoved(ledger.base.revisionNo, active);
     const reconciled = reconcile(ledger, draft);
 
     const local = await hashWorkdir(root);
@@ -132,7 +173,7 @@ export async function pushSiteSource(options: PushOptions): Promise<PushResult> 
         };
     }
 
-    requireWithinLimits(root, plan.edits);
+    requireWithinLimits(plan.edits);
     report(`${plan.edits.length}개를 올리는 중입니다…`);
 
     const dropped: string[] = [];
@@ -143,9 +184,21 @@ export async function pushSiteSource(options: PushOptions): Promise<PushResult> 
     //   요청이 세 번** 나갔다(실측). 「재시도는 한 번」이라 적어 두고 그것이 거짓이었다.
     //   여기서는 상한이 하나이고, 그 값이 곧 계약이다.
     for (let round = 0; round < MAX_PUSH_ATTEMPTS; round += 1) {
-        requireWithinLimits(root, plan.edits);
+        requireWithinLimits(plan.edits);
         sent = await attempt(options.api, root, plan.edits, report);
         if (sent.kind === "ok") break;
+
+        if (sent.kind === "lost") {
+            // 🔴 **「모름」을 장부에 적고 끝낸다.** 재시도하지 않는다 — 요청이 닿았는지 모르므로
+            //    다시 보내면 같은 편집을 두 번 얹을 수 있다. 다음 실행이 화해한다([reconcile]).
+            //    `mine` 은 **보내려던 것**으로 적는다: 화해가 대조할 대상이 그것이다.
+            //    이 줄이 없으면 `server.generation` 이 지난 세대로 남고, 다음 실행의 화해가
+            //    `ledger.server !== null` 에서 곧바로 되돌아간다 — 문은 있는데 못 부른다(심의 실측).
+            const attempted: Record<string, string | null> = {};
+            for (const edit of plan.edits) attempted[edit.path] = edit.sha256;
+            await writeLedger(root, {...ledger, server: null, mine: attempted});
+            throw responseLost(sent.error!);
+        }
 
         // ⚠ **상한이 두 군데다 — 일부러 그렇다.** 반복 조건이 경계이고, 이 줄은 **마지막 회전에서
         //   쓸데없는 재조회를 안 하려는** 것이다(선행조건 갈래는 여기서 서버를 다시 읽는다).
@@ -174,7 +227,8 @@ export async function pushSiteSource(options: PushOptions): Promise<PushResult> 
             // ⚠ **가드를 다시 지난다.** 안 지나면 재시도가 곧 「받아 적고 다시 보내는」 세탁 경로다.
             requireSeen(plan, options);
             plan = {...plan, edits: plan.edits.filter((edit) => !dropped.includes(edit.path))};
-            retried = true;
+            // ⚠ **보낸 뒤에 참이 된다.** 여기서 세우면 아래 조기 반환 갈래(보낼 것이 없어짐)에서도
+            //   「다시 보냈습니다」가 찍히는데, 그 갈래에서는 **두 번째 요청이 안 나간다**(심의 실측).
             if (plan.edits.length === 0) {
                 const written = await writeLedger(root, {
                     ...ledger,
@@ -186,12 +240,14 @@ export async function pushSiteSource(options: PushOptions): Promise<PushResult> 
                     removed: 0,
                     generation: draft.generation,
                     droppedByServer: dropped,
-                    retriedAfterConflict: true,
+                    // 두 번째 요청이 안 나갔다 — 재계산은 했지만 **다시 보내지는 않았다.**
+                    retriedAfterConflict: false,
                     reconciled,
                     previewUrl: null,
                     warning: written ? null : LEDGER_WRITE_FAILED,
                 };
             }
+            retried = true;
             continue;
         }
 
@@ -247,6 +303,29 @@ async function readDraft(api: ZalkeraApi): Promise<DraftFiles> {
 
 const viewOf = (draft: DraftFiles): DraftView => ({changed: draft.changed, deleted: draft.deleted});
 
+/** 지금 켜진 판. **못 읽으면 던진다** — 「모른다」를 「같다」로 바꾸지 않는다. */
+async function activeRevisionNo(api: ZalkeraApi): Promise<number> {
+    const rows = await api.listRevisions(REVISION_SCAN).catch(() => null);
+    const active = rows?.find((row) => row.isActive)?.revisionNo;
+    if (active === undefined) {
+        throw new DevtoolsError(
+            "SERVER_UNREADABLE_DRAFT",
+            "지금 사이트에 켜져 있는 버전을 확인하지 못해 아무것도 올리지 않았습니다.",
+            "잠시 뒤 다시 시도해 주세요.",
+        );
+    }
+    return active;
+}
+
+/**
+ * 활성 판을 찾으려고 훑는 목록 길이.
+ *
+ * ⚠ 활성 판이 **목록 밖**일 수 있다: 되돌리기로 옛 판을 켜 두고 그 위로 새 판을 여럿 발행하면
+ *   활성이 뒤로 밀린다. 그때 [activeRevisionNo] 는 못 찾고 **거절**한다 — 못 찾은 것을
+ *   「안 움직였다」로 읽지 않는 쪽이 안전하다(그 거절의 문면이 「잠시 뒤 다시」라 사람을 가두지도 않는다).
+ */
+const REVISION_SCAN = 50;
+
 /**
  * 지난 실행의 **응답 유실을 화해한다**(§2.3).
  *
@@ -280,8 +359,14 @@ function requireSeen(plan: PushPlan, options: PushOptions): void {
     );
 }
 
-/** 상한 셋을 **보내기 전에** 잰다. 어느 파일이 걸렸는지 말한다. */
-function requireWithinLimits(root: string, edits: readonly PushEdit[]): void {
+/**
+ * **개수** 상한을 보내기 전에 잰다.
+ *
+ * ⚠ 크기 상한 둘(`MAX_PUSH_FILE_BYTES`·`MAX_PUSH_BYTES`)은 여기가 아니라 [bodyOf] 에 있다 —
+ *   계획 단계는 sha 만 알고 **바이트 수를 모른다.** 세 상한을 한자리에 모으려면 계획 단계가
+ *   파일을 다 읽어야 하는데, 그러면 개수 상한이 그 뒤에 걸려 읽기가 헛일이 된다.
+ */
+function requireWithinLimits(edits: readonly PushEdit[]): void {
     if (edits.length > MAX_PUSH_ENTRIES) {
         throw new DevtoolsError(
             "PUSH_TOO_LARGE",
@@ -292,9 +377,14 @@ function requireWithinLimits(root: string, edits: readonly PushEdit[]): void {
 }
 
 /**
- * 한 번 보낸다. **던지지 않고** 결과를 갈라 돌려준다 — 부르는 쪽이 재시도를 정한다.
+ * 한 번 보낸다. **재시도할 수 있는 거절은 던지지 않고 갈라 돌려준다** — 부르는 쪽이 정한다.
  *
- * ⚠ 재시도 판정을 여기 두면 「1회」가 자리마다 달라진다.
+ * ⚠ 재시도 판정을 여기 두면 상한이 자리마다 달라진다([MAX_PUSH_ATTEMPTS]).
+ *
+ * ⚠ **던지는 자리는 있다.** 다시 보내도 결과가 같을 것들이다:
+ *   ⑴ [bodyOf] 의 크기 상한·이진 파일 거절 ⑵ `DevtoolsError` 가 아닌 예외
+ *   ⑶ **응답 유실**(`SERVER_UNREACHABLE`) — 이것은 거절이 아니라 「모름」이라 재시도하면 같은 편집을
+ *      두 번 얹을 수 있다. 끝내고 다음 실행이 화해한다([reconcile]).
  */
 async function attempt(
     api: ZalkeraApi,
@@ -308,14 +398,21 @@ async function attempt(
         return {
             kind: "ok",
             generation: result.generation,
-            previewUrl: result.previewUrl,
-            warning: result.warning,
+            // 🔴 **서버가 정한 문자열은 소독을 지난다.** 같은 응답의 오류 갈래는 이미 지나는데
+            //    성공 갈래의 이 둘만 안 지났다 — 그리고 이 둘은 `stdout` 으로 나간다. 제어문자가
+            //    살아 있으면 서버가 **커서를 올려 방금 찍은 줄을 지우고** 다른 문장을 앉힐 수 있다
+            //    (심의 실측). `plainNotice` 가 제어문자를 걷는다.
+            previewUrl: plainNotice(result.previewUrl ?? "", MAX_PREVIEW_URL) || null,
+            warning: plainNotice(result.warning ?? "", MAX_WARNING) || null,
             rejectedPaths: [],
         };
     } catch (error) {
         if (!(error instanceof DevtoolsError)) throw error;
         // 응답을 못 받은 것은 **거절이 아니다.** 「모름」으로 끝내고 다음 실행이 화해한다.
-        if (error.code === "SERVER_UNREACHABLE") throw responseLost(error);
+        // 🔴 **여기서 던지면 부르는 쪽이 장부에 「모름」을 못 적는다.** 갈래로 돌려준다.
+        if (error.code === "SERVER_UNREACHABLE") {
+            return {kind: "lost", error, rejectedPaths: [], generation: null, previewUrl: null, warning: null};
+        }
         const kind =
             error.serverCode === "DRAFT_PRECONDITION_FAILED"
                 ? "conflict"
@@ -330,7 +427,7 @@ async function attempt(
 }
 
 interface Attempt {
-    kind: "ok" | "conflict" | "excluded" | "other";
+    kind: "ok" | "conflict" | "excluded" | "lost" | "other";
     generation: string | null;
     previewUrl: string | null;
     warning: string | null;
@@ -352,12 +449,41 @@ async function bodyOf(root: string, edits: readonly PushEdit[]): Promise<DraftEd
             body.push({path: edit.path, remove: true, ...(edit.baseSha256 === null ? {} : {baseSha256: edit.baseSha256})});
             continue;
         }
-        const raw = await readFile(join(root, edit.path));
-        if (raw.byteLength > MAX_PUSH_FILE_BYTES) {
+        // ⚠ **읽기 전에 잰다.** 다 읽고 나서 재면 상한이 「메모리 예산」으로는 전혀 안 선다 —
+        //    300MB 파일 하나가 1MiB 상한에 걸려 거절되기까지 실측 VmHWM 423MB 였다(심의).
+        //    그리고 2GiB 를 넘으면 `readFile` 이 먼저 `ERR_FS_FILE_TOO_LARGE` 로 죽어, 준비해 둔
+        //    한국어 문면 대신 **영문 내부 오류**가 그대로 터미널에 나갔다.
+        //    형제 `packProject` 는 이미 `stat` 으로 먼저 재고 있었다.
+        const size = (await stat(join(root, edit.path))).size;
+        if (size > MAX_PUSH_FILE_BYTES) {
             throw new DevtoolsError(
                 "PUSH_TOO_LARGE",
-                `파일 하나가 너무 큽니다: ${edit.path} (${Math.round(raw.byteLength / 1024)}KB · 상한 ${MAX_PUSH_FILE_BYTES / 1024}KB).`,
+                `파일 하나가 너무 큽니다: ${edit.path} (${Math.round(size / 1024)}KB · 상한 ${MAX_PUSH_FILE_BYTES / 1024}KB).`,
                 "동영상·원본 이미지·빌드 산출물이 소스 폴더에 들어 있지 않은지 확인해 주세요.",
+            );
+        }
+        if (total + size > MAX_PUSH_BYTES) {
+            throw new DevtoolsError(
+                "PUSH_TOO_LARGE",
+                `한 번에 올릴 수 있는 총량(${MAX_PUSH_BYTES / 1024 / 1024}MB)을 넘었습니다.`,
+                "나눠 보내면 사이트 쪽에 반쪽만 서는 상태가 생깁니다 — 콘솔에서 소스를 통째로 올려 주세요.",
+            );
+        }
+        const raw = await readFile(join(root, edit.path));
+        // 🔴 **이름만 서식인 비밀 파일을 안 보낸다.** `.env.example` 은 「값이 없다」는 전제로
+        //    이름 예외를 받는데, 값이 들어 있으면 그 전제가 깨진 것이다. zip 레인은 이 문턱을
+        //    이미 달고 있었고 이 레인만 없었다 — 같은 폴더가 한쪽으로는 막히고 한쪽으로는
+        //    나갔다(심의 실측: `oqsk_` 라이브 키가 그대로 올라갔다).
+        //
+        //    ⚠ **여기서는 빼지 않고 거절한다.** zip 레인은 「묶는 김에 뺀다」라 빼고 이름을 대지만,
+        //    올리기는 사람이 **그 파일을 고쳐서 부른 것**일 수 있다. 조용히 빼면 「올렸는데 안 바뀐다」가
+        //    되고, 그 원인이 비밀이라는 사실은 아무 데도 안 보인다.
+        const breach = templateBreach(basename(edit.path), raw);
+        if (breach !== null) {
+            throw new DevtoolsError(
+                "PUSH_SECRET_TEMPLATE",
+                `${edit.path} 에 실제 값이 들어 있어 올리지 않았습니다(${breach}).`,
+                "`.env.example` 같은 서식 파일은 값을 비워 두어야 올라갑니다. 실제 값은 콘솔의 환경변수 화면에서 관리해 주세요.",
             );
         }
         // 🔴 **글자로 되돌아오지 않는 바이트는 보내지 않는다.** 이 문의 본문은 JSON 문자열이라
@@ -374,14 +500,7 @@ async function bodyOf(root: string, edits: readonly PushEdit[]): Promise<DraftEd
                 "이 방법은 글자로 된 파일만 다룹니다. 그림·글꼴·압축 파일이 바뀌었으면 콘솔에서 소스를 통째로 올려 주세요 — 그러면 그 파일들도 그대로 갑니다.",
             );
         }
-        total += raw.byteLength;
-        if (total > MAX_PUSH_BYTES) {
-            throw new DevtoolsError(
-                "PUSH_TOO_LARGE",
-                `한 번에 올릴 수 있는 총량(${MAX_PUSH_BYTES / 1024 / 1024}MB)을 넘었습니다.`,
-                "나눠 보내면 사이트 쪽에 반쪽만 서는 상태가 생깁니다 — 콘솔에서 소스를 통째로 올려 주세요.",
-            );
-        }
+        total += size;
         body.push({
             path: edit.path,
             content: raw.toString("utf8"),
@@ -417,4 +536,21 @@ const foreignLedger = (tenant: string) =>
 /** 반복문이 상한 안에서 반드시 `ok` 로 끝나거나 던지므로 여기 오지 않는다. */
 function unreachable(): DevtoolsError {
     return new DevtoolsError("SERVER_REJECTED", "올리기가 끝나지 않았습니다.", "다시 시도해 주세요.");
+}
+
+/**
+ * 기준 판이 움직였다 — **올리기 전에 받아야 한다.**
+ *
+ * ⚠ 사실만 적고 끊지 않는다(§2.9). 「기준이 12에서 14로 움직였습니다」로 끝내면 사람은 다음 걸음을
+ *   못 찾고, 그 자리에서 폴더를 지우고 다시 받는 길을 스스로 만들어 낸다.
+ *
+ * ⚠ **막는 이유는 값이 낡아서다.** 판이 움직이면 이 폴더의 기준 매니페스트가 낡고, 그 위에서
+ *   「보낼 것이 없다」가 나오면 그것은 「같다」가 아니라 **모른다**이다.
+ */
+function baseMoved(mine: number, now: number): DevtoolsError {
+    return new DevtoolsError(
+        "PUSH_BASE_MOVED",
+        `기준이 ${mine}판에서 ${now}판으로 움직여 아무것도 올리지 않았습니다.`,
+        `이 폴더를 ${now}판에 맞추려면 \`zalkera pull\` 을 먼저 실행하세요. 지금 올리면 ${mine}판을 보고 고친 내용이 ${now}판 위에 얹힙니다.`,
+    );
 }

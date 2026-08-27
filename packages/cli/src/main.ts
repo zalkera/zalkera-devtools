@@ -173,10 +173,14 @@ async function main(argv: readonly string[]): Promise<number> {
             } else if (result.reconciled === "not-applied") {
                 parts.push("지난번에 올린 것이 사이트 쪽에 없어 이번에 다시 보냈습니다.");
             }
+            // ⚠ **「같습니다」는 뺀 것이 없을 때만 말한다.** 뺀 것이 있으면 폴더와 사이트는 다르다 —
+            //    두 줄을 따로 찍으면 「같습니다」 바로 밑에 「N개를 빼고 보냈습니다」가 온다(심의 실측).
             parts.push(
-                result.sent === 0
-                    ? "올릴 것이 없습니다 — 이 폴더의 내용이 사이트 쪽과 같습니다."
-                    : `${result.sent}개를 올렸습니다(그중 지운 것 ${result.removed}개).`,
+                result.sent > 0
+                    ? `${result.sent}개를 올렸습니다(그중 지운 것 ${result.removed}개).`
+                    : result.droppedByServer.length > 0
+                      ? "올린 것이 없습니다 — 달라진 것이 모두 사이트가 받지 않는 경로였습니다."
+                      : "올릴 것이 없습니다 — 이 폴더의 내용이 사이트 쪽과 같습니다.",
             );
             if (result.retriedAfterConflict) {
                 parts.push("올리는 사이에 사이트 쪽이 달라져 다시 읽고 한 번 더 보냈습니다.");

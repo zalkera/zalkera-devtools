@@ -59,10 +59,10 @@ export interface PushPlan {
     /** 서버에 보낼 편집들. 비어 있으면 **이미 반영된 것**이다. */
     edits: PushEdit[];
     /**
-     * 🔴 **내가 안 받은 남의 편집을 되돌리게 되는 경로들.**
+     * 🔴 **내가 안 본 남의 편집을 덮게 되는 경로들.**
      *
-     * 판정은 「서버 편집이 이 경로를 건드렸는데, 내 작업본은 **판 그대로**」다. 판 그대로라는 것은
-     * 내가 그 편집을 **본 적이 없다**는 뜻이다(받기는 판 tar 를 받지 편집을 받지 않는다).
+     * 판정은 「서버 편집이 이 경로를 건드렸는데, 내 작업본이 **그 내용이 아니다**」다. 내가 그
+     * 내용을 들고 있다는 증거는 sha 일치 하나뿐이고, 받기는 **판**을 받지 편집을 받지 않는다.
      *
      * ⚠ **선행조건이 이것을 못 막는다.** 내 `baseSha256` 은 서버 조회에서 나오므로 CAS 는
      *   **정당하게 통과**하고, 남이 콘솔에서 고쳐 둔 것이 조용히 판 값으로 되돌아간다.
@@ -116,15 +116,24 @@ export function planPush(input: PushInput): PushPlan {
         edits.push({path, sha256: here, baseSha256: now});
     }
 
-    // 🔴 **안 본 편집을 되돌리는 경로**를 따로 센다. 판정은 「편집이 건드렸는데 내 작업본은 판 그대로」다.
+    // 🔴 **안 본 편집을 덮는 경로**를 따로 센다.
+    //
+    // 판정은 「편집이 건드렸는데 **그 내용을 내가 안 들고 있다**」다. 들고 있다는 증거는 하나뿐이다:
+    // 내 작업본의 sha 가 편집의 sha 와 **같다**. 그것이 아니면 나는 그 내용을 본 적이 없다.
+    //
+    // ⚠ **「내 작업본이 판 그대로일 때만」으로 좁히면 안 된다**(심의 실측). 그러면 「남도 고치고
+    //   나도 고친」 경우가 빠지는데, 그 경우야말로 남의 편집이 확실히 사라지는 자리다. 그리고 내
+    //   `baseSha256` 은 서버 조회에서 나오므로 CAS 가 정당하게 통과한다 — **sha 만 받아 적고 다시
+    //   보내는** 바로 그 형상이다(memo183 🟠4 가 서버 쪽에서 막은 것을 우리가 되살리는 꼴).
+    //
+    // ⚠ 대가를 정직하게 적는다: 받기는 **판**을 받지 편집을 안 받으므로, 남이 편집한 경로는 명시
+    //   동의 없이는 못 올린다. 내가 올린 편집은 그 다음 회차에 sha 가 같아 안 걸린다.
     for (const path of paths) {
         const touched =
             draft.changed.some((row) => row.path === path) || draft.deleted.includes(path);
         if (!touched) continue;
-        const atBase = base[path]?.sha256 ?? null;
         const here = local[path]?.sha256 ?? null;
-        // 판 그대로라는 것은 그 편집을 **본 적이 없다**는 뜻이다 — 받기는 판을 받지 편집을 안 받는다.
-        if (here === atBase && here !== effectiveSha(base, draft, path)) unseen.push(path);
+        if (here !== effectiveSha(base, draft, path)) unseen.push(path);
     }
 
     return {edits, unseen: unseen.sort()};

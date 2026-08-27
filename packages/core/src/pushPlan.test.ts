@@ -72,14 +72,38 @@ test("🔴 남이 지운 것을 되살리는 경로도 짚는다", () => {
     deepEqual(plan.unseen, ["a.tsx"]);
 });
 
-test("내가 고쳤으면 «안 본 것»이 아니다 — 그것은 내 뜻이다", () => {
+test("🔴 남도 고치고 나도 고쳤으면 **그것이 가장 위험한 경우다** — 여기서 안 걸리면 안 된다", () => {
+    // 종전에는 「내 작업본이 판 그대로일 때만」으로 좁혀 이 경우가 빠졌다(심의 실측). 그런데
+    // 이 경우야말로 남의 편집이 확실히 사라진다 — 그리고 내 `baseSha256` 이 서버 조회값이라
+    // CAS 는 정당하게 통과한다. sha 만 받아 적고 다시 보내는 바로 그 형상이다.
     const plan = planPush({
         base: {"a.tsx": f("판")},
         draft: draft({changed: [{path: "a.tsx", sha256: "남이-고침"}]}),
         local: {"a.tsx": l("내가-고침")},
     });
-    deepEqual(plan.unseen, [], "내 편집을 남의 것으로 셌다");
-    deepEqual(plan.edits, [{path: "a.tsx", sha256: "내가-고침", baseSha256: "남이-고침"}]);
+    deepEqual(plan.unseen, ["a.tsx"], "남의 편집을 덮는데 안 걸렸다");
+});
+
+test("그 내용을 **들고 있으면** 안 걸린다 — 증거는 sha 일치 하나뿐이다", () => {
+    const plan = planPush({
+        base: {"a.tsx": f("판"), "b.tsx": f("판b")},
+        draft: draft({changed: [{path: "a.tsx", sha256: "편집"}]}),
+        local: {"a.tsx": l("편집"), "b.tsx": l("내가-고침")},
+    });
+    deepEqual(plan.unseen, [], "들고 있는 내용을 못 봤다고 셌다");
+    deepEqual(plan.edits, [{path: "b.tsx", sha256: "내가-고침", baseSha256: "판b"}]);
+});
+
+test("🔴 내가 올린 편집은 다음 회차에 안 걸린다 — 안 그러면 두 번째 올리기가 영영 막힌다", () => {
+    // push 가 성공하면 서버 편집의 sha 가 내 작업본과 같아진다. 그 뒤 다른 파일을 고쳐 올릴 때
+    // 앞서 올린 경로가 「안 본 것」으로 잡히면 이 도구는 한 번밖에 못 쓴다.
+    const plan = planPush({
+        base: {"a.tsx": f("판"), "b.tsx": f("판b")},
+        draft: draft({changed: [{path: "a.tsx", sha256: "내가-올린것"}]}),
+        local: {"a.tsx": l("내가-올린것"), "b.tsx": l("이번에-고침")},
+    });
+    deepEqual(plan.unseen, []);
+    deepEqual(plan.edits.map((e) => e.path), ["b.tsx"]);
 });
 
 test("편집을 이미 받아 둔 경로는 «안 본 것»이 아니다", () => {

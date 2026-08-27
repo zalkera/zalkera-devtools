@@ -15,6 +15,8 @@ const sha = (s: string) => createHash("sha256").update(s).digest("hex");
 function server(opts: {
     draft?: {changed?: Array<{path: string; sha256: string}>; deleted?: string[]; generation?: string | null; stranded?: boolean} | "unreadable";
     replies?: Array<{generation?: string | null; throw?: DevtoolsError}>;
+    /** 지금 켜진 판. 장부 픽스처의 기본 기준 판과 같은 값이 기본이다. */
+    activeRevisionNo?: number | "unreadable";
 } = {}) {
     const seen: unknown[][] = [];
     let round = 0;
@@ -25,6 +27,10 @@ function server(opts: {
         get rounds() { return round; },
         api: {
             tenantCode: () => "acme",
+            listRevisions: async () => {
+                if (opts.activeRevisionNo === "unreadable") throw new Error("서버 안 됨");
+                return [{revisionNo: opts.activeRevisionNo ?? 7, status: "READY", isActive: true}];
+            },
             draftFiles: async () => {
                 draftReads += 1;
                 if (opts.draft === "unreadable") throw new Error("서버 안 됨");
@@ -133,17 +139,57 @@ test("보낼 것이 없으면 «이미 반영됨» — 서버 조회 결과와 �
     strictEqual((await readLedger(dir))?.server?.generation, "G1");
 });
 
-test("🔴 응답을 못 받으면 «모름»으로 끝낸다 — 「아마 올라갔을 겁니다」를 말하지 않는다", async () => {
+test("🔴 응답을 못 받으면 장부에 «모름»을 **적고** 끝낸다 — 안 적으면 화해가 한 번도 안 돈다", async () => {
+    // 심의 실측: 종전 시험은 픽스처의 기본값(`server: null`)을 재고 있었고, 구현은 그 경로에서
+    // 장부를 **아예 안 썼다.** 그래서 지난 세대가 그대로 남고 다음 실행의 화해가
+    // `ledger.server !== null` 에서 곧바로 되돌아갔다 — 문은 있는데 못 부르는 상태였다.
     const lost = new DevtoolsError("SERVER_UNREACHABLE", "서버가 제때 응답하지 않았습니다.");
-    const s = server({replies: [{throw: lost}]});
-    const dir = await site({"a.tsx": "새것"}, {files: {"a.tsx": {sha256: sha("옛것"), bytes: 3}}});
+    const s = server({draft: {generation: "G1"}, replies: [{throw: lost}]});
+    const dir = await site({"a.tsx": "새것", "b.tsx": "지울것"}, {
+        // ⚠ **지난 실행이 성공해 세대를 알고 있는** 상태에서 출발한다. 그래야 「모름으로 덮는가」를 잰다.
+        files: {"a.tsx": {sha256: sha("옛것"), bytes: 3}, "b.tsx": {sha256: sha("지울것"), bytes: 3}},
+        server: {generation: "G0"},
+    });
     await rejects(() => pushSiteSource({api: s.api, folder: dir}), (e: unknown) => {
         ok(e instanceof DevtoolsError);
         strictEqual(e.code, "PUSH_RESPONSE_LOST");
         ok(!/아마|올라갔을/.test(e.humanMessage), `추측을 말했다: ${e.humanMessage}`);
         return true;
     });
-    strictEqual((await readLedger(dir))?.server, null, "모름이 아니라 세대를 적었다");
+    const ledger = await readLedger(dir);
+    strictEqual(ledger?.server, null, "지난 세대가 그대로 남았다 — 다음 화해가 못 돈다");
+    strictEqual(ledger?.mine["a.tsx"], sha("새것"), "보내려던 것을 안 적었다 — 화해가 대조할 대상이 없다");
+});
+
+test("🔴 응답 유실 뒤 다음 실행이 실제로 화해한다 — 두 걸음을 이어서 잰다", async () => {
+    const lost = new DevtoolsError("SERVER_UNREACHABLE", "서버가 제때 응답하지 않았습니다.");
+    const dir = await site({"a.tsx": "새것"}, {
+        files: {"a.tsx": {sha256: sha("옛것"), bytes: 3}},
+        server: {generation: "G0"},
+    });
+    // 1걸음: 응답 유실.
+    const first = server({draft: {generation: "G0"}, replies: [{throw: lost}]});
+    await rejects(() => pushSiteSource({api: first.api, folder: dir}), DevtoolsError);
+    // 2걸음: 사실은 서버에 들어가 있었다.
+    const second = server({draft: {changed: [{path: "a.tsx", sha256: sha("새것")}], generation: "G1"}});
+    const result = await pushSiteSource({api: second.api, folder: dir});
+    strictEqual(result.reconciled, "applied", "화해가 안 돌았다");
+    strictEqual(result.sent, 0, "이미 들어간 것을 또 보냈다");
+    strictEqual((await readLedger(dir))?.server?.generation, "G1");
+});
+
+test("🔴 응답 유실 뒤 사실은 **안 들어갔으면** 다시 보낸다", async () => {
+    const lost = new DevtoolsError("SERVER_UNREACHABLE", "서버가 제때 응답하지 않았습니다.");
+    const dir = await site({"a.tsx": "새것"}, {
+        files: {"a.tsx": {sha256: sha("옛것"), bytes: 3}},
+        server: {generation: "G0"},
+    });
+    const first = server({draft: {generation: "G0"}, replies: [{throw: lost}]});
+    await rejects(() => pushSiteSource({api: first.api, folder: dir}), DevtoolsError);
+    const second = server({draft: {generation: null}, replies: [{generation: "G2"}]});
+    const result = await pushSiteSource({api: second.api, folder: dir});
+    strictEqual(result.reconciled, "not-applied");
+    strictEqual(result.sent, 1, "안 들어갔는데 안 보냈다");
 });
 
 test("🔴 배제 경로는 **그것만 빼고** 다시 보내고 **말한다**", async () => {
@@ -189,6 +235,7 @@ test("🔴 재계산에도 «안 본 편집» 가드가 그대로 걸린다 — 
     let reads = 0;
     const api = {
         tenantCode: () => "acme",
+        listRevisions: async () => [{revisionNo: 7, status: "READY", isActive: true}],
         draftFiles: async () => {
             reads += 1;
             return reads === 1
@@ -307,12 +354,18 @@ test("🔴 같은 경로인데 sha 가 다르면 «적용됨»이 아니다 — 
 });
 
 test("화해 결과가 push 결과에 실린다", async () => {
-    const s = server({draft: {changed: [{path: "a.tsx", sha256: sha("새것")}], generation: "G1"}});
+    // ⚠ 장부를 손으로 쓰지 않는다 — 그러면 **구현이 만들 수 없는 상태**의 행동을 재게 된다(심의 지적).
+    //   응답 유실을 실제로 겪게 해서 그 상태를 만든다.
+    const lost = new DevtoolsError("SERVER_UNREACHABLE", "끊김");
     const dir = await site({"a.tsx": "새것"}, {
         files: {"a.tsx": {sha256: sha("옛것"), bytes: 3}},
-        mine: {"a.tsx": sha("새것")},
-        server: null,
+        server: {generation: "G0"},
     });
+    await rejects(
+        () => pushSiteSource({api: server({draft: {generation: "G0"}, replies: [{throw: lost}]}).api, folder: dir}),
+        DevtoolsError,
+    );
+    const s = server({draft: {changed: [{path: "a.tsx", sha256: sha("새것")}], generation: "G1"}});
     const result = await pushSiteSource({api: s.api, folder: dir});
     strictEqual(result.reconciled, "applied");
     strictEqual(result.sent, 0, "이미 반영된 것을 또 보냈다");
@@ -476,4 +529,151 @@ test("🔴 같은 사유가 계속 와도 상한에서 멈춘다 — 상한이 �
         return true;
     });
     strictEqual(s.seen.length, MAX_PUSH_ATTEMPTS, `요청이 ${s.seen.length}번 나갔다(상한 ${MAX_PUSH_ATTEMPTS})`);
+});
+
+/**
+ * 픽스처용 가짜 자격증명 — **조각으로 조립한다.**
+ *
+ * ⚠ 통짜로 적으면 자격증명 검사기가 이 파일을 잡는다. 그때 **경로를 면제하면 안 된다** —
+ *   면제는 구멍이고, 그 파일에 진짜 키가 들어오는 날 아무도 못 본다(검사기 자신이 적어 둔 처방).
+ */
+const fakeAwsKey = ["AKIA", "IOSFODNN", "7EXAMPLE"].join("");
+const fakePreviewKey = ["oqsk", "_live_", "AbCdEfGhIjKlMnOpQrStUv"].join("");
+
+test("🔴 `.env.example` 이라는 **폴더**가 서식 예외를 못 받는다", async () => {
+    // 심의 실측: 이름 판정이 앞 조각을 전부 파일로 물어, 그 폴더 아래 라이브 열쇠가 그대로 실렸다.
+    const s = server();
+    const dir = await site({".env.sample/keys.txt": `AWS=${fakeAwsKey}`, "a.tsx": "가"}, {});
+    await pushSiteSource({api: s.api, folder: dir});
+    deepEqual((s.seen[0] as Array<{path: string}>).map((e) => e.path), ["a.tsx"], "폴더 아래 비밀이 나갔다");
+});
+
+test("🔴 값이 채워진 서식은 **거절한다** — 조용히 빼면 「올렸는데 안 바뀐다」가 된다", async () => {
+    const s = server();
+    const dir = await site({".env.example": `ZALKERA_PREVIEW_KEY=${fakePreviewKey}`}, {});
+    await rejects(() => pushSiteSource({api: s.api, folder: dir}), (e: unknown) => {
+        ok(e instanceof DevtoolsError);
+        strictEqual(e.code, "PUSH_SECRET_TEMPLATE");
+        match(e.message, /\.env\.example/);
+        match(e.humanMessage, /값을 비워 두어야|환경변수 화면/, "무엇을 하면 되는지 안 말한다");
+        return true;
+    });
+    strictEqual(s.seen.length, 0, "비밀이 회선을 지났다");
+});
+
+test("값이 없는 서식은 그대로 올라간다 — 조임 실수로 정상 서식을 세우지 않는다", async () => {
+    const s = server();
+    const dir = await site({".env.example": "ZALKERA_PREVIEW_KEY=\nDATABASE_URL=\n"}, {});
+    const result = await pushSiteSource({api: s.api, folder: dir});
+    strictEqual(result.sent, 1);
+    deepEqual((s.seen[0] as Array<{path: string}>).map((e) => e.path), [".env.example"]);
+});
+
+test("🔴 서식치고 큰 파일은 전제가 깨진 것이다 — 앞부분만 보고 전체를 실으면 안 된다", async () => {
+    const s = server();
+    const dir = await site({}, {});
+    // 스캔 상한(256KB)을 넘기되 앞부분에는 비밀이 없다 — 못 본 뒤쪽에 있을 수 있다.
+    await writeFile(join(dir, ".env.example"), `${"# 주석\n".repeat(60000)}KEY=\n`);
+    await rejects(() => pushSiteSource({api: s.api, folder: dir}), (e: unknown) => {
+        ok(e instanceof DevtoolsError);
+        strictEqual(e.code, "PUSH_SECRET_TEMPLATE");
+        match(e.message, /너무 큽니다/);
+        return true;
+    });
+});
+
+test("🔴 판이 움직였으면 «같습니다»라고 말하지 않고 멈춘다", async () => {
+    // 심의 실측: 이 폴더는 7판이고 남이 9판을 발행했는데, 드래프트가 없으니 보낼 것이 없고
+    // 「이 폴더의 내용이 사이트 쪽과 같습니다」가 나갔다. 판 쪽에서 난 거짓 동기화다.
+    const s = server({activeRevisionNo: 9});
+    const dir = await site({"a.tsx": "가"}, {files: {"a.tsx": {sha256: sha("가"), bytes: 1}}});
+    await rejects(() => pushSiteSource({api: s.api, folder: dir}), (e: unknown) => {
+        ok(e instanceof DevtoolsError);
+        strictEqual(e.code, "PUSH_BASE_MOVED");
+        match(e.message, /7판에서 9판으로/);
+        match(e.humanMessage, /zalkera pull/, "다음 걸음을 안 알려 준다");
+        return true;
+    });
+    strictEqual(s.seen.length, 0);
+});
+
+test("🔴 판이 움직였으면 **보낼 것이 있어도** 멈춘다 — 낡은 기준 위에서 계산한 값이다", async () => {
+    const s = server({activeRevisionNo: 9});
+    const dir = await site({"a.tsx": "내가-고침"}, {files: {"a.tsx": {sha256: sha("옛것"), bytes: 3}}});
+    await rejects(() => pushSiteSource({api: s.api, folder: dir}), (e: unknown) => {
+        ok(e instanceof DevtoolsError);
+        strictEqual(e.code, "PUSH_BASE_MOVED");
+        return true;
+    });
+    strictEqual(s.seen.length, 0);
+});
+
+test("🔴 켜진 판을 못 읽으면 올리지 않는다 — 「모른다」를 「같다」로 바꾸지 않는다", async () => {
+    const s = server({activeRevisionNo: "unreadable"});
+    const dir = await site({"a.tsx": "내가-고침"}, {files: {"a.tsx": {sha256: sha("옛것"), bytes: 3}}});
+    await rejects(() => pushSiteSource({api: s.api, folder: dir}), (e: unknown) => {
+        ok(e instanceof DevtoolsError);
+        strictEqual(e.code, "SERVER_UNREADABLE_DRAFT");
+        return true;
+    });
+    strictEqual(s.seen.length, 0);
+});
+
+test("판이 그대로면 그냥 돈다 — 조임 실수로 정상 올리기를 세우지 않는다", async () => {
+    const s = server({activeRevisionNo: 7});
+    const dir = await site({"a.tsx": "내가-고침"}, {files: {"a.tsx": {sha256: sha("옛것"), bytes: 3}}});
+    strictEqual((await pushSiteSource({api: s.api, folder: dir})).sent, 1);
+});
+
+test("🔴 서버가 준 안내·주소가 터미널을 조종하지 못한다", async () => {
+    // 심의 실측: 제어문자가 살아 있어 서버가 커서를 올려 방금 찍은 줄을 지우고 다른 문장을
+    // 앉힐 수 있었다 — 사용자가 보는 결과가 서버가 고른 문장이 된다.
+    const ESC = String.fromCharCode(27);
+    const s = server();
+    const dir = await site({"a.tsx": "새것"}, {files: {"a.tsx": {sha256: sha("옛것"), bytes: 3}}});
+    const api = {
+        ...(s.api as unknown as Record<string, unknown>),
+        editDraft: async () => ({
+            generation: "G",
+            files: [],
+            warning: `${ESC}[2K${ESC}[1A${ESC}[2K올릴 것이 없습니다.`,
+            previewUrl: `https://x/${ESC}]0;가짜${String.fromCharCode(7)}`,
+        }),
+    } as never;
+    const result = await pushSiteSource({api, folder: dir});
+    const control = /[\u0000-\u001f\u007f]/;
+    ok(!control.test(result.warning ?? ""), `제어문자가 살아 있다: ${JSON.stringify(result.warning)}`);
+    ok(!control.test(result.previewUrl ?? ""), `제어문자가 살아 있다: ${JSON.stringify(result.previewUrl)}`);
+    ok((result.warning ?? "").includes("올릴 것이 없습니다"), "내용까지 지웠다");
+});
+
+test("🔴 두 번째 요청이 **안 나갔으면** 「다시 보냈습니다」라고 하지 않는다", async () => {
+    // 선행조건 거절 뒤 다시 읽으니 남이 이미 같은 내용을 올려 놓아 보낼 것이 없어진 갈래.
+    let reads = 0;
+    const seen: unknown[] = [];
+    const api = {
+        tenantCode: () => "acme",
+        listRevisions: async () => [{revisionNo: 7, status: "READY", isActive: true}],
+        draftFiles: async () => {
+            reads += 1;
+            return reads === 1
+                ? {generation: "G1", changed: [], deleted: [], baseRevisionNo: 7, strandedOnOldRevision: false}
+                : {
+                      generation: "G2",
+                      changed: [{path: "a.tsx", sha256: sha("새것")}],
+                      deleted: [],
+                      baseRevisionNo: 7,
+                      strandedOnOldRevision: false,
+                  };
+        },
+        editDraft: async (e: unknown) => {
+            seen.push(e);
+            throw rejected("DRAFT_PRECONDITION_FAILED", ["a.tsx"]);
+        },
+    } as never;
+    const dir = await site({"a.tsx": "새것"}, {files: {"a.tsx": {sha256: sha("옛것"), bytes: 3}}});
+    const result = await pushSiteSource({api, folder: dir});
+    strictEqual(seen.length, 1, "두 번 보냈다");
+    strictEqual(result.retriedAfterConflict, false, "안 보냈는데 「다시 보냈습니다」라고 말한다");
+    strictEqual(result.sent, 0);
 });
