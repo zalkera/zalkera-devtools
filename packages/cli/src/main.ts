@@ -205,10 +205,25 @@ async function main(argv: readonly string[]): Promise<number> {
                 revisionNo,
                 onProgress: (message: string) => process.stderr.write(`${message}\n`),
             });
-            process.stdout.write(
-                `${result.revisionNo}판(파일 ${result.files}개)을 기준으로 ${result.replaced ? "다시 " : ""}세웠습니다.\n` +
-                    "폴더의 파일은 건드리지 않았습니다. 지금 상태는 `zalkera status` 로 볼 수 있습니다.\n",
-            );
+            const lines = [
+                `${result.revisionNo}판(파일 ${result.files}개)을 기준으로 ${result.replaced ? "다시 " : ""}세웠습니다.`,
+                "폴더의 파일은 건드리지 않았습니다.",
+            ];
+            // 🔴 **전제가 깨졌으면 말한다.** 이 동사는 「이 폴더가 그 판에 있다」를 전제로 기준을
+            //    세운다. 다른 것이 많으면 그 기준은 그만큼 거짓이고, 그 상태로 올리면 **내가 만진 적
+            //    없는 파일까지** 그 판을 덮는다(실측: 만진 것 1개 · 나간 것 4개).
+            if (result.differing.length > 0) {
+                lines.push(
+                    "",
+                    `⚠ 이 폴더의 ${result.differing.length}개 파일이 ${result.revisionNo}판과 다릅니다.`,
+                    ...trimPaths(result.differing, PATH_LIST_CAP, verbose).map((p) => `  · ${p}`),
+                    `지금 \`zalkera push\` 를 하면 이 ${result.differing.length}개가 **전부** 올라가 ${result.revisionNo}판의 내용을 덮습니다.`,
+                    "고친 것이 그중 일부뿐이라면 `zalkera pull` 로 받는 쪽이 맞습니다.",
+                );
+            } else {
+                lines.push("지금 상태는 `zalkera status` 로 볼 수 있습니다.");
+            }
+            process.stdout.write(`${lines.join("\n")}\n`);
             return 0;
         }
         default:

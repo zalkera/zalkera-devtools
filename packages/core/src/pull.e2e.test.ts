@@ -426,3 +426,19 @@ test("🔴 모르는 형식은 **뒤에 달려 있어도** 파일 하나 쓰기 
     await rejects(() => run(dir, tarGz({"먼저.tsx": "이것이 남으면 안 된다"}, [["나쁜것", "3", ""]])), DevtoolsError);
     deepEqual(await readdir(dir), [], "거절인데 파일이 남았다");
 });
+
+test("🔴 `baseline` 이 «이 폴더는 그 판에 있지 않다»를 말한다 — 안 말하면 다음 push 가 남의 판을 덮는다", async () => {
+    // 실측: 만진 것은 1개인데 baseline 뒤 push 가 4개를 보내 그 판의 내용을 되돌렸다.
+    // 그 선행조건은 새 매니페스트에서 나오므로 CAS 는 정당하게 통과한다.
+    const dir = await site({"a.tsx": "내가-고침", "b.tsx": "판7", "c.tsx": "판7"});
+    const payload = tarGz({"a.tsx": "판9", "b.tsx": "판9", "c.tsx": "판9"});
+    const result = await rebuildBaseline({api: fakeApi(payload), folder: dir, fetchImpl: serve(payload)} as never);
+    deepEqual(result.differing, ["a.tsx", "b.tsx", "c.tsx"], "다른 것을 안 셌다");
+});
+
+test("그 판에 있는 폴더는 아무것도 신고하지 않는다 — 조임 실수로 정상 복구를 겁주지 않는다", async () => {
+    const dir = await site({"a.tsx": "가", "b.tsx": "나"});
+    const payload = tarGz({"a.tsx": "가", "b.tsx": "나"});
+    const result = await rebuildBaseline({api: fakeApi(payload), folder: dir, fetchImpl: serve(payload)} as never);
+    deepEqual(result.differing, []);
+});

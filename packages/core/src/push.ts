@@ -148,10 +148,18 @@ export async function pushSiteSource(options: PushOptions): Promise<PushResult> 
     //   모르는 채 보내면 낡은 매니페스트 위에서 계산한 값을 보내게 된다. 「모른다」가 「같다」로
     //   변하는 자리를 하나도 남기지 않는다.
     const active = await activeRevisionNo(options.api);
-    if (active > ledger.base.revisionNo) throw baseMoved(ledger.base.revisionNo, active);
     const reconciled = reconcile(ledger, draft);
 
     const local = await hashWorkdir(root);
+    if (active > ledger.base.revisionNo) {
+        // ⚠ **작업본을 본 뒤에 던진다.** 「`pull` 을 먼저」라고만 말하면 그 `pull` 이 로컬 변경 때문에
+        //   또 거절하고, 그 거절은 「`push` 를 먼저」라고 답한다 — **두 문이 서로를 가리켜 사람이
+        //   갇힌다**(실측). 출구를 대려면 이 폴더에 고친 것이 있는지 알아야 한다.
+        const dirty = Object.keys(ledger.files).filter(
+            (path) => local[path]?.sha256 !== ledger.files[path]?.sha256,
+        ).length;
+        throw baseMoved(ledger.base.revisionNo, active, dirty);
+    }
     let plan = planPush({base: ledger.files, draft: viewOf(draft), local});
     requireSeen(plan, options);
 
@@ -547,10 +555,19 @@ function unreachable(): DevtoolsError {
  * ⚠ **막는 이유는 값이 낡아서다.** 판이 움직이면 이 폴더의 기준 매니페스트가 낡고, 그 위에서
  *   「보낼 것이 없다」가 나오면 그것은 「같다」가 아니라 **모른다**이다.
  */
-function baseMoved(mine: number, now: number): DevtoolsError {
+function baseMoved(mine: number, now: number, dirty: number): DevtoolsError {
+    // ⚠ **`zalkera baseline` 을 여기서 대지 않는다.** 그것은 장부만 새 판으로 바꿔 놓는데, 폴더
+    //   내용은 옛 판 그대로다 — 그 뒤의 `push` 는 **새 판과 다른 것을 전부** 보낸다(내가 만진 적
+    //   없는 것까지). 실측: 만진 것 1개 · 나간 것 4개.
+    const way =
+        dirty === 0
+            ? `이 폴더를 ${now}판에 맞추려면 \`zalkera pull\` 을 실행하세요.`
+            : `이 폴더에서 고친 것이 ${dirty}개 있어 \`zalkera pull\` 도 그대로는 막힙니다. ` +
+              "`zalkera pull --discard-local` 을 실행하면 고친 파일을 옆 폴더에 옮겨 두고 새 판을 받습니다 — " +
+              "그 뒤 옮겨 둔 파일을 보고 다시 고쳐 올리시면 됩니다.";
     return new DevtoolsError(
         "PUSH_BASE_MOVED",
         `기준이 ${mine}판에서 ${now}판으로 움직여 아무것도 올리지 않았습니다.`,
-        `이 폴더를 ${now}판에 맞추려면 \`zalkera pull\` 을 먼저 실행하세요. 지금 올리면 ${mine}판을 보고 고친 내용이 ${now}판 위에 얹힙니다.`,
+        `${way} 지금 올리면 ${mine}판을 보고 고친 내용이 ${now}판 위에 얹힙니다.`,
     );
 }

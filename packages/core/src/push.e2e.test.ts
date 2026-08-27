@@ -677,3 +677,30 @@ test("🔴 두 번째 요청이 **안 나갔으면** 「다시 보냈습니다�
     strictEqual(result.retriedAfterConflict, false, "안 보냈는데 「다시 보냈습니다」라고 말한다");
     strictEqual(result.sent, 0);
 });
+
+test("🔴 판 이동 거절이 **실제 출구**를 댄다 — 두 문이 서로를 가리키면 사람이 갇힌다", async () => {
+    // 실측: push 는 「pull 먼저」, pull 은 「push 먼저」라고 서로를 가리켰다. 유일한 출구인
+    // `--discard-local` 은 어느 쪽도 그 상황에서 대 주지 않았다.
+    const s = server({activeRevisionNo: 9});
+    const dir = await site({"a.tsx": "내가-고침"}, {files: {"a.tsx": {sha256: sha("판7"), bytes: 3}}});
+    await rejects(() => pushSiteSource({api: s.api, folder: dir}), (e: unknown) => {
+        ok(e instanceof DevtoolsError);
+        strictEqual(e.code, "PUSH_BASE_MOVED");
+        match(e.humanMessage, /--discard-local/, `갇히는 안내다: ${e.humanMessage}`);
+        // ⚠ `baseline` 을 대면 안 된다 — 그것은 장부만 새 판으로 바꿔 놓고, 그 뒤 push 가
+        //   내가 만진 적 없는 파일까지 전부 보낸다.
+        ok(!/zalkera baseline/.test(e.humanMessage), `위험한 길을 댔다: ${e.humanMessage}`);
+        return true;
+    });
+});
+
+test("고친 것이 없으면 그냥 «받으세요»라고 한다 — 필요 없는 경고를 안 붙인다", async () => {
+    const s = server({activeRevisionNo: 9});
+    const dir = await site({"a.tsx": "판7"}, {files: {"a.tsx": {sha256: sha("판7"), bytes: 3}}});
+    await rejects(() => pushSiteSource({api: s.api, folder: dir}), (e: unknown) => {
+        ok(e instanceof DevtoolsError);
+        match(e.humanMessage, /zalkera pull/);
+        ok(!/--discard-local/.test(e.humanMessage), "버리라는 말을 필요 없이 붙였다");
+        return true;
+    });
+});

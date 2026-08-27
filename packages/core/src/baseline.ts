@@ -7,9 +7,18 @@
  * 「폴더를 지우고 다시 받으세요」라고 말하면 **작업본이 사라진다.** 이 동사는 서버 판 매니페스트를
  * 다시 읽어 장부만 고쳐 세운다.
  *
- * ⚠ **작업본을 안 건드린다.** 그래서 고쳐 둔 것이 그대로 남고, 다음 `status` 가 그것을 「고친 것」으로
+ * ⚠ **작업본을 안 고친다.** 그래서 고쳐 둔 것이 그대로 남고, 다음 `status` 가 그것을 「고친 것」으로
  *   정직하게 보고한다. 파일을 맞춰 주는 일은 `pull` 의 몫이다 — 한 동사가 둘 다 하면 「장부만 고치려
  *   했는데 내 작업이 사라졌다」가 난다.
+ *
+ * ■ 🔴 그러나 **읽기는 한다** — 안 읽으면 위험한 거짓을 조용히 세운다
+ *
+ * 이 동사의 전제는 「이 폴더가 **그 판에 있다**」이다. 그 전제가 깨진 폴더에 기준을 세우면, 장부는
+ * 「이 폴더는 9판 기반이다」라고 **거짓을 선언**하고 그 뒤의 `push` 는 9판과 다른 것을 전부 보낸다 —
+ * 내가 만진 적 없는 파일까지. 그 선행조건은 새 매니페스트에서 나오므로 **정당하게 통과**하고,
+ * 남이 9판에 넣은 변경이 조용히 옛 내용으로 되돌아간다(실측: 만진 것 1개 · 나간 것 4개).
+ *
+ * 그래서 **작업본을 읽어 몇 개가 그 판과 다른지 센다.** 고치지 않고, 말한다.
  *
  * ⚠ **`files` 를 「직전 작업본」으로 추정하지 않는다.** 서버가 경로 정규화·제외 목록을 적용하므로
  *   추정은 조용히 어긋난다. 판의 tar 를 받아 **다시 읽는다.**
@@ -28,6 +37,7 @@ import {
     type SyncLedger,
 } from "./syncLedger.ts";
 import {readTarGzManifest} from "./untar.ts";
+import {hashWorkdir} from "./workdir.ts";
 
 export interface BaselineOptions {
     api: ZalkeraApi;
@@ -44,6 +54,14 @@ export interface BaselineResult {
     files: number;
     /** 종전 장부가 있었는가. 거짓이면 새로 세운 것이다. */
     replaced: boolean;
+    /**
+     * 🔴 **이 폴더가 그 판과 다른 경로들.** 비어 있는 것이 정상이다.
+     *
+     * 비지 않으면 이 폴더는 그 판에 있지 않고, 방금 세운 기준은 **그만큼 거짓**이다. 그 상태로
+     * `push` 하면 여기 실린 것이 **전부** 올라가 그 판의 내용을 덮는다 — 내가 만진 적 없는 것까지.
+     * 부르는 쪽은 이것을 **말해야 한다.**
+     */
+    differing: string[];
 }
 
 /** 장부를 판에서 다시 세운다. 작업본은 **읽지도 쓰지도 않는다.** */
@@ -96,5 +114,17 @@ export async function rebuildBaseline(options: BaselineOptions): Promise<Baselin
         );
     }
 
-    return {revisionNo: tar.revisionNo, files: Object.keys(manifest).length, replaced: previous !== null};
+    // 고치지 않고 **읽어서 센다** — 전제가 깨진 폴더에 기준을 세운 것인지 부르는 쪽이 알아야 한다.
+    const local = await hashWorkdir(root);
+    const differing = Object.keys(manifest)
+        .filter((path) => local[path]?.sha256 !== manifest[path]?.sha256)
+        .concat(Object.keys(local).filter((path) => manifest[path] === undefined))
+        .sort();
+
+    return {
+        revisionNo: tar.revisionNo,
+        files: Object.keys(manifest).length,
+        replaced: previous !== null,
+        differing,
+    };
 }
