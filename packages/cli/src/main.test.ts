@@ -3,6 +3,9 @@ import {execFile} from "node:child_process";
 import {fileURLToPath} from "node:url";
 import {promisify} from "node:util";
 import {test} from "node:test";
+import {mkdtemp, writeFile} from "node:fs/promises";
+import {tmpdir} from "node:os";
+import {join} from "node:path";
 
 /** 실제 프로세스로 부른다 — 배선(인자 → 갈래 → 종료 코드)이 여기 살기 때문이다. */
 const run = promisify(execFile);
@@ -100,4 +103,17 @@ test("도움말이 `push` 와 그 동의 손잡이를 말한다", async () => {
     match(out, /--overwrite-unseen/);
     // ⚠ 그 손잡이가 **무엇을 잃는지** 말해야 한다. 안 말하면 사람은 막힐 때 그냥 붙인다.
     match(out, /그 편집은 사라진다/);
+});
+
+test("🔴 이 도구가 사이트 의존에 들어와 있으면 **네트워크 전에** 짚는다 — 확장의 `doctor` 는 CLI 에 안 닿는다", async () => {
+    // 그 오인을 하는 쪽이 바로 CLI 를 설치하는 사람이고, 그 사람은 대개 서버 설정도 아직이다.
+    // 서버는 닿지 않는 주소다 — 그래도 이 고지는 나와야 한다(로컬 사실이므로).
+    const dir = await mkdtemp(join(tmpdir(), "zalkera-misuse-"));
+    await writeFile(
+        join(dir, "package.json"),
+        JSON.stringify({name: "site", dependencies: {next: "15.0.0", "@zalkera/cli": "^0.20.2"}}),
+    );
+    const {err} = await cli("status", "--site", "acme", "--folder", dir);
+    match(err, /@zalkera\/cli 가 이 사이트의 의존으로 들어 있습니다/, `안 짚었다: ${err.slice(0, 200)}`);
+    match(err, /package\.json/, "무엇을 하라는지 안 말한다");
 });

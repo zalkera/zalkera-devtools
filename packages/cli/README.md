@@ -13,7 +13,7 @@ npm i -g @zalkera/cli && zalkera pull         # 자주 쓸 때 (명령은 `zalke
 ⚠ **이것은 `import` 하는 패키지가 아니다.** 사이트 프로젝트의 의존으로 넣지 마라 — 사람이
 터미널에서 치는 명령이다. 넣으면 그 `package.json` 이 사이트와 함께 올라가 **서버가 사이트를
 지을 때 이것까지 설치한다.** 소스가 `import` 하는 쪽은 `@zalkera/client` 이고 그것은 다른
-패키지다. (`zalkera doctor` 가 잘못 들어온 것을 짚어 준다.)
+패키지다. (`zalkera status` 가 잘못 들어온 것을 짚어 준다.)
 
 ⚠ **판이 VS Code 확장과 묶여 있다.** 서버의 최소판 게이트가 하나라 두 도구가 같은 판으로 간다.
 게이트에 걸리면 `npx @zalkera/cli@latest` 나 `npm i -g @zalkera/cli@latest` 로 나간다.

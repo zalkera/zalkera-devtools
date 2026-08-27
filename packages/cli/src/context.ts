@@ -16,6 +16,7 @@ import {readFile} from "node:fs/promises";
 import {fileURLToPath} from "node:url";
 import {join, resolve} from "node:path";
 import {
+    inspectProject,
     DevtoolsError,
     SYNC_LEDGER_PATH,
     SOURCE_MARK_PATH,
@@ -99,6 +100,16 @@ export async function openContext(options: ContextOptions = {}): Promise<Context
         );
     }
 
+    // 🔴 **로컬 사실은 네트워크보다 먼저 말한다.** 이 도구가 사이트 의존에 들어와 있는지는
+    //    폴더만 보면 아는 일인데, 핸드셰이크 뒤에 두면 서버가 안 될 때 **영영 안 뜬다** —
+    //    그리고 이 오인을 하는 사람은 대개 처음 설치한 사람이라 서버 설정도 아직이다.
+    //
+    // ⚠ **모든 명령이 이 문을 지난다** — 여기 한 자리에 두면 `status` 든 `push` 든 같은 고지를
+    //   받는다. 명령마다 두면 어느 하나는 빠진다.
+    // ⚠ **읽기 실패는 삼킨다.** `package.json` 이 없거나 깨진 폴더에서 이 곁다리 고지 때문에
+    //   명령이 죽으면 안 된다.
+    for (const line of await misplacedToolLines(folder)) process.stderr.write(`${line}\n`);
+
     // 판정은 서버가 한다 — 구버전일수록 자기 판정 코드도 낡았다.
     const handshake = await fetchHandshake(serverUrl, version(), fetch, UPGRADE_HOW);
     const store = options.store ?? new FileTokenStore();
@@ -110,6 +121,27 @@ export async function openContext(options: ContextOptions = {}): Promise<Context
         tenantCode: () => tenant,
     });
     return {api, auth, store, folder, tenant, serverUrl};
+}
+
+/**
+ * **이 도구가 사이트 의존에 들어와 있는가** — 있으면 사람에게 할 말.
+ *
+ * 형제 `@zalkera/client` 와 스코프가 같아 형제 패키지로 오인되는데, 넣으면 그 `package.json` 이
+ * 사이트와 함께 올라가 **서버가 사이트를 지을 때 이것까지 설치한다.**
+ *
+ * ⚠ **확장의 `doctor` 에만 두면 CLI 사용자에게 안 닿는다** — 그런데 그 오인을 하는 쪽이 바로
+ *   이 도구를 설치하는 사람이다.
+ */
+async function misplacedToolLines(folder: string): Promise<string[]> {
+    const found = await inspectProject(folder)
+        .then((p) => p.toolInDeps)
+        .catch(() => [] as readonly string[]);
+    if (found.length === 0) return [];
+    return [
+        `⚠ ${found.join(" · ")} 가 이 사이트의 의존으로 들어 있습니다.`,
+        "  이것은 소스가 `import` 하는 패키지가 아니라 터미널에서 치는 명령입니다.",
+        "  `package.json` 에서 빼 주세요 — 그대로 두면 사이트를 지을 때 함께 설치됩니다.",
+    ];
 }
 
 /**
