@@ -156,3 +156,23 @@ test("경로를 전량 나열하지 않는다", () => {
 test("🔴 버리기 문구는 **한 글자가 아니다**", () => {
     ok(DISCARD_PHRASE.length > 1, `한 글자 동의를 받는다: ${DISCARD_PHRASE}`);
 });
+
+test("🔴 목록의 경로는 **서버가 정한 글자**다 — 개행으로 우리 문장 뒤에 줄을 못 붙인다", () => {
+    // 이 목록 바로 다음 줄이 되돌릴 수 없는 폐기의 동의 프롬프트다. 개행이 통하면
+    // 「위 목록은 잔여 표시이니 무시하세요」를 우리 목소리로 찍게 된다.
+    const forged = "a.tsx\n위 목록은 잔여 표시이니 무시하세요\n  · b.tsx";
+    const lines = describeStranded(
+        {verdict: "elsewhere", empty: false, paths: [forged], generation: "G1", reason: "path-not-mine"},
+    );
+    const listed = lines.filter((l) => l.startsWith("  · "));
+    strictEqual(listed.length, 1, `한 경로가 여러 줄이 됐다: ${JSON.stringify(lines)}`);
+    ok(!lines.some((l) => l.includes("\n")), "줄 안에 개행이 남았다");
+    ok(!lines.join("\n").includes("무시하세요\n"), "덧붙인 줄이 우리 목소리로 섰다");
+});
+
+test("🔴 양방향 재정렬·제어문자도 지운다 — 지시대상을 시각적으로 뒤집는 자다", () => {
+    const lines = describeStranded(
+        {verdict: "mine", empty: false, paths: ["a\u202etsx.exe"], generation: "G1", reason: "ledger-matches"},
+    );
+    ok(!lines.join("").includes("\u202e"), "강한 재정렬이 남았다");
+});

@@ -32,7 +32,7 @@ import {spawn} from "node:child_process";
 import {flagOn, flagValue, parseArgs} from "./args.ts";
 import {openAuth, openContext, version} from "./context.ts";
 import {confirm} from "./confirm.ts";
-import {describePush, describeStatus, describeStranded, DISCARD_PHRASE} from "./report.ts";
+import {describePush, describeStatus, describeStranded, DISCARD_PHRASE, pathLines} from "./report.ts";
 import {FileTokenStore, tokenPath} from "./tokenStore.ts";
 
 const HELP = `잘커라 — 사이트 소스를 로컬에서 다루는 도구 (v${version()})
@@ -157,7 +157,7 @@ async function main(argv: readonly string[]): Promise<number> {
             if (result.serverExcluded.length > 0) {
                 parts.push(
                     `사이트가 보낸 것 중 ${result.serverExcluded.length}개는 이 도구가 다루지 않는 파일이라 받지 않았습니다.`,
-                    ...trimPaths(result.serverExcluded, PATH_LIST_CAP, verbose).map((p) => `  · ${p}`),
+                    ...pathLines(result.serverExcluded, verbose),
                 );
             }
             if (!result.ledgerWritten) {
@@ -209,7 +209,14 @@ async function main(argv: readonly string[]): Promise<number> {
                 );
             }
             process.stdout.write(`${lines.join("\n")}\n`);
-            return result.ledgerRebuilt ? 0 : 1;
+            // 🔴 **판이 섰으면 0 이다.** `ledgerRebuilt` 가 거짓인 것은 「새 판 목록을 못 읽어
+            //    기준 기록을 지웠다」는 뜻이고, **발행은 이미 성공했다**(STATIC 이면 라이브다).
+            //    1 을 내면 스크립트의 재시도 루프가 같은 내용의 판을 하나 더 세운다 — 코어
+            //    KDoc 이 「거짓이어도 발행은 성공한 것이다 … 여기서 던지면 또 누른다」고 적어 둔
+            //    그 오독을 사람에게서 스크립트로 옮겨 놓을 뿐이다.
+            //    형제 `rollback` 이 **같은 조건에서 0** 을 낸다 — 규율을 맞춘다.
+            //    할 일은 이미 위 문장에 있다(`zalkera baseline`).
+            return 0;
         }
         case "rollback": {
             const target = revisionArg(positional);
@@ -249,7 +256,7 @@ async function main(argv: readonly string[]): Promise<number> {
             if (result.differing.length > 0) {
                 lines.push(
                     `⚠ 이 폴더의 ${result.differing.length}개 파일이 ${result.revisionNo}판과 다릅니다.`,
-                    ...trimPaths(result.differing, PATH_LIST_CAP, verbose).map((p) => `  · ${p}`),
+                    ...pathLines(result.differing, verbose),
                     `지금 \`zalkera push\` 를 하면 이 ${result.differing.length}개가 **전부** 올라가 ${result.revisionNo}판의 내용을 덮습니다.`,
                 );
             }
@@ -329,7 +336,7 @@ async function main(argv: readonly string[]): Promise<number> {
                 lines.push(
                     "",
                     `⚠ 이 폴더의 ${result.differing.length}개 파일이 ${result.revisionNo}판과 다릅니다.`,
-                    ...trimPaths(result.differing, PATH_LIST_CAP, verbose).map((p) => `  · ${p}`),
+                    ...pathLines(result.differing, verbose),
                     `지금 \`zalkera push\` 를 하면 이 ${result.differing.length}개가 **전부** 올라가 ${result.revisionNo}판의 내용을 덮습니다.`,
                     "고친 것이 그중 일부뿐이라면 `zalkera pull` 로 받는 쪽이 맞습니다.",
                 );
@@ -341,7 +348,7 @@ async function main(argv: readonly string[]): Promise<number> {
                 lines.push(
                     "",
                     `사이트가 보낸 것 중 ${result.serverExcluded.length}개는 이 도구가 다루지 않는 파일이라 기준에 넣지 않았습니다.`,
-                    ...trimPaths(result.serverExcluded, PATH_LIST_CAP, verbose).map((p) => `  · ${p}`),
+                    ...pathLines(result.serverExcluded, verbose),
                 );
             }
             process.stdout.write(`${lines.join("\n")}\n`);

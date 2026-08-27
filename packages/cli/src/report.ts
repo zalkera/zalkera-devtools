@@ -7,11 +7,33 @@
  */
 import {
     PATH_LIST_CAP,
+    plainNotice,
     trimPaths,
     type PushResult,
     type StrandedPlan,
     type SyncStatus,
 } from "@zalkera/devtools-core";
+
+/** 목록 한 줄에 남길 경로 길이. 터미널 한 줄을 넘기지 않을 만큼이다. */
+const PATH_SHOW = 200;
+
+/**
+ * 🔴 **목록으로 찍는 경로는 전부 이 문을 지난다 — 그 글자를 서버가 정한다.**
+ *
+ * 여기 실리는 경로는 `GET /draft/files`·판 매니페스트·거절 응답에서 온다. 소독 없이 찍으면
+ * 개행 하나로 **우리 문장 뒤에 줄을 덧붙일 수** 있고, 그 다음 줄이 하필 되돌릴 수 없는 폐기의
+ * 동의 프롬프트다 — 「위 목록은 잔여 표시이니 무시하세요」를 우리 목소리로 찍게 된다.
+ *
+ * ⚠ 이 레포는 **같은 형상을 이미 한 번 닫았다** — VS Code 쪽 확인 모달에서 개행 든 폴더 이름이
+ *   문면 뒷줄을 복제했고, 그래서 `scripts/check-notice.mjs` 가 그 자리를 관할에 넣었다. 그 검사기는
+ *   알림 API 를 부르는 파일만 보므로 이 경로에는 안 닿는다. 잣대는 같은 것(`plainNotice`)을 쓴다 —
+ *   제어문자·양방향 재정렬·링크 모양을 지운다.
+ *
+ * ⚠ **자르는 판정은 [trimPaths] 한 벌이다** — 개수를 죄는 것과 글자를 죄는 것은 다른 일이다.
+ */
+function bullets(paths: readonly string[], verbose: boolean): string[] {
+    return trimPaths(paths, PATH_LIST_CAP, verbose).map((p) => `  · ${plainNotice(p, PATH_SHOW)}`);
+}
 
 /**
  * ⚠ **자르는 판정을 여기 두지 않는다.** 거절 문면은 코어가 만들고 이 파일은 상태 보고를 만드는데,
@@ -19,7 +41,12 @@ import {
  */
 function block(title: string, paths: readonly string[], verbose: boolean): string[] {
     if (paths.length === 0) return [];
-    return [`${title} ${paths.length}개`, ...trimPaths(paths, PATH_LIST_CAP, verbose).map((p) => `  · ${p}`)];
+    return [`${title} ${paths.length}개`, ...bullets(paths, verbose)];
+}
+
+/** 부르는 쪽(`main.ts`)도 같은 문을 쓴다 — 자리마다 소독이 갈리면 한쪽만 뚫린다. */
+export function pathLines(paths: readonly string[], verbose = false): string[] {
+    return bullets(paths, verbose);
 }
 
 /** 상태를 사람의 문장으로. */
@@ -130,7 +157,7 @@ export function describePush(result: PushResult, verbose = false): string[] {
     if (result.droppedByServer.length > 0) {
         lines.push(
             `사이트가 받지 않는 경로 ${result.droppedByServer.length}개는 빼고 보냈습니다.`,
-            ...trimPaths(result.droppedByServer, PATH_LIST_CAP, verbose).map((p) => `  · ${p}`),
+            ...bullets(result.droppedByServer, verbose),
         );
     }
     if (result.previewUrl) lines.push(`미리보기: ${result.previewUrl}`);
@@ -150,7 +177,7 @@ export function describePush(result: PushResult, verbose = false): string[] {
  *    문면은 **「여기 없는 편집」** — 폴더 기준이라 언제나 참이다.
  */
 export function describeStranded(plan: StrandedPlan, verbose = false): string[] {
-    const list = trimPaths(plan.paths, PATH_LIST_CAP, verbose).map((p) => `  · ${p}`);
+    const list = bullets(plan.paths, verbose);
     if (plan.verdict === "mine") {
         return [
             "지금 사이트 쪽에 걸려 있는 편집은 이 폴더에서 올린 것과 같습니다.",
