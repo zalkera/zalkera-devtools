@@ -159,8 +159,9 @@ export class ZalkeraApi {
         this.fetchImpl = options.fetchImpl ?? fetch;
     }
 
-    /** 내 소속 테넌트 — 테넌트 선택(A3)에 쓴다. 이 경로만 `X-Tenant` 를 요구하지 않는다(닭과 달걀). */
     /**
+     * 내 소속 테넌트 — 테넌트 선택(A3)에 쓴다. 이 경로만 `X-Tenant` 를 요구하지 않는다(닭과 달걀).
+     *
      * 내가 고를 수 있는 사이트. **`isSuperAdmin` 을 함께 돌려준다** — 목록이 비었다고 해서
      * "사이트가 없다"가 아니기 때문이다.
      *
@@ -211,8 +212,9 @@ export class ZalkeraApi {
         return this.request<PresetSource>("GET", `/api/partner/site-preset/presets/${encodeURIComponent(code)}/source-url`);
     }
 
-    /** 버전 이력(최신순). B2「현재 사이트 내려받기」와 롤백이 여기서 대상을 고른다. */
     /**
+     * 버전 이력(최신순). B2「현재 사이트 내려받기」와 롤백이 여기서 대상을 고른다.
+     *
      * @param limit **최근 몇 개만** 받을지. 없으면 전량이다.
      *
      * ⚠ **판은 발행할 때마다 늘고 줄지 않는다.** 몇 개면 되는 소비자가 전량을 받으면 그 비용이 원장
@@ -229,8 +231,9 @@ export class ZalkeraApi {
         return this.request<RevisionSource>("GET", `/api/partner/site-upload/revisions/${revisionNo}/source-url`);
     }
 
-    /** 버전 전환(롤백 포함). READY 인 버전만 받는다. */
     /**
+     * 버전 전환(롤백 포함). READY 인 버전만 받는다.
+     *
      * ⚠ **소비하는 필드만 형에 둔다.** `pointerMoved` 는 「판을 옮겼다」와 「아무것도 안 옮겼다」를
      *   가른다 — 종전에는 둘 다 성공이라 화면이 무동작을 「바꿨습니다」로 말했다.
      *   **결여는 `true` 방향**이다(서버 기본값이 그렇고, 구서버는 이 필드를 안 보낸다).
@@ -260,8 +263,9 @@ export class ZalkeraApi {
         });
     }
 
-    /** 업로드 확정 — 서버가 언팩·검사하고 새 버전을 만든다. */
     /**
+     * 업로드 확정 — 서버가 언팩·검사하고 새 버전을 만든다.
+     *
      * @param baseRevisionNo 이 올리기가 **딛는다고 선언하는 판**(동시 업로드 최소 방어). 서버가 판을
      *   만들기 전에 원장 꼬리와 대조하고 다르면 `UPLOAD_BASE_MOVED` 409 로 멈춘다.
      *   `null` 은 **무선언 — 현행 그대로 통과**다(모르는 것으로 막지 않는다).
@@ -402,13 +406,6 @@ async function toError(response: Response): Promise<DevtoolsError> {
 }
 
 /**
- * 게시 대기 중인 AI 변경이 있어 서버가 **동의를 요구한** 거절. 백엔드 `BaselineShiftGuard` 가
- * `discardPendingChanges=true` 를 받으면 통과시킨다.
- *
- * 다른 409(게시 진행 중·AI 작업 중·레포 연결 테넌트)에는 동의로 뚫는 길이 없다 — 그래서 코드를
- * 정확히 하나만 본다. 「409 면 물어본다」로 넓히면 뚫을 수 없는 거절에도 동의 창을 띄우게 된다.
- */
-/**
  * **동의 인자 하나(`discardPendingChanges=true`)가 서버에서 실제로 통과시키는 코드의 명시 집합.**
  *
  * ⚠ **409 전반으로 넓히지 마라 — 그리고 이름 패턴으로도 넓히지 마라.** 뚫을 수 없는 거절에도
@@ -426,7 +423,15 @@ const DISCARD_CONSENT_CODES: ReadonlySet<string> = new Set([
     "DRAFT_DISCARD_CONFIRM_REQUIRED",
 ]);
 
-/** 이 거절이 **사용자 동의 한 번으로 넘어갈 수 있는가.** */
+/**
+ * 이 거절이 **사용자 동의 한 번으로 넘어갈 수 있는가.**
+ *
+ * 게시 대기 중인 AI 변경이 있어 서버가 **동의를 요구한** 거절. 백엔드 `BaselineShiftGuard` 가
+ * `discardPendingChanges=true` 를 받으면 통과시킨다.
+ *
+ * 다른 409(게시 진행 중·AI 작업 중·레포 연결 테넌트)에는 동의로 뚫는 길이 없다 — 그래서 코드를
+ * 정확히 하나만 본다. 「409 면 물어본다」로 넓히면 뚫을 수 없는 거절에도 동의 창을 띄우게 된다.
+ */
 export function needsDiscardConsent(error: unknown): boolean {
     return error instanceof DevtoolsError && DISCARD_CONSENT_CODES.has(error.serverCode ?? "");
 }
@@ -446,24 +451,6 @@ export function isUploadBaseMoved(error: unknown): boolean {
     return error instanceof DevtoolsError && error.serverCode === UPLOAD_BASE_MOVED;
 }
 
-/**
- * **되돌리기가 지목하는 판인가** — 이것도 목록에서 뺀다.
- *
- * ⚠ **`isActive` 만으로는 못 뺀다.** 백엔드는 활성 포인터가 없는 테넌트(첫 업로드가 빌드 실패한
- *   경우)에서 **드래프트의 기준 판**을 「지금 켜진 판」으로 본다 — 안 그러면 편집을 만들 수는
- *   있는데 버릴 수도 발행할 수도 없기 때문이다. 그 판이 목록에 후보로 뜨면, 고르는 순간
- *   전환이 아니라 **폐기**가 된다.
- *
- *   백엔드가 그 자리 응답 KDoc 에 **「화면이 `isActive` 로 직접 찾으면 안 된다」**고 적어 뒀고,
- *   콘솔이 먼저 그 함정을 밟았다.
- *
- * ⚠ **서버 답 둘의 합집합이다 — 화면이 규칙을 지어내지 않는다.** 드래프트가 있으면
- *   `revertTargetRevisionNo` 가 곧 그 답이고, 없으면 그 필드는 `null` 이며 답은 목록의
- *   `isActive` 행이다. 둘을 합치면 서버가 답한 것만 남는다.
- *
- * @param revertTarget `GET /draft` 의 `revertTargetRevisionNo`. **못 읽었으면 `null`** — 모르는
- *   것으로는 막지 않는다(그때 동작은 종전과 같다).
- */
 /**
  * 배포한 판이 **방문자에게 닿았는가**(백엔드 명세 A). 게시 직후 이 판정을 되풀이해 묻는다.
  *
@@ -507,6 +494,24 @@ export function reflectionOf(
         : "pending";
 }
 
+/**
+ * **되돌리기가 지목하는 판인가** — 이것도 목록에서 뺀다.
+ *
+ * ⚠ **`isActive` 만으로는 못 뺀다.** 백엔드는 활성 포인터가 없는 테넌트(첫 업로드가 빌드 실패한
+ *   경우)에서 **드래프트의 기준 판**을 「지금 켜진 판」으로 본다 — 안 그러면 편집을 만들 수는
+ *   있는데 버릴 수도 발행할 수도 없기 때문이다. 그 판이 목록에 후보로 뜨면, 고르는 순간
+ *   전환이 아니라 **폐기**가 된다.
+ *
+ *   백엔드가 그 자리 응답 KDoc 에 **「화면이 `isActive` 로 직접 찾으면 안 된다」**고 적어 뒀고,
+ *   콘솔이 먼저 그 함정을 밟았다.
+ *
+ * ⚠ **서버 답 둘의 합집합이다 — 화면이 규칙을 지어내지 않는다.** 드래프트가 있으면
+ *   `revertTargetRevisionNo` 가 곧 그 답이고, 없으면 그 필드는 `null` 이며 답은 목록의
+ *   `isActive` 행이다. 둘을 합치면 서버가 답한 것만 남는다.
+ *
+ * @param revertTarget `GET /draft` 의 `revertTargetRevisionNo`. **못 읽었으면 `null`** — 모르는
+ *   것으로는 막지 않는다(그때 동작은 종전과 같다).
+ */
 export function switchCandidates<T extends {revisionNo: number; isActive: boolean; status: string}>(
     revisions: readonly T[],
     revertTarget: number | null,

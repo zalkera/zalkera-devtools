@@ -53,6 +53,10 @@ const STATES = [
     //    검사 밖에 남는다 — 상태 목록의 존재 이유가 그것이다.
     { signedIn: true, tenant: "t", site: "/x", previewUrl: null, keyExpiresAt: null, folderTenant: null, folderPath: "/x" },
     { signedIn: true, tenant: "t", site: "/x", previewUrl: "http://localhost:3000", keyExpiresAt: "2026-01-01", folderTenant: "t", folderPath: "/x" },
+    // ⚠ **하나뿐인 계정**(`canSwitch: false`). 이 칸이 없으면 위 칸들이 전부 `canSwitch` 를 안 넘겨
+    //    `!== false` 가 늘 참이 되고, 「사이트 선택」 갈래가 **한 번도 안 그려진다** — 그 갈래는
+    //    동적 라벨이 아니라 팔레트 제목과 대조돼야 하는데, 대조가 통째로 비껴간다.
+    { signedIn: true, tenant: "t", site: "/x", previewUrl: null, keyExpiresAt: null, folderTenant: "t", folderPath: "/x", canSwitch: false },
 ];
 /** 라벨이 상태를 담아도 되는 명령. 사이트 이름과 미리보기 주소 둘뿐이다. */
 const DYNAMIC_ALLOWED = new Set(["zalkera.site.choose", "zalkera.preview.start"]);

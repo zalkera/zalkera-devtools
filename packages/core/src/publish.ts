@@ -30,8 +30,7 @@ export interface PublishOptions {
      *   작업이 사람 모르게 사라진다. 화면이 없는 자리(CLI·시험)는 그 문을 안 열면 된다.
      *
      * @param serverMessage 서버가 보낸 문장(건수가 들어 있다). 표시 자리에서 소독한다.
-     */
-    /**
+     *
      * ⚠ **문면 재료가 둘이다** — 서버 문장과 **서버 코드**. 같은 동의 인자로 뚫리는 코드가 둘이고
      *   결과가 다르다(판이 옮겨진다 / 판은 그대로고 작업만 버린다). 코드를 안 넘기면 부르는 쪽이
      *   그 둘을 못 갈라 **다른 행위에 대한 동의**를 받게 된다.
@@ -57,9 +56,33 @@ export interface PublishOptions {
      * @param serverMessage 서버가 보낸 문장(최신 판 번호가 들어 있다). 표시 자리에서 소독한다.
      */
     onBaseMoved?: (serverMessage: string) => Promise<boolean>;
+    /**
+     * 사람이 「올리는 중」에 그만두겠다고 한 신호.
+     *
+     * ■ ⚠ **이 신호는 `confirm` 에 안 붙는다 — 그 비대칭이 이 설계의 전부다**
+     *   `confirm` 이 판을 만든다. 나간 요청은 우리가 응답을 안 읽어도 서버가 그대로 처리하므로,
+     *   그것을 끊고 「취소했습니다」라고 말하면 **서버는 판을 만들었는데 화면만 거짓**이 된다.
+     *   그래서 끊는 것은 pack·presign·PUT 까지이고, `confirm` 은 **보내기 전에만** 묻고 한 번
+     *   나가면 완주시킨다.
+     *
+     * ■ 검사 지점은 「보내기 전 한 번」이 아니다
+     *   `confirm` 은 동의·기반이동 갈래로 **최대 세 번** 나간다. 첫 발송 전만 보면 **동의 후
+     *   재발송이 검사 없이** 나간다 — 「되돌릴 수 없는 다음 전송을 시작하기 직전마다」 본다.
+     *
+     * ■ 취소가 늦었을 때
+     *   `confirm` 이 **성공**으로 오면 판은 만들어졌다 — [PublishResult.cancelledLate] 로 알린다.
+     *   부르는 쪽은 그때 「취소했습니다」로 접으면 안 되고, 발행 성공의 부수효과(표식 갱신 등)를
+     *   **그대로 해야 한다** — 안 하면 화면이 아니라 **디스크에 거짓**이 남는다.
+     */
+    signal?: AbortSignal;
 }
 
 export interface PublishResult {
+    /**
+     * **취소를 눌렀지만 판이 이미 만들어졌다.** `confirm` 이 나간 뒤에 눌렀고 그것이 성공한 경우다.
+     * 부르는 쪽은 「취소했습니다」로 접으면 안 된다 — 그 문장은 거짓이다.
+     */
+    cancelledLate?: true;
     fileCount: number;
     byteSize: number;
     sha256: string;
@@ -71,6 +94,44 @@ export interface PublishResult {
     /** 서버가 보낸 한계·상태 안내. 있으면 **그대로 보여 준다**(memo66 §4). */
     capabilityNote: string;
 }
+
+/**
+ * PUT 을 보내되, 끊긴 이유가 **사람의 취소면 취소로** 접는다. 상한(타임아웃)으로 끊긴 것은
+ * 그대로 던진다 — 그쪽은 진짜 실패이고 사람에게 말해야 한다.
+ */
+async function fetchWithCancel(
+    fetchImpl: typeof fetch,
+    url: string,
+    init: RequestInit & { signal: AbortSignal },
+    userSignal: AbortSignal | undefined,
+): Promise<Response> {
+    try {
+        return await fetchImpl(url, init);
+    } catch (e) {
+        if (userSignal?.aborted) throw cancelled();
+        throw e;
+    }
+}
+
+/**
+ * 둘 중 먼저 끊기는 쪽을 따르는 신호.
+ *
+ * `AbortSignal.any` 를 안 쓴다 — 이 패키지의 `engines.node` 가 `>=20` 인데 그 API 는 20.3.0 에 들어왔다.
+ * 20.0~20.2 에서 도는 편집기가 있으면 **호출 자체가 없는 함수**가 된다.
+ */
+function anySignal(a: AbortSignal | undefined, b: AbortSignal): AbortSignal {
+    if (!a) return b;
+    const c = new AbortController();
+    const stop = (s: AbortSignal) => () => c.abort(s.reason);
+    if (a.aborted) return a;
+    if (b.aborted) return b;
+    a.addEventListener("abort", stop(a), { once: true });
+    b.addEventListener("abort", stop(b), { once: true });
+    return c.signal;
+}
+
+/** 사람이 그만둔 것 — 실패가 아니다. 부르는 쪽이 빨간창 대신 조용히 접는다. */
+const cancelled = () => new DevtoolsError("CANCELLED", "올리기를 그만두었습니다.");
 
 /**
  * confirm 을 **문이 열릴 때까지** 다시 부른다.
@@ -100,6 +161,9 @@ async function confirmWithConsent(
     let consentAsked = false;
     let baseAsked = false;
     for (;;) {
+        // ⚠ **매 발송 직전에 본다** — 첫 발송 전만 보면 동의 후 재발송이 검사 없이 나간다.
+        //    여기서 멈추면 판은 안 만들어졌다(서버가 아직 아무것도 안 받았다).
+        if (options.signal?.aborted) throw cancelled();
         try {
             // ⚠ **같은 `storageKey` 로 다시 부른다 — 절대 다시 묶지 않는다.** 사람이 동의한 것은
             //    「지금 이 바이트를 그대로 올린다」이고, 재압축하면 **동의한 것과 다른 것**이 올라간다.
@@ -107,10 +171,14 @@ async function confirmWithConsent(
         } catch (error) {
             const rejected = error instanceof DevtoolsError ? error : null;
             const message = rejected?.message ?? String(error);
+            // ⚠ **409 는 「판이 안 만들어졌다」는 증명이다.** 그러니 취소를 존중할 수 있다 —
+            //    그런데 여기서 모달을 띄우면 **방금 그만두겠다고 한 사람에게 「버리는 데 동의하십니까」**
+            //    를 묻게 된다. 그 답은 이미 나와 있다. 모달을 띄우기 **직전**에 본다.
+            if (options.signal?.aborted) throw cancelled();
             if (needsDiscardConsent(error) && options.onConsent && !consentAsked) {
                 consentAsked = true;
                 if (!(await options.onConsent(message, rejected?.serverCode ?? null))) {
-                    throw new DevtoolsError("CANCELLED", "올리기를 그만두었습니다.");
+                    throw cancelled();
                 }
                 discard = true;
                 continue;
@@ -118,7 +186,7 @@ async function confirmWithConsent(
             if (isUploadBaseMoved(error) && options.onBaseMoved && !baseAsked) {
                 baseAsked = true;
                 if (!(await options.onBaseMoved(message))) {
-                    throw new DevtoolsError("CANCELLED", "올리기를 그만두었습니다.");
+                    throw cancelled();
                 }
                 // 무선언으로 내려놓는다. 같은 선언을 다시 실으면 같은 409 를 다시 맞고, 표식은 발행
                 // 성공에서만 갱신되므로 **영원히 못 빠져나온다** — 그것이 이 갈래가 존재하는 이유다.
@@ -159,6 +227,8 @@ export async function publish(options: PublishOptions): Promise<PublishResult> {
         );
     }
 
+    // 여기까지는 로컬 작업이라 흔적이 0 이다 — 끊기 가장 싼 자리다.
+    if (options.signal?.aborted) throw cancelled();
     report(`${packed.fileCount}개 파일을 올리는 중…`);
     const presigned = await options.api.presignArchive("site.zip", packed.buffer.byteLength);
 
@@ -178,12 +248,21 @@ export async function publish(options: PublishOptions): Promise<PublishResult> {
   // **상한을 둔다.** Node 의 fetch 는 기본 타임아웃이 없어, 연결만 붙들린 채 응답이 없으면 영원히
     // 매달린다. 제어 평면(30초)보다 훨씬 길게 잡는다 — 여기는 100MB 까지 오르는 자리라
     // 짧은 값은 **느린 회선의 정상 전송을 끊는다**(그쪽이 더 나쁜 고장이다).
-    const upload = await fetchImpl(presigned.uploadUrl, {
+    // ⚠ **보내기 직전에도 본다 — signal 만 믿지 않는다.** 신호는 *진행 중인* 전송을 끊는 장치이고,
+    //    아직 시작 안 한 전송은 끊을 것이 없다. 여기서 안 보면 presign 과 PUT 사이에 누른 취소가
+    //    **100MB 를 그대로 내보낸 뒤에야** 관측된다(실측: 시험이 이 구멍을 잡았다).
+    if (options.signal?.aborted) throw cancelled();
+    // ⚠ **취소로 끊긴 전송을 「실패」로 말하지 않는다.** 사람이 스스로 그만둔 일에 빨간창을 내면
+    //    그것도 거짓 보고다 — 상한으로 끊긴 것과는 다른 사건이다.
+    const upload = await fetchWithCancel(fetchImpl, presigned.uploadUrl, {
         method: "PUT",
         headers: { "content-type": "application/zip" },
         body: new Uint8Array(packed.buffer),
-        signal: AbortSignal.timeout(TRANSFER_TIMEOUT_MS),
-    });
+        // ⚠ **상한과 취소를 합친다.** 둘 중 먼저 오는 쪽이 끊는다 — 상한만 두면 사람이 눌러도
+        //    100MB 가 다 나갈 때까지 안 멈추고, 취소만 두면 매달린 연결을 아무도 안 끊는다.
+        //    단일 PUT 이라 여기서 끊으면 **객체가 안 생긴다**(S3 는 PUT 완료 시 만든다).
+        signal: anySignal(options.signal, AbortSignal.timeout(TRANSFER_TIMEOUT_MS)),
+    }, options.signal);
     if (!upload.ok) {
         throw new DevtoolsError(
             "SERVER_REJECTED",
@@ -191,6 +270,9 @@ export async function publish(options: PublishOptions): Promise<PublishResult> {
             "잠시 뒤 다시 시도해 주세요.",
         );
     }
+    // ⚠ **여기서 한 번 더 본다.** 아래 `confirm` 이 판을 만드는 문이고, 그 앞이 **되돌릴 수 있는
+    //    마지막 자리**다. 지나면 취소는 「늦었다」가 된다.
+    if (options.signal?.aborted) throw cancelled();
 
     report("서버가 확인하는 중…");
     // ⚠ **여기서 다시 묶지 않는다.** 동의 뒤 재시도는 **같은 `storageKey`** 를 쓴다 — S3 에 이미
@@ -200,6 +282,11 @@ export async function publish(options: PublishOptions): Promise<PublishResult> {
     report(`버전 ${confirmed.revisionNo} 로 올렸습니다.`);
 
     return {
+        // ⚠ **취소가 늦었으면 그 사실을 싣는다 — 삼키지 않는다.** `confirm` 이 성공했으므로 판은
+        //    만들어졌다. 부르는 쪽이 이것을 안 보고 「취소했습니다」로 접으면 **서버는 판을 만들었는데
+        //    화면만 거짓**이 되고, 발행 성공의 부수효과(표식 갱신)를 건너뛰면 **디스크에 거짓**이 남는다
+        //    — 다음 발행이 낡은 기반을 선언해 자기가 방금 만든 판에 대해 409 를 맞는다.
+        ...(options.signal?.aborted ? { cancelledLate: true as const } : {}),
         fileCount: packed.fileCount,
         byteSize: packed.buffer.byteLength,
         sha256: packed.sha256,

@@ -62,7 +62,7 @@ const REEXPORT = join("packages", "core", "src", "index.ts");
  * 브랜드를 만드는 자리. 둘이다.
  *
  * ⑴ `ensureApiFor` — 사이트를 고르는 일반 경로.
- * ⑵ `offerFolderElsewhere` — 고른 사이트가 **이 폴더의 것이 아닐 때** 그 사이트의 소스를 받는 자리.
+ * ⑵ `offerElsewhere` — 고른 사이트가 **이 폴더의 것이 아닐 때** 그 사이트의 소스를 받는 자리.
  *    이 창의 유효 사이트는 아직 폴더의 것이라 라이브로 읽으면 **엉뚱한 사이트를 받는다.** 고르는
  *    그 순간이 값이 API 에 묶일 값으로 고정되는 순간이므로, 거기서 잡아 `openSite` 로 넘긴다.
  *

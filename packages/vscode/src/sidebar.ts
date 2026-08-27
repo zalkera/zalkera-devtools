@@ -34,6 +34,8 @@ export class ZalkeraSidebar implements vscode.TreeDataProvider<Node> {
         keyExpiresAt: null,
         folderTenant: null,
         folderPath: null,
+        // 아직 목록을 본 적이 없다 — **모름**이다(「하나뿐」이 아니다).
+        canSwitch: null,
     };
 
     update(patch: Partial<SidebarState>): void {

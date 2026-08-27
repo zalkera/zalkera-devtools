@@ -39,6 +39,18 @@ export interface SidebarState {
      */
     folderPath: string | null;
     /**
+     * **이 계정에 사이트가 여럿인가** — 「전환」을 말해도 되는가의 근거.
+     *
+     * ⚠ **세 값이다. `false` 와 `null` 을 접지 마라.**
+     *   · `true`  — 여럿. 전환할 곳이 실제로 있다.
+     *   · `false` — 하나뿐. **「전환」은 거짓말이고, 눌러도 자기 하나가 뜬다.**
+     *   · `null`  — **모른다**(로그인 직후·조회 실패). 이때는 **보여 준다** — 안 보여 주면 여러
+     *     사이트를 맡은 사람이 전환할 자리를 잃는다. 모름을 「하나」로 접으면 그것이 막다른 길이다.
+     *
+     * 값은 고르는 창이 목록을 받을 때 캐시한다 — 그 시점에 이미 손에 있으므로 **새 조회가 0** 이다.
+     */
+    canSwitch: boolean | null;
+    /**
      * 홈 폴더. 주면 그 아래 경로를 `~` 로 접는다 — **머리를 접는 것보다 짧고 안 잃는다**
      * (`/home/x/projects/…` 50자 → `~/projects/…` 38자, 접기 자체가 불필요해진다).
      *
@@ -136,7 +148,7 @@ export function sidebarPlan(state: SidebarState): PlanGroup[] {
         ];
     }
 
-    const {tenant, site, previewUrl, keyExpiresAt, folderTenant, folderPath, home} = state;
+    const {tenant, site, previewUrl, keyExpiresAt, folderTenant, folderPath, home, canSwitch} = state;
     // 화면에 적을 경로. 홈은 **확장이 넘긴다** — 기계마다 다른 값을 판정이 스스로 읽으면 시험이 갈린다.
     // ⚠ **「없음」을 총체적으로 받는다.** 타입은 `string | null` 이지만 이 판정은 JS 에서도
     //    불린다(라벨 검사기가 상태를 손으로 짜서 넘긴다) — `undefined` 한 칸에 터지면 그 검사기가
@@ -157,9 +169,36 @@ export function sidebarPlan(state: SidebarState): PlanGroup[] {
             icon: "account",
             description: tenant,
             items: [
-                tenant
-                    ? live(tenant, "zalkera.site.choose", "circle-filled", "다른 사이트로 바꿉니다")
-                    : act("사이트 선택", "zalkera.site.choose", "circle-outline", "작업할 사이트를 고릅니다"),
+                // ⚠ **이름을 두 번 말하지 않는다.** 이 묶음의 `description` 이 이미 사이트 이름을 든다 —
+                //    바로 아래 항목이 같은 이름을 또 적으면 한 줄이 사실을 반복하면서 **누르면 무슨 일이
+                //    일어나는지는 아무 데도 없다.** 항목은 「이것이 무엇인가」가 아니라 「누르면 무엇을
+                //    하는가」를 말해야 하고, 사이트가 이미 있으면 그 답은 **전환**이다.
+                //
+                // ⚠ 라벨이 상태로 갈리므로 `dynamic` 이다 — 값을 싣는 것은 아니지만 팔레트 제목과
+                //    일치할 수 없다. 팔레트는 상태를 모르므로 「사이트 선택」 하나로 둘을 덮는다.
+                // ⚠ **줄을 없애지 않는다 — 라벨만 가른다.** 「전환」은 여럿일 때만 참이지만, 하나뿐이라고
+                //    줄을 지우면 두 가지가 깨진다.
+                //
+                //    ⑴ 이 파일이 이미 반대 규칙을 세웠다(아래 「내려받기」 묶음): 「상태에 따라 커졌다
+                //       작아졌다 하지 않는다 — 사람은 줄어든 것을 「조건이 안 됐다」가 아니라 **「고장」**
+                //       으로 읽는다.」 콘솔 전환기는 드롭다운이 **같은 자리의 이름 텍스트로 강등**되지만
+                //       여기선 줄이 통째로 사라진다 — 매체가 다르므로 그 선례를 빌려올 수 없다.
+                //
+                //    ⑵ **낡은 `false` 가 자기봉인이 된다.** 캐시를 갱신하는 유일한 클릭 입구가 이 줄인데,
+                //       그것을 숨기면 나중에 둘째 사이트에 초대돼도 줄이 영영 안 돌아온다. 낡은 `true` 는
+                //       누르면 스스로 고쳐지는데 낡은 `false` 는 못 고친다 — **회복 불가능한 방향**이다.
+                //
+                //    그래서 하나뿐이면 「선택」이라 말한다: 「전환」이라 안 하니 거짓이 아니고, 눌러도
+                //    정중하게 끝나며(고르는 창이 하나짜리 목록도 일부러 보여 준다), 그 누름이 캐시를
+                //    갱신해 **화면이 스스로 고쳐진다.**
+                tenant && canSwitch !== false
+                    ? live("사이트 전환", "zalkera.site.choose", "circle-filled", "다른 사이트로 바꿉니다")
+                    : act(
+                          "사이트 선택",
+                          "zalkera.site.choose",
+                          tenant ? "circle-filled" : "circle-outline",
+                          tenant ? "맡으신 사이트를 봅니다" : "작업할 사이트를 고릅니다",
+                      ),
                 // 경고로 그치면 다음 할 일이 화면에 없다 — 누르면 그 사이트로 돌아간다.
                 ...(mismatched
                     ? [act("이 폴더의 사이트로 돌아가기", "zalkera.site.useFolder", "warning")]

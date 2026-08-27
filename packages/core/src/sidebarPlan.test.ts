@@ -20,6 +20,7 @@ const base: SidebarState = {
   keyExpiresAt: null,
   folderTenant: null,
   folderPath: null,
+  canSwitch: null,
 };
 const plan = (patch: Partial<SidebarState> = {}) => sidebarPlan({ ...base, ...patch });
 const ids = (patch?: Partial<SidebarState>) => plan(patch).map((g) => g.id);
@@ -359,4 +360,45 @@ test("폴더 이름의 링크 문법이 무력화된다 — 툴팁이 언젠가 
   for (const 문면 of [g?.description ?? "", g?.tooltip ?? ""]) {
     assert.ok(!/\]\(command:/.test(문면), `링크 모양이 살아남았다: ${문면}`);
   }
+});
+
+// ── 사이트 묶음이 이름을 두 번 말하지 않는다 ─────────────────────────────────
+//
+// 묶음 헤더(`description`)가 이미 사이트 이름을 든다. 바로 아래 항목이 같은 이름을 또 적으면
+// **한 줄이 사실을 반복하면서 「누르면 무슨 일이 일어나는지」는 아무 데도 없다.** 항목은
+// 「이것이 무엇인가」가 아니라 「누르면 무엇을 하는가」를 말해야 한다.
+const siteItems = (state: SidebarState) =>
+    sidebarPlan(state).find((g) => g.id === "site")!.items.filter((i) => i.kind === "action");
+
+test("사이트가 여럿이면 항목이 「전환」을 말한다 — 이름을 되풀이하지 않는다", () => {
+    const state = { ...base, tenant: "bix", canSwitch: true };
+    const group = sidebarPlan(state).find((g) => g.id === "site")!;
+    assert.equal(group.description, "bix", "이름은 묶음 헤더가 든다");
+    const first = siteItems(state)[0]!;
+    assert.equal(first.label, "사이트 전환");
+    assert.equal(first.command, "zalkera.site.choose");
+    assert.ok(!first.label.includes("bix"), "헤더가 말한 이름을 항목이 또 말하면 안 된다");
+});
+
+test("사이트가 하나뿐이면 「선택」이다 — 「전환」은 거짓말이고, 줄은 남는다", () => {
+    // ⚠ **줄을 지우면 안 된다.** 이 파일이 이미 「줄어든 것은 고장으로 읽힌다」를 세웠고, 더 나쁘게는
+    //    캐시를 갱신하는 유일한 클릭 입구가 이 줄이라 **낡은 `false` 가 자기봉인**이 된다 —
+    //    나중에 둘째 사이트에 초대돼도 줄이 영영 안 돌아온다.
+    const items = siteItems({ ...base, tenant: "bix", canSwitch: false });
+    const labels = items.map((i) => i.label);
+    assert.ok(!labels.includes("사이트 전환"), `하나뿐인데 전환을 권했다: ${labels.join("·")}`);
+    assert.ok(labels.includes("사이트 선택"), `줄이 사라졌다 — 캐시를 고칠 입구가 없어진다: ${labels.join("·")}`);
+    assert.equal(items[0]!.command, "zalkera.site.choose", "눌러야 캐시가 갱신된다");
+});
+
+test("모르면 보여 준다 — 모름을 「하나뿐」으로 접지 않는다", () => {
+    // 로그인 직후·조회 실패. 안 보여 주면 여러 사이트를 맡은 사람이 **전환할 자리를 잃는다** —
+    // 그것이 막다른 길이고, 보여 주는 쪽은 눌러 봐야 손해가 없다.
+    const labels = siteItems({ ...base, tenant: "bix", canSwitch: null }).map((i) => i.label);
+    assert.ok(labels.includes("사이트 전환"), "모름을 false 로 접으면 전환 자리가 사라진다");
+});
+
+test("사이트가 없으면 「선택」이다 — 전환할 것이 없다", () => {
+    const first = siteItems({ ...base, tenant: "", canSwitch: null })[0]!;
+    assert.equal(first.label, "사이트 선택");
 });

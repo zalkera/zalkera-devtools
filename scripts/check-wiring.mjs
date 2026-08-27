@@ -65,6 +65,22 @@ const WIRES = [
     ],
     [
         "packages/vscode/src/extension.ts",
+        "void persistedState.update(CAN_SWITCH_STATE, isSuperAdmin || tenants.length > 1);",
+        "사이드바가 **사이트 수를 영영 모른다** — 목록을 쥐는 자리가 여기 하나뿐이라, 안 남기면 " +
+            "「전환」이 하나뿐인 계정에도 계속 뜬다(누르면 자기 하나가 뜨는 거짓 권유)",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "canSwitch: canSwitchCached(),",
+        "사이드바가 그 사실을 안 읽는다 — 캐시는 쌓이는데 화면이 안 쓰면 없는 것과 같다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "await persistedState.update(CAN_SWITCH_STATE, undefined);",
+        "로그아웃이 계정 사실을 안 지운다 — **다음 사람의 계정에 앞사람의 사실**을 쓰게 된다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
         "stopReflectionWatches();",
         "확장이 내려가는데 **반영 확인 폴링이 계속 돈다** — 조회가 더 나가고, 최악에는 이미 없는 " +
             "맥락에 대고 알림을 띄운다. 상한(180초)은 「끝난다」를 보장할 뿐 「지금 끝난다」가 아니다",
@@ -80,6 +96,54 @@ const WIRES = [
         "reflectionOf(await api.listRevisions(REFLECT_PAGE), revisionNo)",
         "반영 확인이 **판 전량**을 읽는다 — 판은 발행할 때마다 늘고 줄지 않으므로 그 비용이 원장 " +
             "크기에 비례해 영원히 자란다. 관측이 없는 사이트에서는 유예까지 여섯 번 되풀이된다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "{ location: vscode.ProgressLocation.Notification, title: \"올리는 중\", cancellable: true },",
+        "「올리는 중」에 취소 버튼이 사라진다 — 시작하면 끝날 때까지 못 멈춘다(실사용 요청)",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "signal: stop.signal,",
+        "버튼은 뜨는데 **아무것도 안 끊긴다** — 누른 사람은 멈춘 줄 알고 화면은 계속 돈다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "token.onCancellationRequested(() => {\n          stop.abort();",
+        "취소 손잡이가 **신호를 안 당긴다** — 버튼도 뜨고 「멈추는 중」 문면까지 나오는데 전송은 " +
+            "끝까지 간다. 바로 윗줄의 `signal: stop.signal` 이 있어도 당기는 손이 없으면 장식이다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        'say.publishCancelledLate(tenant, result.revisionNo, result.status === "READY"),',
+        "늦은 취소 문면이 **판의 현재 상태를 안 보고** 늘 미래형으로 말한다 — `STATIC` 은 확정 즉시 " +
+            "게시라 이미 손님에게 나갔는데 「준비되면 게시됩니다」라고 하면, 사람은 안 바뀐 줄 알고 " +
+            "한 번 더 올린다. 문면 자체는 시험이 물지만 **어느 값을 넘기는지**는 여기서만 잡힌다",
+    ],
+    // ⚠ **줄머리(`\n  `)부터 고정한다.** `countOccurrences` 는 부분문자열이라 줄 안쪽만 박으면
+    //    **그 앞에 가드를 붙이는 길**이 열린다 — `if (!result.cancelledLate) rememberFolder(…)` 한
+    //    줄로 부수효과를 조건부로 만들어도 조각은 그대로 있다. 들여쓰기까지 물어야 그 길이 막힌다.
+    //
+    // ⚠ **주석을 사이에 두지 않는다.** 주석을 낀 조각은 **주석의 자리**를 지킬 뿐이라, 블록만
+    //    옮기고 주석을 두고 가면 통과한다. 그래서 이 조각은 **코드끼리 맞붙은 자리**를 문다.
+    [
+        "packages/vscode/src/extension.ts",
+        "\n  rememberFolder(String(tenant), dir);\n\n  if (result.cancelledLate) {",
+        "늦은 취소 갈래가 **표식·폴더기억 위로 올라가면** 화면이 아니라 **디스크에 거짓**이 남는다 — " +
+            "표식이 옛 판을 든 채라 다음 발행이 낡은 기반을 선언하고 자기가 방금 만든 판에 409 를 맞는다. " +
+            "블록의 존재만 세면 이 순서가 안 잡힌다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "\n  const marked = await writeBindingMarkTo(dir, {\n    origin: \"published\",",
+        "표식 갱신을 **조건부로 감싸면** 늦은 취소에서 표식이 옛 판을 든 채 남는다 — 아래 순서 조각은 " +
+            "`rememberFolder` 쪽만 지키므로 이 문장은 따로 문다. 줄머리 고정이라 가드를 앞에 못 붙인다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "if (result.cancelledLate) {",
+        "취소가 늦었는데 **빌드 대기에 붙든다** — 그만두겠다고 한 사람을 계속 기다리게 한다. " +
+            "반대로 여기서 「취소했습니다」로 접으면 판이 있는데 없다고 말하는 거짓이 된다",
     ],
     [
         "packages/vscode/src/extension.ts",

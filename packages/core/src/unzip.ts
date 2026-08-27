@@ -38,11 +38,15 @@ export interface UnzipResult {
     fileCount: number;
 }
 
-/**
- * 아카이브의 **항목 이름만** 읽는다. 파일을 하나도 만들지 않는다.
- *
- * 들여오기가 쓴다 — 무엇을 풀지(`decideImportPlan`)는 **쓰기 전에** 정해져야 한다.
- */
+/** 이름 총량 상한을 넘었을 때. 두 판독 경로가 **같은 말**을 하도록 한 곳에서 만든다. */
+function tooManyNameBytes(): DevtoolsError {
+    return new DevtoolsError(
+        "NOT_A_SITE",
+        "압축 파일의 파일 목록이 지나치게 큽니다.",
+        "사이트 소스 zip 이 맞는지 확인해 주세요 — 정상 소스에는 이런 목록이 없습니다.",
+    );
+}
+
 /**
  * zip 항목의 **파일 이름을 읽는다 — UTF-8 만 받는다.**
  *
@@ -57,15 +61,6 @@ export interface UnzipResult {
  *   남는다. 그래서 못 읽으면 멈추고, **다음에 할 일을 이름 대고 말한다** — 「최신 도구로」라고만
  *   하면 같은 도구로 다시 해서 또 막힌다.
  */
-/** 이름 총량 상한을 넘었을 때. 두 판독 경로가 **같은 말**을 하도록 한 곳에서 만든다. */
-function tooManyNameBytes(): DevtoolsError {
-    return new DevtoolsError(
-        "NOT_A_SITE",
-        "압축 파일의 파일 목록이 지나치게 큽니다.",
-        "사이트 소스 zip 이 맞는지 확인해 주세요 — 정상 소스에는 이런 목록이 없습니다.",
-    );
-}
-
 function decodeEntryName(raw: Buffer, flags: number): string {
     // ASCII 뿐이면 어느 인코딩이든 같다 — 가장 흔한 경우를 먼저 끝낸다.
     let ascii = true;
@@ -119,6 +114,11 @@ function decodeEntryName(raw: Buffer, flags: number): string {
     }
 }
 
+/**
+ * 아카이브의 **항목 이름만** 읽는다. 파일을 하나도 만들지 않는다.
+ *
+ * 들여오기가 쓴다 — 무엇을 풀지(`decideImportPlan`)는 **쓰기 전에** 정해져야 한다.
+ */
 export function listZipEntries(zip: Buffer): string[] {
     const eocd = findEocd(zip);
     const entryCount = zip.readUInt16LE(eocd + 10);
