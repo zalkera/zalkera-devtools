@@ -256,19 +256,31 @@ export async function writeExclusive(
         written?.add(path);
     } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-        if (written?.has(path)) {
-            throw new DevtoolsError(
-                "SERVER_REJECTED",
-                `받은 꾸러미가 같은 파일을 두 번 담고 있습니다: ${entryName}`,
-                "받은 것이 잘못됐습니다 — 빈 폴더로 다시 받아도 같은 자리에서 멈춥니다. 잘커라에 알려 주세요.",
-            );
-        }
+        assertNotWrittenTwice(path, entryName, written);
         throw new DevtoolsError(
             "SERVER_REJECTED",
             `받은 꾸러미가 이미 있는 파일을 덮으려 합니다: ${entryName}`,
             "그 파일은 이 폴더에 원래 있던 것입니다. 빈 폴더를 새로 만들어 다시 받아 주세요.",
         );
     }
+}
+
+/**
+ * **아카이브가 같은 경로를 두 번 담았는가.** 담았으면 던진다.
+ *
+ * ⚠ **판정과 문면이 여기 한 벌만 있다.** 이 사실은 「덮지 않고 쓰는」 길과 「골라서 덮는」 길
+ *   ([UntarOptions.decide])이 **둘 다** 물어야 하는데, 각자 자기 자리에서 물으면 한쪽만 고쳐진다 —
+ *   이 레포가 되풀이해 겪은 병이다.
+ * ⚠ 문면이 「빈 폴더로 다시 받아도 같은 자리에서 멈춥니다」인 이유: 이쪽은 **받은 것이 잘못된**
+ *   경우다. 「빈 폴더를 만드세요」라고 말하면 사람은 그 말을 따르고 또 실패하는 고리에 갇힌다.
+ */
+export function assertNotWrittenTwice(path: string, entryName: string, written?: Set<string>): void {
+    if (!written?.has(path)) return;
+    throw new DevtoolsError(
+        "SERVER_REJECTED",
+        `받은 꾸러미가 같은 파일을 두 번 담고 있습니다: ${entryName}`,
+        "받은 것이 잘못됐습니다 — 빈 폴더로 다시 받아도 같은 자리에서 멈춥니다. 잘커라에 알려 주세요.",
+    );
 }
 
 /**

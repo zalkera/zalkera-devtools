@@ -30,6 +30,7 @@ export {
   type ReflectionState,
   switchCandidates,
   type ActivateResult,
+  type DraftFiles,
   type DraftState,
   isDraftInProgress,
   revisionWhen,
@@ -198,6 +199,7 @@ export {
     declaredBaseRevisionNo,
     mergeTenantSetting,
     SOURCE_MARK_PATH,
+    TENANT_CODE,
     writeSourceMarkTo,
     writeBindingMarkTo,
     linkFolderToTenant,
@@ -228,3 +230,32 @@ export { sidebarPlan } from "./sidebarPlan.ts";
 export { displayPath } from "./displayPath.ts";
 export { idleStatusPlan, type StatusPlan } from "./statusPlan.ts";
 export type { PlanGroup, PlanItem, SidebarState } from "./sidebarPlan.ts";
+export {
+    SYNC_LEDGER_FORMAT,
+    SYNC_LEDGER_PATH,
+    parseSyncLedger,
+    serializeSyncLedger,
+    type LedgerFile,
+    type SyncLedger,
+} from "./syncLedger.ts";
+export {
+    applyAfterDiscard,
+    planPull,
+    type Conflict as PullConflict,
+    type LocalFile,
+    type PullInput,
+    type PullPlan,
+} from "./pullPlan.ts";
+export {
+    CONFLICT_LIST_CAP,
+    SAVED_SUFFIX,
+    pullSiteSource,
+    readLedger,
+    writeLedger,
+    type PullOptions,
+    type PullResult,
+} from "./pull.ts";
+export {rebuildBaseline, type BaselineOptions, type BaselineResult} from "./baseline.ts";
+export {ledgerCorrection, syncStatus, type SyncBlocker, type SyncStatus, type SyncStatusInput} from "./syncStatus.ts";
+export {hashFile, hashWorkdir, resolveExisting, type WorkdirManifest} from "./workdir.ts";
+export {readTarGzManifest, type TarManifestEntry} from "./untar.ts";

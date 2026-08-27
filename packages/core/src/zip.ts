@@ -1,3 +1,4 @@
+import {SYNC_LEDGER_PATH} from "./syncLedger.ts";
 import { createHash } from "node:crypto";
 import { PROVENANCE_PATH, buildProvenance } from "./provenance.ts";
 import {MAX_ZIP_ENTRIES} from "./limits.ts";
@@ -384,7 +385,18 @@ export interface PackResult {
  *   남기고(고객 소스와 동행), 같은 폴더의 `ASSETS-LICENSE.md`(라이선스 대장)·`pack.json`(판 출처)이
  *   배송 문서가 가리키는 실물이다 — 폴더째 빼면 그 참조가 매달린다.
  */
-const EXCLUDED_PATHS = new Set([".zalkera/source.json", PROVENANCE_PATH]);
+const EXCLUDED_PATHS = new Set([".zalkera/source.json", SYNC_LEDGER_PATH, PROVENANCE_PATH]);
+
+/**
+ * **접두로 빼는 자리.** 정확일치·세그먼트 이름으로는 안 걸리는 것들이다.
+ *
+ * ⚠ `.zalkera/saved/2026…/foo.tsx` 같은 「치워 두는 자리」가 그렇다 — 어느 갈래에도 안 걸려
+ *   **정본에 실린다.** 본선 방어는 그 자리를 **트리 밖 형제 디렉터리**로 두는 것이고, 이것은
+ *   옛 판이 만든 폴더가 남아 있을 때를 위한 **둘째 겹**이다.
+ * ⚠ **`.zalkera/` 를 통째로 넣지 마라** — 같은 폴더의 `ASSETS-LICENSE.md`·`pack.json` 은
+ *   배송 문서가 가리키는 실물이다.
+ */
+const EXCLUDED_PREFIXES = [".zalkera/saved/"];
 
 /**
  * ⚠ **이 목록은 열거다 — 그리고 열거로 끝날 수밖에 없다.**
@@ -418,6 +430,7 @@ const EXCLUDED_PATHS = new Set([".zalkera/source.json", PROVENANCE_PATH]);
 export function isExcludedEntry(entryPath: string): boolean {
     const path = entryPath.split(sep).join("/").toLowerCase();
     if (EXCLUDED_PATHS.has(path)) return true;
+    if (EXCLUDED_PREFIXES.some((prefix) => path.startsWith(prefix))) return true;
     // 이름 기준 제외는 **어느 층에 있든** 걸린다 — 뿌리의 `node_modules` 만 보면 중첩된 것이 샌다.
     const segments = path.split("/").filter((s) => s !== "");
     if (segments.some((segment) => ALWAYS_EXCLUDED.has(segment))) return true;

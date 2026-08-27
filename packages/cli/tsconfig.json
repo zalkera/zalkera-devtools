@@ -1,0 +1,21 @@
+{
+    "extends": "../../tsconfig.base.json",
+    "compilerOptions": {
+        "rootDir": "src",
+        "outDir": "dist",
+        "paths": {
+            "@zalkera/devtools-core": [
+                "../core/dist/index.d.ts"
+            ]
+        },
+        "types": [
+            "node"
+        ]
+    },
+    "include": [
+        "src/**/*.ts"
+    ],
+    "exclude": [
+        "src/**/*.test.ts"
+    ]
+}

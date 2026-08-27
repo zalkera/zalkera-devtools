@@ -118,6 +118,21 @@ export interface ActivateResult {
     discardedPendingChanges?: number;
 }
 
+/**
+ * `GET /draft/files` 의 응답(memo184 T0-②).
+ *
+ * ⚠ [strandedOnOldRevision] 이 참이면 그 편집은 **발행도 열람도 막혀 있고 되돌리기만 남는다.**
+ *   그래도 [changed] 는 무엇이 들어 있었는지를 말한다 — 좌초 반출이 그 자리다.
+ */
+export interface DraftFiles {
+    /** 불투명 세대. 편집이 없으면 `null`. */
+    generation: string | null;
+    changed: Array<{path: string; sha256: string}>;
+    deleted: string[];
+    baseRevisionNo: number | null;
+    strandedOnOldRevision: boolean;
+}
+
 /** `GET /draft` 에서 **우리가 쓰는 것**. */
 export interface DraftState {
     /** 되돌리기가 지목하는 판. **편집이 없으면 `null`** 이다(그때 답은 활성 행이다). */
@@ -254,6 +269,26 @@ export class ZalkeraApi {
      */
     draftState(): Promise<DraftState> {
         return this.request<DraftState>("GET", "/api/partner/site-upload/draft");
+    }
+
+    /** 이 클라이언트가 어느 사이트를 가리키는가. 장부(`sync.json`)가 소속을 적을 때 쓴다. */
+    tenantCode(): string {
+        return this.options.tenantCode();
+    }
+
+    /**
+     * 지금 편집 중인 것이 **무엇을 바꿔 놓았는가**(memo184 T0-② · `GET /draft/files`).
+     *
+     * ⚠ **선행조건의 정본이 이 문이다.** 로컬 도구는 다음 편집의 base sha 를 자기 장부가 아니라
+     *   여기서 받는다. 장부로 폴백하면 memo184 🔴1(남이 되돌린 뒤에도 「이미 반영됨」이라 말하는
+     *   거짓 성공)이 그대로 되살아난다.
+     * ⚠ `generation` 은 **불투명**하다. 값을 해석하거나 순서를 매기지 않는다 — 서버 내부 토큰이
+     *   클라이언트로 새지 않게 그렇게 정했다.
+     *
+     * 편집이 없으면 **빈 목록**이다(404 가 아니다 — 「없다」와 「못 물어봤다」를 가른다).
+     */
+    draftFiles(): Promise<DraftFiles> {
+        return this.request<DraftFiles>("GET", "/api/partner/site-upload/draft/files");
     }
 
     /** 업로드 presign — zip 을 S3 로 **직접** 올린다(백엔드 미경유). */
