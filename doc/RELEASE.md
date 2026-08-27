@@ -67,6 +67,31 @@ npx vsce publish --packagePath dist/zalkera-devtools-<version>.vsix
 
 ---
 
+## 2b. CLI 도 **같은 판으로** 발행한다 (오너)
+
+```bash
+npm run pack:cli                                  # verify → 번들 → npm pack → 검수
+npm publish ./shared/zalkera-<version>.tgz        # 오너만
+```
+
+⚠ **판을 올릴 때마다 둘 다 발행한다.** 서버의 최소판 게이트는 **하나**다
+(`min-extension-version` · `check-version-lockstep.mjs` KDoc). 확장만 올리고 CLI 를 안 올리면,
+게이트가 새 판을 요구하는데 npm 최신은 옛 판이라 **CLI 사용자가 갇힌다** — 그들이 받는 안내는
+「업데이트하세요」인데 받을 새 판이 없다.
+
+⚠ **`npm pack` 을 직접 부르지 마라.** 그것은 지금 `dist/` 에 있는 것을 묻지 않고 담는다.
+`tsc` 조각이 남아 있으면 번들 대신 그것이 실려 고객 기계에서 `ERR_MODULE_NOT_FOUND` 가 난다.
+`pack-cli.mjs` 가 지우고·굽고·검수한다(자립 · shebang 1개 · 예상 밖 항목 0 · 판 축).
+
+산출물이 실제로 도는지는 **설치해서** 본다 — 굽기만으로는 안 드러나는 갈래가 있다(실측: shebang
+두 줄이면 포장은 성공하고 `node` 가 2행에서 `SyntaxError` 로 죽는다):
+
+```bash
+npm i -g ./shared/zalkera-<version>.tgz && zalkera --version
+```
+
+---
+
 ## 3. 발행 **다음** — 태그를 찍는다
 
 `dist/*.vsix` 는 gitignore 다. 태그를 안 찍으면 **어느 트리가 나갔는지 아무 데도 안 남는다.**

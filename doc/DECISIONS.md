@@ -12,6 +12,39 @@
 
 ---
 
+## CLI 는 `@zalkera/*` 스코프 **밖**에 낸다 — 맨 이름 `zalkera`
+
+**경계**: `@zalkera/*` = 고객 소스가 **`import` 하는 것**(계약) · 맨 `zalkera` = 사람이 터미널에서
+**치는 것**(도구).
+
+`@zalkera/client` 는 이 시스템에서 스코프의 뜻을 이미 정해 놨다 — 고객 `package.json` 의
+의존으로 선언되고, 서버가 그 **최소 버전을 광고**하며(`precheck`), LLM 이 읽는 규약 정본이
+`node_modules/@zalkera/client/llms.txt` 이고, `diagnostics` 가 고객 소스의 호출 이름을 그
+패키지의 실제 export 와 대조한다. CLI 는 그중 어느 것도 아니다.
+
+**스코프에 넣으면 생기는 실해**: 우리 나침반이 「고객 LLM + 로컬 코드 유지보수」다. 에이전트가
+`node_modules/@zalkera/client` 에서 규약을 읽는 그 환경에서 「zalkera devtools 를 쓰라」는 말을
+들으면, 형제 패키지처럼 보이는 이름을 **사이트 프로젝트 안에** 설치할 개연이 크다
+(`npm i @zalkera/devtools`). 그러면 CLI 가 사이트 의존 트리에 들어가고 그 `package.json` 이
+업로드돼 서버 빌드가 CLI 를 설치한다. 지금 그것을 막는 검사기는 **없다.**
+맨 이름은 그 오인을 안 만든다 — `npm i zalkera` 는 「명령을 의존으로 넣는다」로 읽혀 손이 멈춘다.
+
+⚠ **`@zalkera/devtools`·`@zalkera/cli` 를 별칭으로 함께 내지 않는다.** 판을 올릴 때마다 **둘 다**
+발행해야 하고(최소판 게이트가 하나라 한쪽만 올라가면 별칭 사용자가 갇힌다), 발행 대상이 둘이면
+언젠가 한쪽이 빠진다.
+
+## `@zalkera/devtools-core` 는 발행하지 않는다 — 번들한다
+
+확장이 이미 esbuild `--alias` 로 그렇게 싣고, CLI 도 같은 문을 쓴다. 발행하면 **공개 계약 표면이
+하나 더** 생기는데, 이 레포는 `storefront-kit` 을 철회하며 「계약 출처는 `client` 하나」로
+좁혀 놨다. core 의 API 는 우리 둘(확장·CLI)만 쓰는 내부 모양이라 계약으로 굳히면 못 고친다.
+
+⚠ 대가: 번들이 자립하는지 **매번 확인해야 한다.** `npm pack` 은 `dist/` 에 있는 것을 묻지 않고
+담으므로, `tsc` 조각이 남아 있으면 고객 기계에서 `ERR_MODULE_NOT_FOUND` 다. `pack-cli.mjs` 가
+그 자리를 잰다.
+
+---
+
 ## ⛔ 다시 올리지 말 것
 
 ### 동시 업로드 — 덮어쓰기 방어

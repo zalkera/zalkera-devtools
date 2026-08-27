@@ -35,7 +35,15 @@ import {confirm} from "./confirm.ts";
 import {describePush, describeStatus, describeStranded, DISCARD_PHRASE, pathLines} from "./report.ts";
 import {FileTokenStore, tokenPath} from "./tokenStore.ts";
 
-const HELP = `잘커라 — 사이트 소스를 로컬에서 다루는 도구 (v${version()})
+/**
+ * 도움말 한 판.
+ *
+ * 🔴 **모듈 최상위 상수로 두지 않는다.** 그러면 `version()`·`tokenPath()` 가 **import 시점**에,
+ *    곧 최상위 `catch` 가 서기 전에 돈다 — 그 둘이 던지는 갈래(설치 깨짐·홈 디렉터리 없음)에서
+ *    사람이 받는 것이 친절한 문장이 아니라 **날 스택 트레이스**가 된다(실측).
+ */
+function help(): string {
+    return `잘커라 — 사이트 소스를 로컬에서 다루는 도구 (v${version()})
 
   zalkera login                 브라우저로 로그인
   zalkera logout                로그인 정보를 지운다
@@ -62,6 +70,7 @@ const HELP = `잘커라 — 사이트 소스를 로컬에서 다루는 도구 (v
 
 로그인 정보는 ${tokenPath()} 에 **평문**으로 저장됩니다.
 그 컴퓨터를 쓸 수 있는 사람은 이 사이트를 고치고 배포할 수 있습니다.`;
+}
 
 async function main(argv: readonly string[]): Promise<number> {
     const {command, positional, flags} = parseArgs(argv);
@@ -72,7 +81,7 @@ async function main(argv: readonly string[]): Promise<number> {
         return 0;
     }
     if (command === null || command === "help" || flagOn(flags, "help")) {
-        process.stdout.write(`${HELP}\n`);
+        process.stdout.write(`${help()}\n`);
         return 0;
     }
 
@@ -355,7 +364,7 @@ async function main(argv: readonly string[]): Promise<number> {
             return 0;
         }
         default:
-            process.stderr.write(`모르는 명령입니다: ${command}\n\n${HELP}\n`);
+            process.stderr.write(`모르는 명령입니다: ${command}\n\n${help()}\n`);
             return 2;
     }
 }

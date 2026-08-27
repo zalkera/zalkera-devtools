@@ -1,9 +1,24 @@
-# @zalkera/devtools-cli
+# zalkera
 
 터미널에서 쓰는 길. VS Code 를 쓰지 않거나, 스크립트·CI 에서 돌릴 때를 위한 것이다.
 
+```bash
+npx zalkera pull --site <사이트코드>     # 한 번만 쓸 때
+npm i -g zalkera && zalkera pull        # 자주 쓸 때
+```
+
+> ⚠ **아직 npm 에 안 올라갔다.** 위 두 줄은 첫 발행 뒤에 선다. 그때까지는 구운 탈볼로 설치한다 —
+> `npm run pack:cli` 뒤 `npm i -g ./shared/zalkera-<version>.tgz`.
+
 > **상태: 한 바퀴가 돈다.** 받기 → 고치기 → 올리기 → 발행 → 되돌리기·버리기가 전부 선다.
-> 미리보기와 로컬 MCP 서버는 **아직 없다**. npm 에 올라가 있지 않다.
+> 미리보기와 로컬 MCP 서버는 **아직 없다**.
+
+⚠ **이것은 `import` 하는 패키지가 아니다.** 사이트 프로젝트의 의존으로 넣지 마라 — 사람이
+터미널에서 치는 명령이다. 소스가 `import` 하는 쪽은 `@zalkera/client` 이고 그것은 다른
+패키지다(스코프가 그 경계다 · `doc/DECISIONS.md`).
+
+⚠ **판이 확장과 묶여 있다.** 서버의 최소판 게이트가 하나라, 확장이 올라가면 이쪽도 같은 판으로
+올라간다. 게이트에 걸리면 `npx zalkera@latest` 나 `npm i -g zalkera@latest` 로 나간다.
 
 ## 지금 되는 것
 

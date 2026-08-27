@@ -41,6 +41,7 @@
     "check:help": "node scripts/check-help-quotes.mjs",
     "check:claims": "node scripts/check-shipped-claims.mjs",
     "check:chain": "node scripts/check-verify-chain.mjs",
-    "check:version": "node scripts/check-version-lockstep.mjs"
+    "check:version": "node scripts/check-version-lockstep.mjs",
+    "pack:cli": "node scripts/pack-cli.mjs"
   }
 }

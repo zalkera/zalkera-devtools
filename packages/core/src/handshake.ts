@@ -59,11 +59,18 @@ const HANDSHAKE_TIMEOUT_MS = 15 * 1000;
  * 코드도 낡았으므로, 판정을 클라이언트에 두면 정작 고쳐야 할 버전이 자기가 낡은 줄 모른다).
  *
  * `UPGRADE_REQUIRED` 면 여기서 던진다 — 호출부가 판정을 다시 해석하지 않게 하려는 것이다.
+ *
+ * ⚠ **「업데이트하세요」의 방법은 문마다 다르다.** 확장은 편집기가 알아서 갱신하지만, CLI 는
+ *   사람이 명령을 쳐야 한다. 그 한 줄이 없으면 게이트에 걸린 사람은 **나갈 길이 없다** —
+ *   「업데이트한 뒤 다시 시도해 주세요」만 읽고 무엇을 할지 모른다. 부르는 쪽이 방법을 준다
+ *   ([upgradeHow]). 판정은 서버가, 방법은 문이 안다.
  */
 export async function fetchHandshake(
     apiBase: string,
     extensionVersion: string,
     fetchImpl: typeof fetch = fetch,
+    /** 이 문에서 **어떻게** 업데이트하는가. 안 주면 방법을 말하지 않는다(거짓 안내보다 낫다). */
+    upgradeHow?: string,
 ): Promise<Handshake> {
     const url = new URL("/api/devtools/handshake", withTrailingSlash(apiBase));
     url.searchParams.set("extensionVersion", extensionVersion);
@@ -155,7 +162,8 @@ export async function fetchHandshake(
         throw new DevtoolsError(
             "EXTENSION_OUTDATED",
             handshake.message ?? "이 버전은 더 이상 서버와 맞지 않습니다.",
-            `${handshake.minExtensionVersion} 이상으로 업데이트한 뒤 다시 시도해 주세요.`,
+            `${handshake.minExtensionVersion} 이상으로 업데이트한 뒤 다시 시도해 주세요.` +
+                (upgradeHow === undefined ? "" : ` ${upgradeHow}`),
         );
     }
     return handshake;
