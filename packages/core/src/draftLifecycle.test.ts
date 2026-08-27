@@ -292,15 +292,17 @@ test("버린 뒤 세대와 `mine` 을 비운다 · 판 기록은 그대로다", 
     strictEqual(ledger?.base.revisionNo, 9, "판 기록을 건드렸다");
 });
 
-test("🔴 버리기는 **사람에게 보여 준 그 판정**을 그대로 쓴다 — 다시 조회하면 확인한 것과 갈린다", async () => {
-    // 다시 조회하면 그 사이 남의 편집이 끼어들 수 있고, 그러면 동의 없이 그것을 지운다.
+test("🔴 버리기는 **사람에게 보여 준 그 판정**을 그대로 쓴다 — 다시 읽은 것으로 갈아치우지 않는다", async () => {
+    // ⚠ **「다시 조회한다」와 「다시 조회한 것으로 행동한다」는 다른 일이다.**
+    //   조회는 한다 — 확인한 것과 버리는 것이 **갈렸는지 재려고** 한다(갈렸으면 아무것도 안 버린다).
+    //   금지되는 것은 그 결과를 **판정으로 갈아 끼우는 것**이다. 그러면 사람이 본 적 없는 것이
+    //   목록에 들어오고, 방금 받은 동의가 그것까지 덮는다.
     const s = server({active: 9});
     const shown: StrandedPlan = {
         verdict: "elsewhere", empty: false, paths: ["남이-고침.tsx"], generation: "G1", reason: "path-not-mine",
     };
     const out = await discardDraft({api: s.api, folder: await site({"a.tsx": "가"}), plan: shown});
     deepEqual(out.plan, shown, "보여 준 판정과 다른 것을 기록했다");
-    ok(!s.calls.some((c) => c.startsWith("draftFiles")), "확인 뒤에 다시 조회했다");
 });
 
 test("🔴 버리기가 동의를 **무조건 참으로** 안 보낸다 — 그 인자는 게시 대기 AI 변경 폐기다", async () => {
@@ -358,6 +360,20 @@ test("🔴 **무엇이 걸렸는지 안 짚어 주는 서버**에서는 잇지 �
         return true;
     });
     ok(!s.calls.includes("activate:9:true"), `모르는 채로 동의를 이었다: ${s.calls}`);
+});
+
+test("🔴 `--discard-pending` 으로 들어와도 재검을 지난다 — 우리 문면이 안내하는 바로 그 경로다", async () => {
+    // 서버가 동의를 안 물으면 거절 갈래가 아예 안 돈다. 재검이 그 갈래 안에만 있으면 이 회차는
+    // 가드 밖이고, 하필 `asConsentRequired` 가 사람에게 대는 재시도 경로가 이것이다.
+    const s = server({active: 9, hasDraft: true, draft: {generation: "G9", changed: [], deleted: [], baseRevisionNo: 8, strandedOnOldRevision: true}});
+    const plan: StrandedPlan = {verdict: "mine", empty: false, paths: ["a.tsx"], generation: "G1", reason: "ledger-matches"};
+    const dir = await site({});
+    await rejects(() => discardDraft({api: s.api, folder: dir, plan, discardPending: true}), (e: unknown) => {
+        ok(e instanceof DevtoolsError);
+        strictEqual(e.code, "DRAFT_MOVED_WHILE_CONFIRMING");
+        return true;
+    });
+    ok(!s.calls.some((c) => c.startsWith("activate:")), `달라졌는데 그대로 버렸다: ${s.calls}`);
 });
 
 test("🔴 확인하는 사이 사이트 쪽이 달라졌으면 **아무것도 안 버린다**", async () => {

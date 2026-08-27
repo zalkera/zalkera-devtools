@@ -298,6 +298,28 @@ export async function discardDraft(options: DiscardOptions): Promise<DiscardOutc
 
     const active = await activeRevisionNo(options.api);
 
+    // 🔴 **버리기 전에 「확인한 것과 버리는 것이 같은가」를 한 번 잰다.**
+    //
+    //    사람이 목록을 보고 답하는 창은 상한이 없다(분 단위일 수 있다). 그 사이 콘솔·AI 레인이
+    //    편집을 얹으면 그 한 글자 동의가 **보여 준 적 없는 것**을 태운다 — §2.5 🔴3 이 막으려던
+    //    그 얼굴이다.
+    //
+    // ⚠ **문 앞에 둔다 — 거절 갈래 안이 아니다.** 안에만 두면 `--discard-pending` 을 처음부터
+    //   준 회차는 서버가 동의를 안 물어 그 갈래가 아예 안 돌고, 재검이 통째로 빠진다(심의 실측).
+    //   그리고 우리 거절 문면이 **바로 그 플래그를 안내한다**([asConsentRequired]) — 도구가
+    //   스스로 가리키는 재시도 경로가 가드 밖에 있는 꼴이었다.
+    //
+    // ⚠ 창이 없어지는 것은 아니다 — 사람-시간이 망-시간으로 줄 뿐이고, 서버가 원자 조건부
+    //   폐기를 안 받는 한 그 잔량은 남는다(§2.5 에 적혀 있다).
+    const now = await options.api.draftFiles().catch(() => null);
+    if (now === null || (now.generation ?? null) !== options.plan.generation) {
+        throw new DevtoolsError(
+            "DRAFT_MOVED_WHILE_CONFIRMING",
+            "확인하시는 사이 사이트 쪽 편집이 달라져 아무것도 버리지 않았습니다.",
+            "`zalkera discard` 를 다시 실행하면 지금 걸려 있는 것을 보여 드립니다.",
+        );
+    }
+
     report("편집 중인 것을 버리는 중입니다…");
     // 🔴 **동의를 무조건 참으로 보내지 않는다.** 그 인자는 `discardPendingChanges` 이고, 참이면
     //    서버가 **게시 대기 AI 변경 전량**을 크레딧과 함께 지운다 — 그런데 우리가 사람에게 보여
@@ -318,20 +340,7 @@ export async function discardDraft(options: DiscardOptions): Promise<DiscardOutc
             //    ⑵ 편집만 걸렸으면 그것은 **방금 확인받은 바로 그 목록**이므로 동의를 실어 잇는다.
             if (!needsDiscardConsent(error) || !(error instanceof DevtoolsError)) throw error;
             if (creditsAtStake(error)) throw asConsentRequired(error);
-            // ⚠ **확인한 것과 버리는 것이 같은지 다시 잰다.** 사람이 목록을 보고 답하는 창은
-            //   상한이 없다(분 단위일 수 있다). 그 사이 콘솔·AI 레인이 편집을 얹으면, 이어지는
-            //   동의는 **보여 준 적 없는 것**을 태운다 — §2.5 🔴3 이 막으려던 그 얼굴이다.
-            //   창을 사람-시간에서 망-시간으로 줄인다(없앨 수는 없다 — 서버가 원자 조건부
-            //   폐기를 안 받는다. 그 비대칭은 §2.5 에 적혀 있다).
-            const now = await options.api.draftFiles().catch(() => null);
-            if (now === null || (now.generation ?? null) !== options.plan.generation) {
-                throw new DevtoolsError(
-                    "DRAFT_MOVED_WHILE_CONFIRMING",
-                    "확인하시는 사이 사이트 쪽 편집이 달라져 아무것도 버리지 않았습니다.",
-                    "`zalkera discard` 를 다시 실행하면 지금 걸려 있는 것을 보여 드립니다.",
-                    error,
-                );
-            }
+            // 세대는 이 문 **앞에서** 이미 쟀다 — 두 갈래가 같은 문을 지나야 한쪽만 뚫리지 않는다.
             report("서버가 확인을 한 번 더 요구해 방금 주신 동의를 그대로 잇습니다…");
             return options.api.activateRevision(active, true);
         });
