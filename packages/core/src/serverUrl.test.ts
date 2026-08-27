@@ -1,8 +1,3 @@
-import { doesNotThrow, ok, strictEqual } from "node:assert/strict";
-import { test } from "node:test";
-import { apiBaseUrl, httpUrl, isLoopback, mcpServerName } from "./serverUrl.ts";
-import { resolveHelpUrl } from "./tenantScope.ts";
-
 /**
  * 서버가 준 값을 쓸지 정하는 판정의 계약.
  *
@@ -12,6 +7,11 @@ import { resolveHelpUrl } from "./tenantScope.ts";
  *
  * 두 방향을 같이 잰다. 좁히기만 재면 정상 주소를 막는 변이가 살아남고, 넓히기만 재면 그 반대다.
  */
+import { doesNotThrow, ok, strictEqual } from "node:assert/strict";
+import { test } from "node:test";
+import { apiBaseUrl, httpUrl, isLoopback, mcpServerName } from "./serverUrl.ts";
+import { resolveHelpUrl } from "./tenantScope.ts";
+
 
 /** `new URL` 이 순순히 파는 위험한 스킴들 — 이 시험이 무엇을 막는지 보이는 통제군이다. */
 const DANGEROUS = ["javascript:alert(1)", "file:///etc/passwd", "vscode://ms-vscode.x/run", "data:text/html,x", "ftp://h/x"];
@@ -120,12 +120,10 @@ test("resolveHelpUrl — 없으면 조용히 기본값(알림을 띄우지 않�
     strictEqual(r.note, undefined);
 });
 
-/**
- * ─── 소비처가 판정을 **실제로 태우는가** ────────────────────────────────────────────────
- *
- * 술어만 재는 시험은 조용히 죽는다 — 호출부에서 그 줄을 지워도 초록이면 아무것도 안 지킨 것이다
- * (이 조직이 형제 레포에서 정확히 그렇게 당했다). 그래서 경계 함수의 **행동**을 잰다.
- */
+// ─── 소비처가 판정을 **실제로 태우는가** ────────────────────────────────────────────────
+//
+// 술어만 재는 시험은 조용히 죽는다 — 호출부에서 그 줄을 지워도 초록이면 아무것도 안 지킨 것이다
+// (이 조직이 형제 레포에서 정확히 그렇게 당했다). 그래서 경계 함수의 **행동**을 잰다.
 
 /** 핸드셰이크 응답 하나를 흉내 낸다. */
 function stubHandshake(data: Record<string, unknown>): typeof fetch {

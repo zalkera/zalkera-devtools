@@ -1,5 +1,3 @@
-import type {ActivateResult} from "./api.ts";
-import {ours, plainNotice, countJosa} from "./notice.ts";
 /**
  * **"어느 사이트냐"를 판정하고 말하는 자리.** 순수 함수만 있고 `vscode` 를 모른다.
  *
@@ -20,6 +18,8 @@ import {ours, plainNotice, countJosa} from "./notice.ts";
  *
  *   ⚠ 여기 어느 함수에도 "현재 테넌트를 읽는" 기능을 넣지 마라. 그 순간 존재 이유가 사라진다.
  */
+import type {ActivateResult} from "./api.ts";
+import {ours, plainNotice, countJosa} from "./notice.ts";
 
 /**
  * **캡처된** 테넌트 코드. 라이브로 읽은 값과 타입으로 구분된다.
@@ -39,12 +39,6 @@ export function captureTenant(tenant: string): CapturedTenant {
     return tenant as CapturedTenant;
 }
 
-/**
- * 사용자에게 보이는 문구. **전부 `tenant` 를 요구한다** — 그것이 이 모듈의 요점이다.
- *
- * 확인창이 침묵하면 두 번 물어도 소용이 없다. 폴더와 사이트는 따로 정해지고 사이드바에서 사이트만
- * 바꿀 수 있어서, 말하지 않으면 A 의 소스가 B 의 라이브가 된다.
- */
 /**
  * ⚠ **표시 직전에 소독한다.** 여기 박히는 사이트 이름은 **서버가 준 값**이고(`/api/me` 의
  * `tenants[].code`), 이 문장들은 **비-모달 알림**으로 나간다. VS Code 는 비-모달 알림의
@@ -79,6 +73,15 @@ function switchedLine(tenant: CapturedTenant, revisionNo: number): string {
     return `「${shown(tenant)}」 사이트를 버전 ${countJosa(revisionNo, "으로/로")} 바꿨습니다.`;
 }
 
+/**
+ * 사용자에게 보이는 문구. **전부 `tenant` 를 요구한다** — 그것이 이 모듈의 요점이다.
+ *
+ * ⚠ **`detail` 은 모달에서만 렌더된다**(`@types/vscode`). 비-모달 알림에 넣으면 화면에 안 뜨므로,
+ *   사람이 봐야 하는 사실은 `message` 에 적는다.
+ *
+ * 확인창이 침묵하면 두 번 물어도 소용이 없다. 폴더와 사이트는 따로 정해지고 사이드바에서 사이트만
+ * 바꿀 수 있어서, 말하지 않으면 A 의 소스가 B 의 라이브가 된다.
+ */
 export const say = {
     /**
      * 미리보기가 도는 사이 폴더가 다른 사이트로 재연결됐다. **다시 세우지 않고 멈춘다** —
@@ -155,13 +158,7 @@ export const say = {
     fetchTargetTitle(tenant: CapturedTenant, revisionNo: number): string {
         return `「${shown(tenant)}」 버전 ${countJosa(revisionNo, "을/를")} 받을 새 빈 폴더를 고르세요 — 지금 폴더는 그대로 둡니다`;
     },
-    /**
-     * 옆에 만들 폴더를 **본문에** 적는다.
-     *
-     * ⚠ `detail` 은 **모달에서만 렌더된다**(`@types/vscode`). 비-모달 알림에 넣으면 화면에 안 뜨고,
-     *   그러면 사람이 어디에 폴더가 생기는지 못 본 채 「옆에 새 폴더로 받기」를 누른다.
-     */
-    /**
+        /**
      * 받을 자리가 **지금 열어 둔 그 폴더**일 때. [fetchTargetHere] 와 갈라 두는 이유는 그쪽 문장이
      * 「지금 폴더는 그대로 둡니다」라고 약속하기 때문이다 — 대상이 그 폴더 자신이면 자기모순이다.
      */
@@ -242,8 +239,7 @@ export const say = {
      * 백엔드는 업로드로 만든 판을 자동으로 켠다 — STATIC 은 확정 즉시, NEXT_SOURCE 는 빌드가
      * 끝나는 순간이다. 그러니 이 모달이 **마지막 확인 지점**이고, 여기서 "안 바뀐다"고 말하면
      * 사람은 읽지 않고 넘긴 뒤 미검수 소스를 손님에게 보낸다.
-     */
-    /**
+     *
      * ⚠ **모양이 갈린다 — 문장만 더하지 않는다.** 소속 있는 폴더의 일상 발행과 소속 없는 폴더의
      *   위험 발행이 같은 모양이면, 매일 누르던 반사가 위험한 날에도 그대로 눌린다. 그래서
      *   `binding === null` 갈래는 **버튼까지** 다르다 — 클릭 자체가 고지된 진술이 되게 한다
@@ -261,8 +257,7 @@ export const say = {
      *   항등 함수라 그것을 못 막는다 — 형제 모달 둘(`discardPendingConfirm`·`draftBlocked`)이
      *   이미 **모달 `detail` 이라는 이유로** `plainNotice` 를 지나는데 이 자리만 빠져 있었다.
      *   상한은 `MAX_CAP` 이라 정상 경로는 글자 그대로 남는다(축약과 충돌하지 않는다).
-     */
-    /**
+     *
      * @param baseDeclared 이 올리기가 **기반 판을 선언하는가**. 거짓이면 detail 에 한 줄을 더한다 —
      *   이 기능이 나가는 순간 사람은 보호를 전제하는데 **무표식 폴더는 조용히 무보호**이기 때문이다.
      *   그 침묵이 곧 이 트랜치가 사냥한 병(모르는 것을 안다고 믿게 두기)이다.
@@ -404,8 +399,7 @@ export const say = {
      *
      * 몇 건이 사라지는지는 **서버만 안다.** 그래서 서버 문장을 그대로 싣되, 나가는 자리가 모달
      * `detail` 이라 여기서 소독한다.
-     */
-    /**
+     *
      * ⚠ **동의는 하나인데 결과가 둘이다 — 그래서 문면이 갈린다.** 인자(`discardPendingChanges=true`)
      *   하나로 뚫리는 코드가 둘이고, 하나는 **판이 옮겨지고** 하나는 **판이 그대로**다.
      *   사람은 방금 「버전 N 으로 바꿉니다」 모달에 동의했다 — 그 프레임을 여기서 안 바로잡으면

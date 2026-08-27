@@ -1,8 +1,3 @@
-import { createHash } from "node:crypto";
-import type { ZalkeraApi } from "./api.ts";
-import { DevtoolsError } from "./errors.ts";
-import { downloadBounded } from "./download.ts";
-
 /**
  * B1「예제 zip 다운로드」 — 시작 소스 팩을 받아 **파일 하나로** 내준다.
  *
@@ -16,6 +11,11 @@ import { downloadBounded } from "./download.ts";
  * 받은 zip 이 **원장의 그 바이트인지 스스로 대조한다** — 서버가 sha256 을 함께 주므로, 그 약속이 말뿐이
  * 아니려면 받는 쪽이 실제로 계산해 봐야 한다(전송 손상·중간자 모두 여기서 걸린다).
  */
+import { createHash } from "node:crypto";
+import type { ZalkeraApi } from "./api.ts";
+import { DevtoolsError } from "./errors.ts";
+import { downloadBounded } from "./download.ts";
+
 
 /** 받아서 **대조까지 마친** 시작 소스 팩 그 자체. */
 export interface PresetZip {

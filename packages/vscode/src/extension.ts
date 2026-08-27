@@ -193,7 +193,8 @@ async function whileExtracting<T>(run: () => Thenable<T>): Promise<T | typeof BU
  */
 let issuedKey: { keyId: number; tenant: string } | null = null;
 /**
- * `issuedKeyId` 를 창 밖으로 넘긴다. **모듈 메모리만으로는 부족하다**(심의 경고 · 2026-08-10) —
+ * 발급한 열쇠(`IssuedKey` = 아이디 + 사이트)의 **목록**을 창 밖으로 넘긴다. 모듈 메모리만으로는
+ * 부족하다 —
  * 「중지」 뒤 창을 다시 열면(reload·재시작) 값이 사라져, 로그아웃해도 서버 키가 TTL(최대 12시간)까지
  * 살아 있었다. 도움말은 그 경로에서도 폐기된다고 무조건으로 약속하고 있었다.
  */
@@ -289,8 +290,7 @@ function confirmedFolderFor(tenant: string): string | null {
 /**
  * 그 폴더가 **자기 `.vscode/settings.json` 에** 적어 둔 사이트. 지금 창의 설정이 아니다 —
  * 다른 폴더를 확증하는 자리라 파일을 직접 읽는다.
- */
-/**
+ *
  * **판독은 여기 한 벌이다.** 「없다」와 「못 읽었다」를 갈라 돌려주고, 종전 계약이 필요한 자리는
  * `linkedTenantOf` 로 좁혀 쓴다 — 판독기가 둘이면 한쪽만 고쳐진다.
  *
@@ -579,8 +579,9 @@ async function openBundledHelp(): Promise<void> {
   }
 }
 
-/** 모든 명령을 한 자리에서 감싼다 — 오류를 **사람 말로** 보여 주는 곳이 여기 하나여야 한다. */
 /**
+ * 모든 명령을 한 자리에서 감싼다 — 오류를 **사람 말로** 보여 주는 곳이 여기 하나여야 한다.
+ *
  * 지금 상태에서 요건이 안 갖춰진 명령이면 **왜인지 말하고 다음에 할 일을 준다.**
  *
  * 사이드바는 일곱 묶음을 항상 보여 준다 — 숨기면 「갱신이 안 됐다」로 읽히기 때문이다(오너 확정).
@@ -1423,14 +1424,6 @@ async function downloadSourceZipCommand(): Promise<void> {
 }
 
 /**
- * 「zip 으로 시작」 — **남이 준 소스 zip** 을 빈 폴더에 푼다.
- *
- * 「예제 zip 다운로드」로 받은 팩도 이 문으로 들어온다. 다만 출처가 다르다: 서버 팩은 원장이 sha256 을 주장하고 우리가
- * 대조하는데, **로컬 파일에는 주장할 원장이 없다.** 그래서 무결성 검증을 흉내 내지 않는다 —
- * 대신 `decideImportPlan` 이 **쓰기 전에** 구조를 판정하고, 통과 못 하면 파일을 하나도 안 만든다.
- * 완료 문면도 「검증됐다」고 말하지 않는다.
- */
-/**
  * zip 을 풀 자리. **받기와 같은 판정을 지난다**(`decideFetchTargetPlan`) — 빈 폴더를 열어 두고 온
  * 사람에게 「빈 폴더를 고르세요」라고 다시 묻지 않는 것이 그 판정의 요점이다.
  *
@@ -1559,6 +1552,14 @@ async function bindImportedFolder(
   return true;
 }
 
+/**
+ * 「zip 으로 시작」 — **남이 준 소스 zip** 을 빈 폴더에 푼다.
+ *
+ * 「예제 zip 다운로드」로 받은 팩도 이 문으로 들어온다. 다만 출처가 다르다: 서버 팩은 원장이 sha256 을 주장하고 우리가
+ * 대조하는데, **로컬 파일에는 주장할 원장이 없다.** 그래서 무결성 검증을 흉내 내지 않는다 —
+ * 대신 `decideImportPlan` 이 **쓰기 전에** 구조를 판정하고, 통과 못 하면 파일을 하나도 안 만든다.
+ * 완료 문면도 「검증됐다」고 말하지 않는다.
+ */
 async function importZipCommand(pinned?: CapturedTenant): Promise<void> {
   const chosen = await vscode.window.showOpenDialog({
     canSelectFiles: true,
@@ -1665,8 +1666,9 @@ async function importZipCommand(pinned?: CapturedTenant): Promise<void> {
   }
 }
 
-/** 읽기·판정·해제. **판정은 core 가 한다** — 확장 안에 두면 시험도 검사기도 못 닿는다. */
 /**
+ * 읽기·판정·해제. **판정은 core 가 한다** — 확장 안에 두면 시험도 검사기도 못 닿는다.
+ *
  * zip 을 읽고 **판정까지** 한 자리에서 한다.
  *
  * ⚠ **부르는 쪽에서 각자 판정하지 마라.** 시작·갱신 둘이 같은 판정을 따로 들면 한쪽만 고쳐진다 —
@@ -1715,18 +1717,6 @@ async function importZipInto(
 
 
 /**
- * **받은 zip 으로 지금 폴더를 갈아 끼운다.**
- *
- * 대행사가 새 판을 보내오는 것은 예외가 아니라 정상 흐름인데, `zip 으로 시작`은 빈 폴더만
- * 받으므로 갱신하려면 사람이 손으로 폴더를 비워야 했다. 그 조작에 함정이 둘이다 —
- * `rm -rf 폴더/*` 는 dot 파일(`.gitignore`·`.github/`·`.zalkera/`)을 하나도 못 지워 다음 시도가
- * 「비어 있지 않습니다」로 막히고, 중간에 실패하면 되돌릴 길이 없다.
- *
- * 그래서 옆에 치워 두고 채운 뒤 성공했을 때만 버린다(`replaceContents`). 그리고 **소속 표식은
- * 보존한다** — 포장기가 `.zalkera/source.json` 을 빼고 압축하므로 zip 에 그 파일이 없다. 그냥 풀면
- * 이 폴더가 어느 사이트 것인지 잃는다.
- */
-/**
  * zip 안의 **출처 표시**를 읽는다. 없거나 못 읽으면 `null`(= 모른다).
  *
  * ⚠ **저수준 판독기를 새로 쓰지 않는다.** `extractZip` 은 읽기 «전에» 범위·이름 바이트·항목 수
@@ -1771,6 +1761,18 @@ function provenanceNotice(verdict: UpdateVerdict, zipTenant: string | null, bind
   }
 }
 
+/**
+ * **받은 zip 으로 지금 폴더를 갈아 끼운다.**
+ *
+ * 대행사가 새 판을 보내오는 것은 예외가 아니라 정상 흐름인데, `zip 으로 시작`은 빈 폴더만
+ * 받으므로 갱신하려면 사람이 손으로 폴더를 비워야 했다. 그 조작에 함정이 둘이다 —
+ * `rm -rf 폴더/*` 는 dot 파일(`.gitignore`·`.github/`·`.zalkera/`)을 하나도 못 지워 다음 시도가
+ * 「비어 있지 않습니다」로 막히고, 중간에 실패하면 되돌릴 길이 없다.
+ *
+ * 그래서 옆에 치워 두고 채운 뒤 성공했을 때만 버린다(`replaceContents`). 그리고 **소속 표식은
+ * 보존한다** — 포장기가 `.zalkera/source.json` 을 빼고 압축하므로 zip 에 그 파일이 없다. 그냥 풀면
+ * 이 폴더가 어느 사이트 것인지 잃는다.
+ */
 async function updateZipCommand(): Promise<void> {
   const dir = siteDir();
   if (dir === null) {
@@ -1865,14 +1867,6 @@ async function updateZipCommand(): Promise<void> {
 }
 
 /**
- * D4「버전 전환」 — **어느 판을 켤지 고른다.** 뒤로 가는 것은 그중 한 경우일 뿐이라 이름이
- * 방향을 가리키지 않는다(오너 확정). 롤백한 뒤 다시 앞 판으로 오는 길도 여기 하나다.
- *
- * ■ 확인을 modal 로 받는다
- *   전환은 **방문자가 보는 화면이 즉시 바뀌는** 동작이다. 잘못 누르면 손님이 다른 화면을 본다.
- *   「새 버전 배포」도 modal 로 묻는다 — 둘 다 배포 사건이라 문의 무게가 같아야 한다.
- */
-/**
  * 조회 하나에 **화면을 안 붙드는 시한**을 씌운다. 시한을 넘기면 거절한다 — 부르는 쪽이 이미
  * 「못 읽으면 강하」를 갖고 있으므로 그 자리로 수렴한다.
  *
@@ -1892,6 +1886,14 @@ function withProbeDeadline<T>(work: Promise<T>): Promise<T> {
   });
 }
 
+/**
+ * D4「버전 전환」 — **어느 판을 켤지 고른다.** 뒤로 가는 것은 그중 한 경우일 뿐이라 이름이
+ * 방향을 가리키지 않는다(오너 확정). 롤백한 뒤 다시 앞 판으로 오는 길도 여기 하나다.
+ *
+ * ■ 확인을 modal 로 받는다
+ *   전환은 **방문자가 보는 화면이 즉시 바뀌는** 동작이다. 잘못 누르면 손님이 다른 화면을 본다.
+ *   「새 버전 배포」도 modal 로 묻는다 — 둘 다 배포 사건이라 문의 무게가 같아야 한다.
+ */
 async function switchVersion(): Promise<void> {
   const { api, tenant } = await ensureApiFor();
   // ⚠ **되돌리기 대상은 서버가 답한다** — 화면이 `isActive` 로 지어내면 활성 포인터 없는
@@ -2061,8 +2063,9 @@ async function precheckCommand(): Promise<void> {
   );
 }
 
-/** B3 — 이미 가진 폴더를 이 테넌트에 붙인다. 지금은 테넌트 코드를 설정에 적는 것이 전부다. */
 /**
+ * B3 — 이미 가진 폴더를 이 테넌트에 붙인다. 지금은 테넌트 코드를 설정에 적는 것이 전부다.
+ *
  * 「이 폴더의 사이트로 돌아가기」 — 어긋난 상태의 **탈출구**.
  *
  * 「사이트에 연결」과 다르다: **소속을 바꾸지 않고 링크만 소속에 맞춘다.** 그래서 동의 모달이 없다 —
@@ -2421,7 +2424,9 @@ function scheduleRenewal(expiresAt: string, ttlSeconds: number): void {
  *
  * ⚠ **여기서 재진입 가드를 풀지 않는다.** 이 catch 가 도는 동안 바깥에서는 키 폐기가 **수 초** 더
  * 이어진다. 그 창에 가드가 풀려 있으면 「미리보기 시작」이 다시 통과해 새 키가 발급되고, 뒤늦게 끝난
- * 첫 번째 정리가 `issuedKeyId` 를 비워 **두 번째 키를 아무도 못 지우게** 만든다.
+ * 첫 번째 정리가 이 창의 `issuedKey` 를 비워 **두 번째 열쇠의 모듈 참조가 사라진다** — 그 창의
+ * 「미리보기 중지」가 자기 열쇠를 못 찾는다. 창 밖 목록(`ISSUED_KEY_STATE`)이 받쳐 로그아웃·초기화는
+ * 여전히 지우지만, 받침을 쓰라고 가드를 푸는 것은 아니다.
  *
  * 가드 해제는 `createReentrancyGuard` 의 `finally` 한 곳뿐이다. 푸는 자리가 둘이면 반드시 어긋난다.
  */
@@ -2453,20 +2458,7 @@ async function stopPreview(): Promise<void> {
 
 // ── 새 버전 배포 ────────────────────────────────────────────────────────
 
-/**
- * 「새 버전 배포」 — **이 명령이 곧 배포다.** 확장은 `confirmArchive` 까지만 부르지만, 백엔드가
- * 그 판을 켠다: STATIC 은 확정 즉시, NEXT_SOURCE 는 빌드가 끝나는 순간이다.
- *
- * 그래서 확인 모달이 **마지막 확인 지점**이고, 여기서 안 바뀐다고 말하면 사람은 그것을 읽지 않고
- * 넘긴 뒤 미검수 소스를 손님에게 보낸다.
- */
 
-/**
- * 게시 대기 중인 AI 변경을 **버리는 데 동의**할지 묻는다.
- *
- * 백엔드는 재업로드·버전 전환·프리셋 재개시 **세 문이 같은 가드**를 지난다. 그러니 사람이 보는
- * 문면도 하나여야 한다 — 자리마다 다른 말을 하면 같은 일인 줄 모른다.
- */
 /**
  * 발행 전 편집에 막혔다 — **묻지 않고 알린다.**
  *
@@ -2488,6 +2480,12 @@ async function tellDraftBlocked(
   });
 }
 
+/**
+ * 게시 대기 중인 AI 변경을 **버리는 데 동의**할지 묻는다.
+ *
+ * 백엔드는 재업로드·버전 전환·프리셋 재개시 **세 문이 같은 가드**를 지난다. 그러니 사람이 보는
+ * 문면도 하나여야 한다 — 자리마다 다른 말을 하면 같은 일인 줄 모른다.
+ */
 async function askDiscardConsent(
   tenant: CapturedTenant,
   serverMessage: string,
@@ -2516,6 +2514,13 @@ async function askBaseMoved(tenant: CapturedTenant, serverMessage: string): Prom
   return answer === ask.action;
 }
 
+/**
+ * 「새 버전 배포」 — **이 명령이 곧 배포다.** 확장은 `confirmArchive` 까지만 부르지만, 백엔드가
+ * 그 판을 켠다: STATIC 은 확정 즉시, NEXT_SOURCE 는 빌드가 끝나는 순간이다.
+ *
+ * 그래서 확인 모달이 **마지막 확인 지점**이고, 여기서 안 바뀐다고 말하면 사람은 그것을 읽지 않고
+ * 넘긴 뒤 미검수 소스를 손님에게 보낸다.
+ */
 async function publishCommand(): Promise<void> {
   const dir = requireWorkspace();
   const { api, tenant } = await ensureApiFor();
@@ -2664,16 +2669,6 @@ async function publishCommand(): Promise<void> {
 }
 
 /**
- * 반영 확인 폴링 — **끝나는 것이 급소다.**
- *
- * 게시는 지시일 뿐이라 실제 반영은 서빙박스 주기에 달려 있다(그 값을 우리는 소유하지 않는다).
- * 그래서 숫자를 문장에 박는 대신 **관측이 올 때까지 물어보고**, 오면 그때 알린다.
- *
- * ⚠ **영원히 묻지 않는다.** 관측이 없는 사이트(구 백엔드·박스 미보고·git 레인)는 첫 물음에
- *   `unknown` 이 나와 그 자리에서 끝난다. 그 밖에도 상한을 둔다 — 상한에 닿으면 **아무 말도 안 한다.**
- *   「아직 반영 안 됐습니다」는 우리가 아는 사실이 아니다(그저 못 봤을 뿐이다).
- */
-/**
  * ⚠ **관측값은 60초에 한 번만 바뀐다** — 상행이 오케스트레이터 동기화 틱에 붙어 있기 때문이다.
  *   그보다 촘촘히 물으면 **같은 사실을 되풀이해 받는다.** 실측(판 100개 기준): 5초×36 은 요청 36건·
  *   백엔드 질의 108회·1,097KB 인데, 15초×12 는 12건·36회·366KB 로 **같은 180초를 덮는다.**
@@ -2706,6 +2701,15 @@ const REFLECT_PAGE = 20;
 /**
  * 게시한 판이 방문자에게 닿으면 **한 번만** 알린다. 실패·상한·관측 없음은 전부 **침묵**이다 —
  * 게시 자체는 이미 알렸고, 여기서 더 말할 사실이 없다.
+ *
+ * 반영 확인 폴링 — **끝나는 것이 급소다.**
+ *
+ * 게시는 지시일 뿐이라 실제 반영은 서빙박스 주기에 달려 있다(그 값을 우리는 소유하지 않는다).
+ * 그래서 숫자를 문장에 박는 대신 **관측이 올 때까지 물어보고**, 오면 그때 알린다.
+ *
+ * ⚠ **영원히 묻지 않는다.** 관측이 없는 사이트(구 백엔드·박스 미보고·git 레인)는 첫 물음에
+ *   `unknown` 이 나와 그 자리에서 끝난다. 그 밖에도 상한을 둔다 — 상한에 닿으면 **아무 말도 안 한다.**
+ *   「아직 반영 안 됐습니다」는 우리가 아는 사실이 아니다(그저 못 봤을 뿐이다).
  */
 async function watchReflection(api: ZalkeraApi, revisionNo: number, tenant: CapturedTenant): Promise<void> {
   const stop = new AbortController();
@@ -3648,16 +3652,6 @@ async function ensureApiFor(
 const API_BASE_DEFAULT = "https://api.zalkera.com";
 
 /**
- * 서버 주소. **https 이거나 루프백**이어야 한다 — 이 주소가 준 값들이 로그인·에이전트 연결을
- * 지시하므로, 뿌리가 평문이면 중간에 앉은 쪽이 나머지를 전부 바꿔 쓴다.
- *
- * 설정 스키마의 `pattern` 만으로는 부족하다 — **이미 저장된 값**은 스키마를 다시 안 지난다.
- */
-/**
- * 어느 npm 으로 설치할지의 사용자 선택. **머신 범위**라 남의 소스 폴더가 못 바꾼다 —
- * `apiBase` 와 같은 이유이고, 여기서는 **우리가 실행할 바이너리**가 걸려 있어 더 직접적이다.
- */
-/**
  * npm 을 찾을 때 **보지 말아야 할 자리.** 열어 둔 폴더와 지금 다루는 소스 폴더가 온다.
  *
  * 이 도구의 기본 동작이 「남이 준 zip 을 풀어 그 폴더에서 명령을 돌리는 것」이라, 그 폴더는 언제나
@@ -3673,11 +3667,21 @@ function npmBlindSpots(projectDir?: string): string[] {
   );
 }
 
+/**
+ * 어느 npm 으로 설치할지의 사용자 선택. **머신 범위**라 남의 소스 폴더가 못 바꾼다 —
+ * `apiBase` 와 같은 이유이고, 여기서는 **우리가 실행할 바이너리**가 걸려 있어 더 직접적이다.
+ */
 function npmPreference(): NpmPreference {
   const raw = vscode.workspace.getConfiguration("zalkera").get<string>("npm");
   return raw === "system" || raw === "auto" ? raw : "bundled";
 }
 
+/**
+ * 서버 주소. **https 이거나 루프백**이어야 한다 — 이 주소가 준 값들이 로그인·에이전트 연결을
+ * 지시하므로, 뿌리가 평문이면 중간에 앉은 쪽이 나머지를 전부 바꿔 쓴다.
+ *
+ * 설정 스키마의 `pattern` 만으로는 부족하다 — **이미 저장된 값**은 스키마를 다시 안 지난다.
+ */
 function apiBase(): string {
   const configured = vscode.workspace
     .getConfiguration("zalkera")

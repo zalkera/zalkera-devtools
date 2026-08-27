@@ -94,12 +94,6 @@ export async function login(config: AuthConfig, store: TokenStore, options: Logi
 }
 
 /**
- * 쓸 수 있는 access 토큰을 돌려준다. 만료가 가까우면 refresh 로 갱신하고 보관소를 갱신한다.
- *
- * **refresh 실패는 재로그인 요구로 환원한다** — 만료·폐기·발급자 변경을 구분해 봐야 사람이 할 일은
- * 하나(다시 로그인)라서다.
- */
-/**
  * **갱신은 한 번에 하나만 난다.** 진행 중인 갱신이 있으면 그것을 나눠 쓴다.
  *
  * ⚠ **없으면 병렬 호출이 refresh 를 확정적으로 두 번 던진다** — 경합이 아니라 결정론이다:
@@ -133,6 +127,12 @@ const logoutEpoch = new WeakMap<TokenStore, number>();
 
 const epochOf = (store: TokenStore): number => logoutEpoch.get(store) ?? 0;
 
+/**
+ * 쓸 수 있는 access 토큰을 돌려준다. 만료가 가까우면 refresh 로 갱신하고 보관소를 갱신한다.
+ *
+ * **refresh 실패는 재로그인 요구로 환원한다** — 만료·폐기·발급자 변경을 구분해 봐야 사람이 할 일은
+ * 하나(다시 로그인)라서다.
+ */
 export async function getAccessToken(config: AuthConfig, store: TokenStore): Promise<string> {
     const inFlight = refreshing.get(store);
     if (inFlight) return inFlight;

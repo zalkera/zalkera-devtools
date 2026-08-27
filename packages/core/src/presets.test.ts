@@ -1,9 +1,3 @@
-import { ok, rejects, strictEqual } from "node:assert/strict";
-import { createHash } from "node:crypto";
-import { test } from "node:test";
-import { createZip } from "./zip.ts";
-import { fetchPresetZip } from "./presets.ts";
-
 /**
  * **받은 바이트가 원장의 그 바이트인가 — 쓰기 전에 판정한다.**
  *
@@ -16,6 +10,12 @@ import { fetchPresetZip } from "./presets.ts";
  *
  * 재현: `npm test -w @zalkera/devtools-core`
  */
+import { ok, rejects, strictEqual } from "node:assert/strict";
+import { createHash } from "node:crypto";
+import { test } from "node:test";
+import { createZip } from "./zip.ts";
+import { fetchPresetZip } from "./presets.ts";
+
 
 /** 서버 대역. sha256 을 부르는 쪽이 정할 수 있게 열어 둔다. */
 function api(zip: Buffer, sha256?: string) {
