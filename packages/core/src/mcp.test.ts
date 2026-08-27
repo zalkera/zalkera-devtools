@@ -194,10 +194,13 @@ test("🔴 **남의 stdio 항목은 안 덮는다** — `command` 가 흔해서 
 });
 
 test("🔴 **옛 이름으로 적힌 우리 항목도 우리 것으로 본다** — 아니면 개명한 날 다시 등록을 못 한다", async () => {
+    // ⚠ **맨 낱말 `zalkera` 는 뺐다.** 남의 항목이 그 낱말 하나로 우리 것이 되기 때문이고
+    //   (`docker run -i zalkera mcp` · 실측), npm 이 그 이름을 거절해 우리가 쓴 적도 없다.
+    //   실제로 쓰인 옛 이름은 스코프 붙은 것들이다.
     const dir = await tempDir("zalkera-mcp-old-");
     await writeFile(
         join(dir, ".mcp.json"),
-        JSON.stringify({mcpServers: {"zalkera-source": {type: "stdio", command: "npx", args: ["-y", "zalkera", "mcp"]}}}),
+        JSON.stringify({mcpServers: {"zalkera-source": {type: "stdio", command: "npx", args: ["-y", "@zalkera/devtools", "mcp"]}}}),
     );
     const result = await registerLocalMcpServer(dir, {
         serverName: serverName("zalkera-source"), command: "npx", args: ["-y", "@zalkera/cli", "mcp"],
@@ -211,6 +214,9 @@ test("🔴 **남의 stdio 항목을 안 덮는다** — 실측 변이 셋(그 en
         {type: "stdio", command: "node", args: ["srv.js", "zalkera"], env: {GITHUB_TOKEN: "비밀"}},
         {command: "uvx", args: ["mcp-server", "zalkera"], env: {API_KEY: "비밀"}},
         {command: "docker", args: ["run", "-i", "zalkera"], env: {TOK: "비밀"}},
+        // ⚠ **우리 하위 명령까지 겹쳐도** 안 덮는다 — 맨 낱말 `zalkera` 로는 우리 것이 안 된다.
+        {command: "docker", args: ["run", "-i", "zalkera", "mcp"], env: {TOK: "비밀"}},
+        {type: "stdio", command: "node", args: ["srv.js", "zalkera", "mcp"], env: {T: "비밀"}},
     ];
     for (const entry of theirs) {
         const dir = await tempDir("zalkera-theirs-");
@@ -233,8 +239,11 @@ test("🔴 **우리가 적은 것은 다시 적을 수 있다** — 판이 붙�
     // 좁히다 못 알아보면 「잘커라에 문의해 주세요」로 **영구 잠김**이 된다(사람이 손으로 지워야 한다).
     const ours = [
         {type: "stdio", command: "npx", args: ["-y", "@zalkera/cli@0.20.2", "mcp", "--folder", "/x"]},
-        {type: "stdio", command: "npx", args: ["-y", "zalkera", "mcp"]},
+        {type: "stdio", command: "npx", args: ["-y", "zalkera-cli", "mcp"]},
         {command: "zalkera", args: ["mcp"]},
+        // 🔴 **확장 동봉본.** 이 모양을 못 알아보면 우리가 적은 항목을 남의 것으로 보고 거절해
+        //    **영구 잠김**이 된다 — 사람이 손으로 지우기 전까지 다시 등록을 못 한다(실측).
+        {type: "stdio", command: "/usr/bin/node", args: ["/ext/dist/zalkera-cli.js", "mcp", "--folder", "/x"]},
     ];
     for (const entry of ours) {
         const dir = await tempDir("zalkera-ours-");

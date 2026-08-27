@@ -3170,6 +3170,11 @@ async function connectAgent(): Promise<void> {
   );
 }
 
+/** 터미널 한 줄에 넣을 인자. 공백·따옴표가 든 경로가 두 인자로 갈리지 않게 감싼다. */
+function quoteArg(value: string): string {
+    return `"${value.replace(/(["\\$`])/g, "\\$1")}"`;
+}
+
 /**
  * **AI 가 이 폴더의 소스를 직접 다루게 한다**(memo184 T4 · 로컬 MCP).
  *
@@ -3186,6 +3191,15 @@ async function connectAgentSource(): Promise<void> {
 
   const name = mcpServerName("zalkera-source");
   if (!name) throw new DevtoolsError("SERVER_REJECTED", "서버 이름을 만들지 못했습니다.", "잘커라에 문의해 주세요.");
+  // 🔴 **동봉본을 절대경로로 부른다.** `npx` 는 이 폴더의 `node_modules` 를 못 이긴다(위 KDoc).
+  const runtime = embeddedNodeRuntime(extensionPath);
+  if (runtime.cliPath === null) {
+    throw new DevtoolsError(
+      "SERVER_REJECTED",
+      "이 확장에 터미널 도구가 안 실려 있습니다.",
+      "확장을 다시 설치해 주세요. 그래도 안 되면 잘커라에 문의해 주세요.",
+    );
+  }
   const result = await registerLocalMcpServer(dir, {
     serverName: name,
     // 🔴 **판과 레지스트리를 고정한다.** `.mcp.json` 은 **사이트 소스 폴더**에 씌어지고 그 폴더가
@@ -3198,12 +3212,9 @@ async function connectAgentSource(): Promise<void> {
     // ⚠ **판을 확장 판으로 못박는다.** 서버 최소판 게이트가 하나라 두 도구가 같은 판으로 간다 —
     //   `@latest` 로 두면 그 계약이 설정 파일에서 풀린다.
     // ⚠ `--ignore-scripts` 로 설치 스크립트를 막는다(형제 `npmArgvOf` 와 같은 규율).
-    command: "npx",
+    command: runtime.nodePath,
     args: [
-      "-y",
-      "--registry=https://registry.npmjs.org",
-      "--ignore-scripts",
-      `@zalkera/cli@${extensionVersion}`,
+      runtime.cliPath,
       "mcp",
       // ⚠ **폴더를 못박는다.** 안 적으면 서버가 **에이전트의 cwd** 로 폴더를 정하고, 그것이 이
       //   폴더가 아니면 네 도구가 전부 죽는다 — 그때 안내가 「`--site` 를 붙여 주세요」인데
@@ -3237,9 +3248,9 @@ async function connectAgentSource(): Promise<void> {
       terminal.show();
       // ⚠ 등록에 적은 것과 **같은 판·같은 레지스트리**로 부른다 — 다른 것을 띄우면 그 로그인이
       //   엉뚱한 자리에 저장될 수 있다.
-      terminal.sendText(
-        `npx -y --registry=https://registry.npmjs.org --ignore-scripts @zalkera/cli@${extensionVersion} login`,
-      );
+      // ⚠ 등록에 적은 것과 **같은 실물**을 부른다 — `npx` 로 부르면 그 폴더가 이겨(위 근거)
+      //   로그인 흐름 자체가 폴더 코드에 잡힌다(평문 토큰을 읽는 정도가 아니라 발급을 받는다).
+      terminal.sendText(`${quoteArg(runtime.nodePath)} ${quoteArg(runtime.cliPath)} login`);
     }
     return;
   }

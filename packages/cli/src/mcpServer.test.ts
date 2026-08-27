@@ -27,23 +27,30 @@ interface Frame {
 }
 
 /** 줄들을 stdin 으로 밀어 넣고 stdout 을 프레임으로 읽는다. */
-async function speak(lines: string[], folder = "/tmp"): Promise<{frames: Frame[]; err: string; raw: string}> {
+async function speak(
+    lines: string[],
+    folder = "/tmp",
+): Promise<{frames: Frame[]; err: string; raw: string; code: number | null}> {
     const child = execFile(process.execPath, ["--experimental-strip-types", ENTRY, "mcp", "--site", "acme", "--folder", folder], {
         env: OFFLINE,
     });
     child.stdin?.end(lines.map((l) => `${l}\n`).join(""));
-    const {stdout, stderr} = await new Promise<{stdout: string; stderr: string}>((resolve) => {
-        let out = "";
-        let err = "";
-        child.stdout?.on("data", (d: Buffer) => (out += d.toString()));
-        child.stderr?.on("data", (d: Buffer) => (err += d.toString()));
-        child.on("close", () => resolve({stdout: out, stderr: err}));
-    });
+    // ⚠ **종료 코드도 본다.** 안 보면 프로세스가 죽어도 시험이 초록이다 — 스칼라 JSON 한 줄이
+    //   서버를 죽이는 회귀가 그렇게 통과했다(심의 실측).
+    const {stdout, stderr, code} = await new Promise<{stdout: string; stderr: string; code: number | null}>(
+        (resolve) => {
+            let out = "";
+            let err = "";
+            child.stdout?.on("data", (d: Buffer) => (out += d.toString()));
+            child.stderr?.on("data", (d: Buffer) => (err += d.toString()));
+            child.on("close", (c) => resolve({stdout: out, stderr: err, code: c}));
+        },
+    );
     const frames = stdout
         .split("\n")
         .filter((l) => l.trim() !== "")
         .map((l) => JSON.parse(l) as Frame);
-    return {frames, err: stderr, raw: stdout};
+    return {frames, err: stderr, raw: stdout, code};
 }
 
 const INIT = '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{}}}';
@@ -221,4 +228,17 @@ test("🔴 도구 힌트를 싣는다 — 없으면 클라이언트가 `publish`
     const tools = (frames[1]?.result?.tools ?? []) as Array<{name: string; annotations?: Record<string, boolean>}>;
     strictEqual(tools.find((t) => t.name === "zalkera_status")?.annotations?.readOnlyHint, true);
     strictEqual(tools.find((t) => t.name === "zalkera_publish")?.annotations?.destructiveHint, true);
+});
+
+test("🔴 **객체가 아닌 줄에 죽지 않는다** — 그 뒤 요청이 답을 영영 못 받는다", async () => {
+    // `JSON.parse` 는 `5`·`"hi"`·`true` 도 돌려준다. 그 값에 `in` 을 쓰면 TypeError 이고,
+    // 그 자리가 try 밖이면 루프를 뚫고 나가 **프로세스가 죽는다**(심의 실측 회귀).
+    const {frames, code} = await speak([
+        INIT, "5", '"hi"', "true", "null",
+        '{"jsonrpc":"2.0","id":2,"method":"ping"}',
+    ]);
+    strictEqual(code, 0, `프로세스가 죽었다(code ${code})`);
+    const last = frames.at(-1);
+    strictEqual(last?.id, 2, `마지막 요청이 답을 못 받았다: ${JSON.stringify(frames)}`);
+    for (const f of frames.slice(1, -1)) strictEqual(f.error?.code, -32600);
 });

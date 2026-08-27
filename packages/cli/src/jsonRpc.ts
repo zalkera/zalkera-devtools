@@ -112,25 +112,31 @@ export async function serveStdio(
                 continue;
             }
 
-            // 🔴 **배열(배치)을 조용히 삼키지 않는다.** JSON-RPC 2.0 은 배열을 허용하고, 종전에는
-            //    `method` 가 문자열이 아니라 **알림으로 접혀 아무것도 안 썼다** — 상대는 영원히
-            //    기다린다(실측). 우리는 배치를 안 받으므로 **그렇다고 말한다.**
-            if (Array.isArray(request)) {
+            // 🔴 **객체가 아닌 것을 그대로 다루지 않는다.** `JSON.parse` 는 `5`·`"hi"`·`true` 도
+            //    돌려주고, 그 값에 `in` 을 쓰면 **TypeError** 다 — 그 자리가 `try` 밖이라 루프를
+            //    뚫고 나가 **프로세스가 죽는다**(실측: 그 뒤 줄의 요청이 답을 영영 못 받는다).
+            //    배열(배치)도 여기서 함께 거절한다 — 규격은 허용하지만 우리는 안 받는다.
+            if (typeof request !== "object" || request === null || Array.isArray(request)) {
                 write({
                     jsonrpc: "2.0",
                     id: null,
-                    error: {code: RPC.INVALID_REQUEST, message: "이 서버는 배치 요청을 받지 않습니다."},
+                    error: {
+                        code: RPC.INVALID_REQUEST,
+                        message: Array.isArray(request)
+                            ? "이 서버는 배치 요청을 받지 않습니다."
+                            : "요청이 객체가 아닙니다.",
+                    },
                 });
                 continue;
             }
 
-            const id = request?.id;
+            const id = request.id;
             // 🔴 **알림은 `id` 가 «없는» 것이지 `null` 인 것이 아니다.** 종전에는 `id: null` 을
             //    알림으로 접어 아무것도 안 썼는데, 규격상 그것은 **답해야 하는 요청**이다.
             //    (`id === 0` 도 같은 함정이라 `!id` 로 재지 않는다.)
-            const isNotification = !("id" in (request ?? {})) || id === undefined;
+            const isNotification = !("id" in request) || id === undefined;
 
-            if (typeof request?.method !== "string") {
+            if (typeof request.method !== "string") {
                 if (!isNotification) {
                     write({jsonrpc: "2.0", id: id ?? null, error: {code: RPC.INVALID_REQUEST, message: "method 가 없습니다."}});
                 }

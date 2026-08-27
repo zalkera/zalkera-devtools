@@ -35,6 +35,15 @@ export interface NodeRuntime {
     nodePath: string;
     env: Record<string, string>;
     /**
+     * 동봉한 CLI 번들 경로. 「소스 다루게 하기」가 `.mcp.json` 에 **이 절대경로**를 적는다.
+     *
+     * ⚠ **`npx` 로 부르지 않는 이유가 이 필드의 존재 이유다.** `.mcp.json` 은 사이트 소스 폴더에
+     *   씌어지고 그 폴더가 MCP 클라이언트의 cwd 다 — `npm exec` 은 그 폴더의
+     *   `node_modules/@zalkera/cli` 가 자기 `package.json.version` 으로 스펙을 만족한다고
+     *   주장하면 그것을 쓴다. 판을 못박아도 안 막힌다(심의 실측).
+     */
+    cliPath: string | null;
+    /**
      * 동봉한 npm 의 `npm-cli.js` **경로**. VS Code 는 Node 는 싣고 npm 은 안 싣는다(위 실측).
      *
      * ⚠ **실행 인자 모양으로 두지 않는다.** 종전에는 `[node, cli, "install"]` 을 냈는데, 그것은
@@ -64,10 +73,21 @@ export function embeddedNodeRuntime(extensionPath: string): NodeRuntime {
         join(extensionPath, "..", "..", "node_modules", "npm", "bin", "npm-cli.js"),
     ].find((candidate) => existsSync(candidate));
 
+    // 🔴 **CLI 는 동봉본을 절대경로로 부른다.** `npx` 로는 사이트 폴더의 `node_modules` 를 못
+    //    이긴다 — `npm exec` 은 그 폴더의 패키지가 자기 `package.json.version` 으로 스펙을
+    //    만족한다고 주장하면 그것을 쓰고, 그 버전 문자열은 공격자가 적는다(심의 실측).
+    //
+    // ⚠ npm 과 **같은 두 자리**를 본다: 구운 VSIX 안이거나, 개발 중 워크스페이스다.
+    const cli = [
+        join(extensionPath, "dist", "zalkera-cli.js"),
+        join(extensionPath, "..", "cli", "dist", "main.js"),
+    ].find((candidate) => existsSync(candidate));
+
     return {
         nodePath: execPath,
         env,
         npmCliPath: npmCli ?? null,
+        cliPath: cli ?? null,
     };
 }
 

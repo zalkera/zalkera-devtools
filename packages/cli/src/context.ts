@@ -163,6 +163,10 @@ export const UPGRADE_HOW =
  *    그 교착이고, 이 레포가 다른 자리에서 이미 여러 번 막은 얼굴이다.
  *
  * ⚠ 자기 `package.json` 을 못 읽는 것은 **설치가 깨졌다**는 뜻이다. 그것을 그렇게 말한다.
+ *
+ * ⚠ **확장 동봉본은 확장 매니페스트를 읽는다.** vsix 안에서는 이 번들이 `extension/dist/` 에
+ *   있어 `../package.json` 이 확장의 것이다 — 그리고 그 값이 **맞다**. 두 판은 서버의 최소판
+ *   게이트가 하나라 `check-version-lockstep` 이 같게 묶는다(우연이 아니라 계약이다).
  */
 export function version(): string {
     let raw: unknown;

@@ -80,8 +80,18 @@ function isOurEntry(value: unknown): boolean {
         //   것은 다시 적을 수 있다」가 **둘 다** 선다.
         const runsOurVerb = args.includes("mcp");
         const namesUs =
+            // 전역 설치 모양(`zalkera mcp`)
             e.command === "zalkera" ||
-            args.some((a) => LOCAL_TOOL_ARGS.has(a.replace(/@[^@/]*$/, "")));
+            // npm 경유(`npx … @zalkera/cli[@판] mcp`)
+            //
+            // ⚠ **맨 낱말 `zalkera` 는 안 받는다.** `docker run -i zalkera mcp` 같은 남의 항목이
+            //   그것으로 우리 것이 된다(실측). 스코프 이름·`zalkera-cli` 만 받는다 — 맨 이름은
+            //   npm 이 거절해서 **우리가 쓸 수 없는** 이름이기도 하다.
+            args.some((a) => SCOPED_TOOL_ARGS.has(a.replace(/@[^@/]*$/, ""))) ||
+            // 🔴 **확장 동봉본**(`<node> <…>/zalkera-cli.js mcp`). 이 모양을 못 알아보면
+            //    우리가 적은 항목을 남의 것으로 보고 거절해 **영구 잠김**이 된다 — 사람이
+            //    손으로 지우기 전까지 다시 등록을 못 한다(실측).
+            args.some((a) => OUR_BUNDLE.test(a));
         return runsOurVerb && namesUs;
     }
     return false;
@@ -96,8 +106,23 @@ function isOurEntry(value: unknown): boolean {
  */
 const LOCAL_TOOL_ARGS = new Set(["@zalkera/cli", "zalkera", "zalkera-cli", "@zalkera/devtools"]);
 
+/**
+ * npm 인자로 받아들이는 이름. **맨 낱말 `zalkera` 는 빠진다** — 남의 항목이 그 낱말 하나로 우리
+ * 것이 되기 때문이고(`docker run -i zalkera mcp` · 실측), npm 이 그 이름을 거절해 우리가 쓰지도
+ * 못한다. 전역 설치 모양은 `command === "zalkera"` 로 따로 받는다.
+ */
+const SCOPED_TOOL_ARGS = new Set(["@zalkera/cli", "zalkera-cli", "@zalkera/devtools"]);
+
 // ⚠ 판이 붙은 인자(`@zalkera/cli@0.21.0`)도 같은 이름으로 읽는다 — 등록이 판을 못박기 때문이다.
 //   그래서 위 판정이 `replace(/@[^@/]*$/, "")` 로 꼬리를 떼고 대조한다.
+
+/**
+ * 확장이 동봉한 CLI 번들의 **파일 이름**. 경로는 설치 자리마다 다르므로 이름으로 잰다.
+ *
+ * ⚠ 이 이름을 바꾸면 `package-vsix.mjs` 의 스테이징·검수와 `runtime.ts` 의 탐색 자리도 같이
+ *   바꿔야 한다 — 한쪽만 바꾸면 등록이 우리 항목을 못 알아본다.
+ */
+const OUR_BUNDLE = /(?:^|[/\\])zalkera-cli\.js$/;
 
 /** 프로젝트 스코프 `.mcp.json` 에 우리 서버를 적는다(팀이 공유하는 자리 — 시크릿은 담기지 않는다). */
 export async function registerMcpServer(
