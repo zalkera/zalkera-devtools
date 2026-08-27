@@ -38,6 +38,7 @@ import {flagOn, flagValue, parseArgs} from "./args.ts";
 import {openAuth, openContext, version} from "./context.ts";
 import {confirm} from "./confirm.ts";
 import {describePush, describeStatus, describeStranded, DISCARD_PHRASE, pathLines} from "./report.ts";
+import {serveMcp} from "./mcpServer.ts";
 import {FileTokenStore, tokenPath} from "./tokenStore.ts";
 
 /**
@@ -59,6 +60,7 @@ function help(): string {
   zalkera rollback <판번호>      라이브를 그 버전으로 되돌린다
   zalkera discard               사이트 쪽에서 편집 중인 것을 버린다(판은 안 옮긴다)
   zalkera preview               이 폴더를 로컬에서 띄워 본다(손님에게는 안 보인다)
+  zalkera mcp                   AI 도구가 이 폴더를 다룰 수 있게 연다(사람이 직접 칠 일은 없다)
   zalkera baseline              기준 기록만 지금 판으로 다시 세운다(파일은 안 건드린다)
 
 옵션
@@ -334,6 +336,16 @@ async function main(argv: readonly string[]): Promise<number> {
             }
             lines.push("이 폴더의 파일은 건드리지 않았습니다.");
             process.stdout.write(`${lines.join("\n")}\n`);
+            return 0;
+        }
+        case "mcp": {
+            // 🔴 **stdout 에는 프로토콜만 나간다.** 진행 문면·경고가 섞이면 상대가 파싱에 실패하고,
+            //    그 실패는 사람에게 「도구가 안 뜬다」로만 보인다. 그래서 이 갈래는 아무것도 안 찍고,
+            //    사람에게 할 말은 전부 stderr 로 간다(`openContext` 의 오용 고지도 그쪽이다).
+            //
+            // ⚠ **여기서 `openContext` 를 안 부른다.** 서버가 안 되는 상태에서도 `tools/list` 는
+            //   답해야 에이전트가 목록을 그린다 — 컨텍스트는 도구를 **처음 부를 때** 연다.
+            await serveMcp({folder: common.folder, tenant: common.tenant});
             return 0;
         }
         case "preview": {
