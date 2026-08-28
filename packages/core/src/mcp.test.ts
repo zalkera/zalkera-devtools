@@ -257,3 +257,20 @@ test("🔴 **우리가 적은 것은 다시 적을 수 있다** — 판이 붙�
         ok(result.action === "updated" || result.action === "unchanged", `못 알아봤다: ${JSON.stringify(entry)}`);
     }
 });
+
+test("🔴 로컬 등록이 **환경을 그대로 적는다** — 안 실리면 Node 가 아니라 VS Code 새 창이 뜬다", async () => {
+    // 확장은 `process.execPath`(＝Electron)로 부르고 `ELECTRON_RUN_AS_NODE=1` 이 함께 가야
+    // Node 로 돈다. 이 한 줄이 없으면 MCP 클라이언트가 그 항목을 띄울 때 창이 뜨고 stdio
+    // 핸드셰이크가 영영 안 온다 — 사람에게는 「도구가 안 뜬다」로만 보인다.
+    const dir = await tempDir("zalkera-mcp-env-");
+    await registerLocalMcpServer(dir, {
+        serverName: serverName("zalkera-source"),
+        command: "/usr/bin/node",
+        args: ["/ext/dist/zalkera-cli.js", "mcp"],
+        env: {ELECTRON_RUN_AS_NODE: "1"},
+    });
+    const written = JSON.parse(await readFile(join(dir, ".mcp.json"), "utf8")) as {
+        mcpServers: Record<string, {env?: Record<string, string>}>;
+    };
+    strictEqual(written.mcpServers["zalkera-source"]?.env?.ELECTRON_RUN_AS_NODE, "1");
+});

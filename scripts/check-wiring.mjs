@@ -31,6 +31,15 @@ const read = (p) => readFileSync(join(root, p), "utf8");
 
 /** [파일, 있어야 하는 조각, 사라지면 무슨 일이 나는가] */
 const WIRES = [
+    [
+        "packages/cli/src/context.ts",
+        "loginHow: LOGIN_HOW",
+        "**로그인 문면에 나갈 길이 사라진다.** 확장 안에서는 누를 단추가 있어 「다시 로그인해 " +
+            "주세요」로 참이지만, 이 문에서는 막다른 길이다 — 그리고 그 문장은 MCP 를 타고 " +
+            "**모델에게** 가서 사장님께 그대로 옮겨진다",
+        // `openAuth`·`openContext` 두 자리가 각각 실어야 한다.
+        2,
+    ],
     // ── 동봉 Node 는 **환경과 짝이다** ────────────────────────────────────────────
     // 🔴 `runtime.nodePath` 는 `process.execPath` 이고 데스크톱 VS Code 에서 그것은 **Electron** 이다.
     //    `ELECTRON_RUN_AS_NODE=1`(＝`runtime.env`)이 함께 가야 Node 로 돈다 — 안 주면 MCP 클라이언트가
