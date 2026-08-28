@@ -125,7 +125,12 @@ try {
 // 전달용 사본. `shared/` 는 손으로 건네는 자리다.
 const shared = join(root, "shared");
 mkdirSync(shared, { recursive: true });
-for (const old of readdirSync(shared).filter((f) => f.endsWith(".tgz"))) rmSync(join(shared, old));
+// ⚠ **우리 이름의 옛 판만 지운다.** 종전에는 `*.tgz` 를 전부 지워, 옆에 구워 둔 **이름 방어
+//   스텁**(`pack:guards`)까지 사라졌다 — 오너가 발행하려던 파일이 조용히 없어진다.
+const stem = `${manifest.name.replace(/^@/, "").replace(/\//g, "-")}-`;
+for (const old of readdirSync(shared).filter((f) => f.startsWith(stem) && f.endsWith(".tgz"))) {
+    rmSync(join(shared, old));
+}
 cpSync(made, join(shared, tarballName));
 
 console.log(`\n✅ ${made}`);

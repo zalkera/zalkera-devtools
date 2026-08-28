@@ -43,6 +43,7 @@
     "check:chain": "node scripts/check-verify-chain.mjs",
     "check:version": "node scripts/check-version-lockstep.mjs",
     "pack:cli": "node scripts/pack-cli.mjs",
-    "check:workspaces": "node scripts/check-workspace-refs.mjs"
+    "check:workspaces": "node scripts/check-workspace-refs.mjs",
+    "pack:guards": "node scripts/pack-name-guards.mjs"
   }
 }

@@ -98,6 +98,28 @@ npm i -g ./shared/zalkera-cli-<version>.tgz && zalkera --version
 
 ---
 
+## 2c. 이름 방어 스텁 — **한 번만** (오너)
+
+```bash
+npm run pack:guards
+npm publish ./shared/guard-zalkera-devtools-0.0.1.tgz --access public
+npm publish ./shared/guard-zalkera-cli-0.0.1.tgz --access public
+npm deprecate zalkera-devtools "이 이름은 쓰이지 않습니다. 터미널 도구는 @zalkera/cli 입니다."
+npm deprecate zalkera-cli      "이 이름은 쓰이지 않습니다. 터미널 도구는 @zalkera/cli 입니다."
+```
+
+`zalkera-devtools` 는 **우리 레포 이름**이자 마켓 확장 id 의 절반이라, 그 이름으로 손을 뻗는
+사람이 생긴다. 먼저 등록한 쪽이 **설치 시점 코드 실행**을 얻고, 그것도 우리 도구가 refresh
+토큰을 평문으로 두는 바로 그 기계에서다.
+
+⚠ **판 축이 없다.** 이 스텁은 실행 표면이 0 이라(＝`bin`·의존·스크립트 없음) 내용이 안 바뀐다 —
+한 번 내고 잊는다. `DECISIONS.md` 의 「별칭을 함께 내지 않는다」와 안 부딪히는 이유가 그것이다.
+
+⚠ `@zalkera/*` 는 **스코프라 외부가 못 낸다.** 맨 이름 `zalkera` 도 npm 이 유사도로 거절한다
+(우리에게도 거절했다). 그래서 지킬 것은 이 둘뿐이다.
+
+---
+
 ## 3. 발행 **다음** — 태그를 찍는다
 
 `dist/*.vsix` 는 gitignore 다. 태그를 안 찍으면 **어느 트리가 나갔는지 아무 데도 안 남는다.**
