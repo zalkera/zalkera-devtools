@@ -22,6 +22,8 @@ npm i -g @zalkera/cli && zalkera pull         # 자주 쓸 때 (명령은 `zalke
 
 ```
 zalkera login                  # 브라우저로 로그인 (사이트를 안 물어본다)
+zalkera preview                # 이 폴더를 로컬에서 띄워 본다
+zalkera mcp                    # AI 도구가 이 폴더를 다루게 연다(사람이 직접 칠 일은 없다)
 zalkera pull --site <사이트코드>  # 빈 폴더에 처음 받을 때
 zalkera status                 # 이 폴더와 사이트가 어떻게 다른지
 zalkera pull                   # 이미 받은 폴더를 지금 판에 맞춘다

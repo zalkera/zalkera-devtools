@@ -112,7 +112,7 @@ const live = (label: string, command: string, icon: string, tooltip?: string): P
 /**
  * 지금 상태에서 보일 묶음들. 순서가 그대로 화면 순서다.
  *
- * 순서(오너 확정): 사이트 · 미리보기 · 배포 · 내려받기 · 작업 폴더 · 버전 · 도움.
+ * 순서(오너 확정): 사이트 · 미리보기 · AI 연결 · 배포 · 내려받기 · 작업 폴더 · 버전 · 도움.
  *
  * ■ **묶음마다 만지는 것이 다르다**
  *   배포는 **서버**를, 내려받기는 **내 디스크**를, 작업 폴더는 **지금/새 폴더**를 만진다.
@@ -216,9 +216,6 @@ export function sidebarPlan(state: SidebarState): PlanGroup[] {
                 : act("미리보기 시작", "zalkera.preview.start", "play", "로컬에서 확인합니다"),
         ];
         if (previewUrl) making.push(act("미리보기 중지", "zalkera.preview.stop", "debug-stop"));
-        // **미리보기와 한 묶음이다.** 보는 것과 고치는 것이 같은 단계이므로 붙어 있어야 한다.
-        // 종전에는 팔레트에만 있어 비개발자가 찾지 못했다 — "말로 고치기"의 입구인데.
-        making.push(act("에이전트 연결(MCP)", "zalkera.agent.connect", "plug", "쓰시는 AI 가 이 사이트를 다루게 합니다"));
         if (keyExpiresAt) {
             // ⚠ **서버가 준 값이다**(열쇠 발급 응답의 `expiresAt`) — 검사기를 이 파일까지 넓히니
             //    이 자리가 무소독인 채 배송되고 있었다(보안 심의가 연 관할의 첫 수확).
@@ -230,9 +227,36 @@ export function sidebarPlan(state: SidebarState): PlanGroup[] {
                 label: "미리보기",
                 icon: "tools",
                 tooltip: site
-                    ? "내 컴퓨터에서 확인하고, AI 를 붙입니다"
+                    ? "내 컴퓨터에서 확인합니다 — 손님에게는 안 보입니다"
                     : "소스를 먼저 받아야 씁니다 — 눌러 보시면 무엇이 필요한지 알려 드립니다",
                 items: making,
+            },
+            {
+                // 🔴 **미리보기와 갈랐다.** 종전에는 「에이전트 연결(MCP)」이 미리보기 묶음 안에
+                //    있었는데, 미리보기는 「내 컴퓨터에서 띄워 본다」이고 이쪽은 「AI 에게 무엇을
+                //    여는가」다 — 같은 단계가 아니다(오너 지적).
+                //
+                // ⚠ **라벨에서 「MCP」를 뺐다.** 사장님에게 그 글자는 아무 뜻이 없고, 여는 것이
+                //   둘이 되면서 「MCP 두 개」로 읽힌다. **무엇을 여는지**로 부른다 — 하나는
+                //   데이터, 하나는 소스.
+                id: "agent",
+                label: "AI 연결",
+                icon: "plug",
+                tooltip: "쓰시는 AI 가 이 사이트를 다루게 합니다",
+                items: [
+                    act(
+                        "내 데이터 보여 주기",
+                        "zalkera.agent.connect",
+                        "database",
+                        "상품·주문·설정을 AI 가 조회합니다 — 가짜 데이터를 지어내지 않게",
+                    ),
+                    act(
+                        "소스 다루게 하기",
+                        "zalkera.agent.source",
+                        "repo-push",
+                        "받기·올리기·새 버전 만들기를 AI 가 직접 합니다 — 되돌리기·버리기는 안 맡깁니다",
+                    ),
+                ],
             },
             {
                 // id 는 라벨과 무관한 상수다 — 이름을 「배포」로 바꿔도 접어 둔 상태가 살아야 한다.

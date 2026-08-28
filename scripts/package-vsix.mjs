@@ -101,6 +101,18 @@ if (!existsSync(join(ext, "dist", "extension.cjs"))) throw new Error("번들 산
 }
 
 // ── 2. 스테이징 ─────────────────────────────────────────────────────────────
+// ── CLI 번들 동봉 ──────────────────────────────────────────────────────────
+// 🔴 **`npx` 로는 폴더를 못 이긴다.** `.mcp.json` 은 사이트 소스 폴더에 씌어지고 그 폴더가 MCP
+//    클라이언트의 cwd 다. `npm exec` 은 그 폴더의 `node_modules/@zalkera/cli` 가 **자기
+//    `package.json.version` 으로 스펙을 만족한다고 주장하면** 그것을 쓴다 — 그 버전 문자열은
+//    공격자가 적고, 우리가 못박은 판은 같은 폴더의 `.mcp.json` 에 그대로 적혀 있다(심의 실측).
+//
+//    그래서 **확장이 자기 안에 CLI 를 들고** 절대경로로 부른다. 폴더가 낄 자리가 없고, 판이
+//    확장과 **자동으로** 같아지며(같은 vsix 안이다), npm 발행 순서에도 안 매인다.
+console.log("· CLI 번들");
+execFileSync("npm", ["run", "build", "-w", "@zalkera/devtools-core"], { cwd: root, stdio: "inherit" });
+execFileSync("npm", ["run", "bundle", "-w", "@zalkera/cli"], { cwd: root, stdio: "inherit" });
+
 console.log("· 스테이징");
 rmSync(stage, { recursive: true, force: true });
 mkdirSync(stage, { recursive: true });
@@ -110,6 +122,29 @@ mkdirSync(stage, { recursive: true });
 for (const entry of ["dist", "media", "README.md", "CHANGELOG.md", "LICENSE", ".vscodeignore"]) {
     const src = join(ext, entry);
     if (existsSync(src)) cpSync(src, join(stage, entry), { recursive: true });
+}
+// CLI 번들을 확장 `dist/` 옆에 싣는다. 확장이 이것을 **절대경로로** 부른다(위 근거).
+const cliBundle = join(root, "packages", "cli", "dist", "main.js");
+if (!existsSync(cliBundle)) throw new Error(`CLI 번들이 없다: ${cliBundle} — 중단`);
+cpSync(cliBundle, join(stage, "dist", "zalkera-cli.js"));
+// ⚠ **구운 것이 실제로 도는지 본다.** 이 번들은 `../package.json` 으로 자기 판을 읽는데,
+//   vsix 안에서 그것은 **확장 매니페스트**다 — 판 축이 묶여 있어 값은 맞지만, 그 배치가
+//   깨지면 「설치가 온전하지 않습니다」로 죽는다. 정적으로는 안 드러난다(실측).
+{
+    const probe = mkdtempSync(join(tmpdir(), "zalkera-cliprobe-"));
+    try {
+        mkdirSync(join(probe, "dist"), { recursive: true });
+        cpSync(cliBundle, join(probe, "dist", "zalkera-cli.js"));
+        cpSync(join(ext, "package.json"), join(probe, "package.json"));
+        const shown = execFileSync(process.execPath, [join(probe, "dist", "zalkera-cli.js"), "--version"], {
+            encoding: "utf8",
+        }).trim();
+        if (shown !== manifest.version) {
+            throw new Error(`동봉 CLI 가 답한 판이 다르다 — 확장 ${manifest.version} · 실행 ${shown}`);
+        }
+    } finally {
+        rmSync(probe, { recursive: true, force: true });
+    }
 }
 
 // 워크스페이스 흔적을 지운 매니페스트. `dependencies` 는 npm 하나만 남긴다 —
@@ -205,6 +240,8 @@ if (!existsSync(made)) throw new Error(`VSIX 가 안 나왔다: ${made} — 중�
 const listed = execFileSync("unzip", ["-Z1", made], { encoding: "utf8" }).split("\n");
 const must = [
     "extension/dist/extension.cjs",
+    // 「소스 다루게 하기」가 부르는 실물. 빠지면 그 버튼이 조용히 죽는다.
+    "extension/dist/zalkera-cli.js",
     "extension/package.json",
     "extension/node_modules/npm/bin/npm-cli.js",
     // 「도움말」이 여는 실물. 빠져도 포장은 성공하고, 사용자가 누를 때에야 열리지 않는다.

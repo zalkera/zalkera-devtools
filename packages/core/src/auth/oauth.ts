@@ -9,6 +9,14 @@ export interface AuthConfig {
     issuer: string;
     clientId: string;
     scopes: string[];
+    /**
+     * 로그인이 없거나 만료됐을 때 **어떻게** 하는가. 안 주면 방법을 말하지 않는다.
+     *
+     * 🔴 **문마다 다르다.** 확장 안에서는 누를 단추가 있어 「다시 로그인해 주세요」로 참이지만,
+     *    터미널 도구·MCP 서버에서는 그 문장이 **나갈 길이 없는 막다른 길**이다 — 모델이 그것을
+     *    사장님께 그대로 옮긴다(심의 실측). 형제 `fetchHandshake` 의 `upgradeHow` 와 같은 자리다.
+     */
+    loginHow?: string;
 }
 
 export interface LoginOptions {
@@ -151,12 +159,12 @@ async function refreshToken(config: AuthConfig, store: TokenStore): Promise<stri
     const epoch = epochOf(store);
     const current = await store.read();
     if (!current) {
-        throw new DevtoolsError("NOT_AUTHENTICATED", "로그인이 필요합니다.", "먼저 잘커라에 로그인해 주세요.");
+        throw new DevtoolsError("NOT_AUTHENTICATED", "로그인이 필요합니다.", config.loginHow ?? "먼저 잘커라에 로그인해 주세요.");
     }
     if (current.issuer !== config.issuer) {
         // 서버(발급자)가 바뀌었으면 남은 토큰은 다른 세계의 것이다. 조용히 쓰면 401 을 이유 없이 만난다.
         await store.clear();
-        throw new DevtoolsError("NOT_AUTHENTICATED", "서버가 바뀌어 다시 로그인해야 합니다.");
+        throw new DevtoolsError("NOT_AUTHENTICATED", "서버가 바뀌어 다시 로그인해야 합니다.", config.loginHow);
     }
     if (current.expiresAt - REFRESH_SKEW_MS > Date.now()) return current.accessToken;
 
@@ -168,7 +176,7 @@ async function refreshToken(config: AuthConfig, store: TokenStore): Promise<stri
         throw new DevtoolsError(
             "NOT_AUTHENTICATED",
             "로그인이 만료되었습니다.",
-            "다시 로그인해 주세요.",
+            config.loginHow ?? "다시 로그인해 주세요.",
             cause,
         );
     }

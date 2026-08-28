@@ -14,6 +14,10 @@
  *   고른 쪽이 안 되면 **말하고 멈춘다.** 조용한 폴백은 "어느 npm 이 돌았는지 모르는 채 결과만
  *   남는" 상태를 만들고, 실사용 신고가 왔을 때 물어볼 것이 없어진다.
  */
+import {execFileSync} from "node:child_process";
+import {existsSync, realpathSync} from "node:fs";
+import {delimiter, isAbsolute, join, normalize, sep} from "node:path";
+
 
 /** 사용자가 고를 수 있는 값. 설정 스키마와 같은 목록이다. */
 export type NpmPreference = "bundled" | "system" | "auto";
@@ -132,6 +136,72 @@ export interface PathOps {
     isAbsolute(path: string): boolean;
     normalize(path: string): string;
     sep: string;
+}
+
+/**
+ * 경로 조작 한 벌. **순수 판정**([systemNpmSearchSteps]·[acceptsResolvedNpmCli])에 주입해
+ * 플랫폼별 동작을 시험할 수 있게 한다.
+ *
+ * ⚠ [probeSystemNpm] 은 주입을 안 받는다 — 그쪽은 파일시스템에 대고 도는 껍데기라 이 상수를
+ *   그대로 쓴다. 그래서 그 함수의 Windows 갈래는 여기 시험이 아니라 위 두 순수 함수가 문다.
+ */
+const PATH_OPS = { join, isAbsolute, normalize, sep };
+
+/**
+ * 이 컴퓨터에 깔린 npm 을 **경로로** 찾아 판본을 읽는다. 없거나 못 읽으면 `null` — **추측하지 않는다.**
+ *
+ * ■ 왜 `npm --version` 을 안 부르나
+ *   이름으로 부르면 실행 파일 탐색이 OS 손에 넘어간다. Windows 의 `npm` 은 `npm.cmd` 배치라 shell
+ *   없이는 안 돌고, shell 을 켜면 cmd.exe 가 **현재 폴더부터** 뒤진다 — 우리가 도는 곳은 **남이 준
+ *   zip 을 푼 폴더**다. 그래서 `npm-cli.js` 를 찾아 **우리 Node 로** 부른다.
+ *
+ * ⚠ **탐색·수용 판정은 [systemNpmSearchSteps]·[acceptsResolvedNpmCli] 한 벌이다.** 이 함수는 그것을
+ *   파일시스템에 대고 도는 껍데기다 — 껍데기를 문마다 따로 쓰면 한쪽만 조여진다(확장과 CLI 가
+ *   같은 npm 을 골라야 한다).
+ *
+ * 3초를 넘기면 없는 것으로 본다 — 느린 네트워크 드라이브에서 멈추는 형상이 있다.
+ *
+ * @param nodePath 이 npm 을 부를 Node. 확장은 동봉 Node 를, CLI 는 자기 자신을 준다.
+ * @param env `--version` 을 부를 때의 환경. VS Code 의 Node 는 `ELECTRON_RUN_AS_NODE=1` 이 필요하다.
+ */
+export function probeSystemNpm(
+    nodePath: string,
+    excludeUnder: readonly string[] = [],
+    env: NodeJS.ProcessEnv = process.env,
+): { version: string; path: string } | null {
+    const entries = (env.PATH ?? "").split(delimiter);
+    for (const step of systemNpmSearchSteps(entries, PATH_OPS, excludeUnder)) {
+        if (!existsSync(step.path)) continue;
+        // `link` 는 따라가 봐야 안다 — 그리고 따라간 **결과**를 다시 검사한다.
+        let cli = step.path;
+        if (step.kind === "link") {
+            try {
+                cli = realpathSync(step.path);
+            } catch {
+                continue;
+            }
+            if (!acceptsResolvedNpmCli(cli, PATH_OPS, excludeUnder)) continue;
+        }
+        try {
+            const out = execFileSync(nodePath, [cli, "--version"], {
+                encoding: "utf8",
+                timeout: 3_000,
+                stdio: ["ignore", "pipe", "ignore"],
+                // 🔴 **자식에게도 넘긴다.** 종전에는 이 `env` 가 PATH 를 읽는 데만 쓰이고 자식은
+                //    `process.env` 를 물려받았다 — 그러면 VS Code 확장 호스트에 `ELECTRON_RUN_AS_NODE`
+                //    가 없어 `execPath` 가 **Electron 으로** 뜨고, `npm-cli.js --version` 이 실패하거나
+                //    3초 타임아웃을 먹는다. 그 결과 「PATH 에 npm 이 없다」는 **거짓 진단**이 나가고
+                //    `zalkera.npm="system"` 인 사람은 미리보기가 통째로 막힌다(심의 실측).
+                //    KDoc 이 이미 그렇게 약속하고 있었는데 코드가 안 지켰다.
+                env,
+            });
+            const version = out.trim();
+            if (version) return { version, path: cli };
+        } catch {
+            // 이 걸음은 못 쓴다 — 다음을 본다. **없는 것으로 단정하지 않는다.**
+        }
+    }
+    return null;
 }
 
 /**

@@ -28,28 +28,10 @@
 import {chmod, readFile, rm} from "node:fs/promises";
 import {homedir} from "node:os";
 import {basename, dirname, isAbsolute, join, resolve, sep} from "node:path";
-import {ensureOwnDir, writeOwnFile, type StoredTokens, type TokenStore} from "@zalkera/devtools-core";
+import {ensureOwnDir, tokenPath, writeOwnFile, type StoredTokens, type TokenStore} from "@zalkera/devtools-core";
 
-/**
- * 보관 자리. `XDG_CONFIG_HOME` 을 존중하되 **홈 아래로 고정**한다.
- *
- * 🔴 **절대경로라고 다 받으면 안 된다**(심의 실측). `XDG_CONFIG_HOME=$PWD/.config` 는 CI·devcontainer·
- *    direnv 에서 실재하는 관례고, 이 도구는 스스로 「스크립트·CI 에서 돌릴 때를 위한 것」이라 적는다.
- *    그 값을 그대로 쓰면 refresh 토큰이 **소스 폴더 안**에 떨어지고, 그 폴더는 zip 으로 포장돼
- *    유통되는 경로다 — 「내 사이트 소스 보내 주세요」 한 번에 발행 권한이 넘어간다.
- *
- * ⚠ 그래서 판정은 「절대경로인가」가 아니라 **「홈 아래인가」**다. 아니면 조용히 기본 자리로 되돌린다 —
- *   여기서 던지면 남의 환경 설정 하나로 도구가 아예 안 뜬다.
- */
-export function tokenPath(env: NodeJS.ProcessEnv = process.env, home = homedir()): string {
-    const fallback = join(home, ".config");
-    const base = env.XDG_CONFIG_HOME;
-    const inside =
-        base !== undefined &&
-        isAbsolute(base) &&
-        (resolve(base) === resolve(home) || resolve(base).startsWith(resolve(home) + sep));
-    return join(inside ? resolve(base!) : fallback, "zalkera", "auth.json");
-}
+// ⚠ **자리 계산은 코어 한 벌이다** — 확장도 같은 자리를 물어야 하고, 두 벌이면 갈린다.
+export {tokenPath};
 
 /** 평문 0600 파일 보관소. */
 export class FileTokenStore implements TokenStore {

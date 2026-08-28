@@ -82,7 +82,7 @@ export async function tenantOf(folder: string, explicit?: string): Promise<strin
  */
 export async function openAuth(options: ContextOptions = {}): Promise<{auth: AuthConfig; store: TokenStore}> {
     const handshake = await fetchHandshake(serverUrlOf(options.env ?? process.env), version(), fetch, UPGRADE_HOW);
-    return {auth: handshake.auth, store: options.store ?? new FileTokenStore()};
+    return {auth: {...handshake.auth, loginHow: LOGIN_HOW}, store: options.store ?? new FileTokenStore()};
 }
 
 /** 명령 하나가 쓸 것을 모두 세운다. */
@@ -113,7 +113,9 @@ export async function openContext(options: ContextOptions = {}): Promise<Context
     // 판정은 서버가 한다 — 구버전일수록 자기 판정 코드도 낡았다.
     const handshake = await fetchHandshake(serverUrl, version(), fetch, UPGRADE_HOW);
     const store = options.store ?? new FileTokenStore();
-    const auth: AuthConfig = handshake.auth;
+    // ⚠ **이 문에서 어떻게 로그인하는가.** 안 주면 「다시 로그인해 주세요」가 나갈 길 없는
+    //   막다른 길이 된다 — 그리고 그 문장은 MCP 를 타고 **모델에게** 간다.
+    const auth: AuthConfig = {...handshake.auth, loginHow: LOGIN_HOW};
 
     const api = new ZalkeraApi({
         apiBase: serverUrl,
@@ -145,6 +147,14 @@ async function misplacedToolLines(folder: string): Promise<string[]> {
 }
 
 /**
+ * 이 문에서 **어떻게** 로그인하는가.
+ *
+ * ⚠ 확장 안에서는 누를 단추가 있지만 여기는 사람이 명령을 쳐야 한다. 그리고 이 문장은 MCP 를
+ *   타고 **모델에게** 가서 사장님께 그대로 옮겨진다 — 나갈 길이 문장 안에 있어야 한다.
+ */
+export const LOGIN_HOW = "터미널에서 `zalkera login` 을 한 번 실행해 주세요.";
+
+/**
  * 이 문에서 **어떻게** 업데이트하는가.
  *
  * ⚠ 여기는 사람이 명령을 쳐야 한다. 이 한 줄이 없으면 최소판 게이트에 걸린 사람은
@@ -163,6 +173,10 @@ export const UPGRADE_HOW =
  *    그 교착이고, 이 레포가 다른 자리에서 이미 여러 번 막은 얼굴이다.
  *
  * ⚠ 자기 `package.json` 을 못 읽는 것은 **설치가 깨졌다**는 뜻이다. 그것을 그렇게 말한다.
+ *
+ * ⚠ **확장 동봉본은 확장 매니페스트를 읽는다.** vsix 안에서는 이 번들이 `extension/dist/` 에
+ *   있어 `../package.json` 이 확장의 것이다 — 그리고 그 값이 **맞다**. 두 판은 서버의 최소판
+ *   게이트가 하나라 `check-version-lockstep` 이 같게 묶는다(우연이 아니라 계약이다).
  */
 export function version(): string {
     let raw: unknown;

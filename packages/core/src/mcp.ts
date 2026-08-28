@@ -26,6 +26,34 @@ export interface McpRegistration {
     authServerMetadataUrl: string;
 }
 
+/**
+ * **로컬(stdio) 서버 등록.** 원격과 달리 주소·OAuth 가 없다 — 에이전트가 이 명령을 **직접 띄운다.**
+ *
+ * ⚠ **토큰을 여기 담지 않는다.** `.mcp.json` 은 팀이 공유하는 파일이고 레포에 들어간다. 로그인은
+ *   그 명령이 자기 보관소(`~/.config/zalkera/auth.json`)에서 읽는다 — 이 파일은 「무엇을 띄울지」만 안다.
+ */
+export interface LocalMcpRegistration {
+    serverName: McpServerName;
+    /** 실행할 명령. */
+    command: string;
+    /** 그 인자. **우리 패키지 이름이 여기 있어야** 나중에 이 항목이 우리 것으로 판별된다. */
+    args: readonly string[];
+    /**
+     * 그 명령에 줄 환경변수.
+     *
+     * 🔴 **이 자리가 없으면 확장이 띄우는 것이 Node 가 아니다.** VS Code 는 Node 를 동봉하되
+     *    별도 바이너리로 주지 않는다 — `process.execPath` 는 **Code 실행 파일(Electron)** 이고,
+     *    `ELECTRON_RUN_AS_NODE=1` 이 함께 가야 그것이 Node 로 돈다. 안 주면 MCP 클라이언트가
+     *    그 항목을 띄울 때 **VS Code 새 창**이 뜨고 stdio 핸드셰이크가 영영 안 온다 —
+     *    사람에게는 「도구가 안 뜬다」로만 보인다(같은 레포의 `runtime.ts` KDoc 이 그 사실을
+     *    실측으로 적어 뒀다).
+     *
+     * ⚠ **자격증명을 여기 담지 않는다.** 이 파일은 팀이 공유하고 레포에 들어간다 — 담을 것은
+     *   「무엇을 어떻게 띄우는가」뿐이다.
+     */
+    env?: Readonly<Record<string, string>>;
+}
+
 export interface RegisterMcpResult {
     path: string;
     action: "created" | "updated" | "unchanged";
@@ -40,29 +68,112 @@ export interface RegisterMcpResult {
  */
 function isOurEntry(value: unknown): boolean {
     if (typeof value !== "object" || value === null) return false;
-    const e = value as { type?: unknown; oauth?: unknown };
-    if (e.type !== "http") return false;
-    // 우리는 항상 `oauth.{clientId,authServerMetadataUrl}` 를 같이 적는다. 그 짝이 없으면 남의 것이다.
-    const o = e.oauth;
-    if (typeof o !== "object" || o === null) return false;
-    const oauth = o as { clientId?: unknown; authServerMetadataUrl?: unknown };
-    return typeof oauth.clientId === "string" && typeof oauth.authServerMetadataUrl === "string";
+    const e = value as { type?: unknown; oauth?: unknown; command?: unknown; args?: unknown };
+    // ⑴ 원격(HTTP) 항목 — 우리는 항상 `oauth.{clientId,authServerMetadataUrl}` 를 같이 적는다.
+    //    그 짝이 없으면 남의 것이다.
+    if (e.type === "http") {
+        const o = e.oauth;
+        if (typeof o !== "object" || o === null) return false;
+        const oauth = o as { clientId?: unknown; authServerMetadataUrl?: unknown };
+        return typeof oauth.clientId === "string" && typeof oauth.authServerMetadataUrl === "string";
+    }
+    // ⑵ 로컬(stdio) 항목 — 인자에 우리 패키지 이름이 있어야 우리 것이다.
+    //
+    // ⚠ **`command` 로 판정하지 않는다.** 그 값은 `npx`·`node` 처럼 흔해서, 그것만 보면 고객이
+    //   쓰던 남의 stdio 서버를 우리 것으로 오인해 **덮는다** — 그 항목의 `env` 에 든 토큰째로.
+    //   유출이 아니라 **파괴**다(형제 갈래가 같은 이유로 그렇게 적혀 있다).
+    if (e.type === "stdio" || e.type === undefined) {
+        const args = (Array.isArray(e.args) ? e.args : []).filter((a): a is string => typeof a === "string");
+        // 🔴 **맨 낱말 하나로 판정하지 않는다.** 종전 목록에 `zalkera` 가 들어 있어, `args` 어딘가에
+        //    그 낱말이 한 번 있으면 **남의 stdio 항목을 우리 것으로 봤다** — 실측 변이에서
+        //    `{command:"docker", args:["run","-i","zalkera"], env:{TOK}}` 가 토큰째로 덮였다.
+        //    유출이 아니라 **파괴**다.
+        //
+        // ⚠ **우리가 적는 모양으로 잰다**: 마지막 인자가 우리 하위 명령이고, 패키지 인자가 우리
+        //   이름이거나 명령 자체가 우리 실행기다. 그래야 「남의 것을 안 덮는다」와 「우리가 적은
+        //   것은 다시 적을 수 있다」가 **둘 다** 선다.
+        const runsOurVerb = args.includes("mcp");
+        const namesUs =
+            // 전역 설치 모양(`zalkera mcp`)
+            e.command === "zalkera" ||
+            // npm 경유(`npx … @zalkera/cli[@판] mcp`)
+            //
+            // ⚠ **맨 낱말 `zalkera` 는 안 받는다.** `docker run -i zalkera mcp` 같은 남의 항목이
+            //   그것으로 우리 것이 된다(실측). 스코프 이름·`zalkera-cli` 만 받는다 — 맨 이름은
+            //   npm 이 거절해서 **우리가 쓸 수 없는** 이름이기도 하다.
+            args.some((a) => SCOPED_TOOL_ARGS.has(a.replace(/@[^@/]*$/, ""))) ||
+            // 🔴 **확장 동봉본**(`<node> <…>/zalkera-cli.js mcp`). 이 모양을 못 알아보면
+            //    우리가 적은 항목을 남의 것으로 보고 거절해 **영구 잠김**이 된다 — 사람이
+            //    손으로 지우기 전까지 다시 등록을 못 한다(실측).
+            args.some((a) => OUR_BUNDLE.test(a));
+        return runsOurVerb && namesUs;
+    }
+    return false;
 }
+
+
+/**
+ * npm 인자로 받아들이는 이름. **맨 낱말 `zalkera` 는 빠진다** — 남의 항목이 그 낱말 하나로 우리
+ * 것이 되기 때문이고(`docker run -i zalkera mcp` · 실측), npm 이 그 이름을 거절해 우리가 쓰지도
+ * 못한다. 전역 설치 모양은 `command === "zalkera"` 로 따로 받는다.
+ */
+const SCOPED_TOOL_ARGS = new Set(["@zalkera/cli", "zalkera-cli", "@zalkera/devtools"]);
+
+// ⚠ 판이 붙은 인자(`@zalkera/cli@0.21.0`)도 같은 이름으로 읽는다 — 등록이 판을 못박기 때문이다.
+//   그래서 위 판정이 `replace(/@[^@/]*$/, "")` 로 꼬리를 떼고 대조한다.
+
+/**
+ * 확장이 동봉한 CLI 번들의 **파일 이름**. 경로는 설치 자리마다 다르므로 이름으로 잰다.
+ *
+ * ⚠ **개발 배치도 함께 본다.** `runtime.ts` 는 vsix 안(`dist/zalkera-cli.js`)과 워크스페이스
+ *   (`packages/cli/dist/main.js`) 두 자리를 찾는데, 이름만 재면 뒤엣것을 못 알아봐 **개발
+ *   기계에서 영구 잠김**이 된다(심의 실측 — 우리가 적은 항목을 우리가 거절한다).
+ *
+ * ⚠ 이 모양을 바꾸면 `package-vsix.mjs` 의 스테이징·검수와 `runtime.ts` 의 탐색 자리도 같이
+ *   바꿔야 한다 — 한쪽만 바꾸면 등록이 우리 항목을 못 알아본다.
+ */
+const OUR_BUNDLE = /(?:^|[/\\])(?:zalkera-cli\.js|packages[/\\]cli[/\\]dist[/\\]main\.js)$/;
 
 /** 프로젝트 스코프 `.mcp.json` 에 우리 서버를 적는다(팀이 공유하는 자리 — 시크릿은 담기지 않는다). */
 export async function registerMcpServer(
     projectDir: string,
     registration: McpRegistration,
 ): Promise<RegisterMcpResult> {
-    const path = join(projectDir, ".mcp.json");
-    const entry = {
+    return writeEntry(projectDir, registration.serverName, {
         type: "http",
         url: registration.url,
         oauth: {
             clientId: registration.clientId,
             authServerMetadataUrl: registration.authServerMetadataUrl,
         },
-    };
+    });
+}
+
+/**
+ * 로컬(stdio) 서버를 같은 파일에 적는다.
+ *
+ * ⚠ **병합 규율은 원격과 한 벌이다** — 남의 항목을 안 덮고, 형태가 틀리면 멈추고, 최상위의 다른
+ *   키를 살린다. 두 벌이 되면 한쪽만 조여진다.
+ */
+export async function registerLocalMcpServer(
+    projectDir: string,
+    registration: LocalMcpRegistration,
+): Promise<RegisterMcpResult> {
+    return writeEntry(projectDir, registration.serverName, {
+        type: "stdio",
+        command: registration.command,
+        args: [...registration.args],
+        ...(registration.env === undefined ? {} : {env: {...registration.env}}),
+    });
+}
+
+async function writeEntry(
+    projectDir: string,
+    serverName: McpServerName,
+    entry: Record<string, unknown>,
+): Promise<RegisterMcpResult> {
+    const path = join(projectDir, ".mcp.json");
+    const registration = {serverName};
 
     if (!existsSync(path)) {
         await writeOwnFile(path, `${JSON.stringify({ mcpServers: { [registration.serverName]: entry } }, null, 2)}\n`);
@@ -96,7 +207,8 @@ export async function registerMcpServer(
     const existing = servers[registration.serverName];
     // ⚠ **남의 항목을 덮지 않는다.** 이름 형태 검사는 `github` 같은 **흔한 이름**을 막지 못한다 —
     //   그 자리에 고객이 쓰던 stdio 서버가 있으면 토큰이 든 `env` 째로 사라지고, 우리는 "갱신"이라
-    //   보고한다. 유출이 아니라 **파괴**다. 우리 형상(`type: "http"`)이 아닌 것은 손대지 않는다.
+    //   보고한다. 유출이 아니라 **파괴**다. **우리가 적는 모양**이 아닌 것은 손대지 않는다
+    //   (원격은 `type:"http"` + `oauth` 짝, 로컬은 우리 하위 명령 + 우리 패키지 이름).
     if (existing !== undefined && !isOurEntry(existing)) {
         throw new DevtoolsError(
             "NOT_A_SITE",

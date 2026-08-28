@@ -8,6 +8,10 @@ dist/**/*.d.ts
 # 이것들은 VSIX 에 없는 `@zalkera/devtools-core` 를 import 하는 **죽은 코드**다(심의 실측).
 dist/*.js
 !dist/extension.cjs
+# ⚠ **CLI 번들은 남긴다.** 「소스 다루게 하기」가 이것을 **절대경로로** 부른다 — `npx` 로는
+#   사이트 폴더의 `node_modules` 를 못 이긴다(그 폴더가 MCP 클라이언트의 cwd 다).
+#   위 `dist/*.js` 가 이것까지 걷어내므로 예외를 명시한다.
+!dist/zalkera-cli.js
 
 # core 는 번들에 들어갔다. 워크스페이스 링크는 확장 폴더 **밖**을 가리켜 VSIX 경로 규칙을 깬다.
 node_modules/@zalkera/**

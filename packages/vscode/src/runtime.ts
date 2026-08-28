@@ -1,16 +1,13 @@
-import { execFileSync } from "node:child_process";
-import { existsSync, realpathSync } from "node:fs";
-import { delimiter, isAbsolute, join, normalize, sep } from "node:path";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 
 /** 순수 판정에 넘기는 경로 조작 한 벌. 코어는 `node:path` 를 안 가져간다. */
-const PATH_OPS = {join, isAbsolute, normalize, sep};
 import { execPath } from "node:process";
 import {
+    probeSystemNpm,
     chooseNpm,
     describeNpm,
     npmArgvOf,
-    acceptsResolvedNpmCli,
-    systemNpmSearchSteps,
     type NpmChoice,
     type NpmPreference,
 } from "@zalkera/devtools-core";
@@ -37,6 +34,15 @@ import {
 export interface NodeRuntime {
     nodePath: string;
     env: Record<string, string>;
+    /**
+     * 동봉한 CLI 번들 경로. 「소스 다루게 하기」가 `.mcp.json` 에 **이 절대경로**를 적는다.
+     *
+     * ⚠ **`npx` 로 부르지 않는 이유가 이 필드의 존재 이유다.** `.mcp.json` 은 사이트 소스 폴더에
+     *   씌어지고 그 폴더가 MCP 클라이언트의 cwd 다 — `npm exec` 은 그 폴더의
+     *   `node_modules/@zalkera/cli` 가 자기 `package.json.version` 으로 스펙을 만족한다고
+     *   주장하면 그것을 쓴다. 판을 못박아도 안 막힌다(심의 실측).
+     */
+    cliPath: string | null;
     /**
      * 동봉한 npm 의 `npm-cli.js` **경로**. VS Code 는 Node 는 싣고 npm 은 안 싣는다(위 실측).
      *
@@ -67,53 +73,24 @@ export function embeddedNodeRuntime(extensionPath: string): NodeRuntime {
         join(extensionPath, "..", "..", "node_modules", "npm", "bin", "npm-cli.js"),
     ].find((candidate) => existsSync(candidate));
 
+    // 🔴 **CLI 는 동봉본을 절대경로로 부른다.** `npx` 로는 사이트 폴더의 `node_modules` 를 못
+    //    이긴다 — `npm exec` 은 그 폴더의 패키지가 자기 `package.json.version` 으로 스펙을
+    //    만족한다고 주장하면 그것을 쓰고, 그 버전 문자열은 공격자가 적는다(심의 실측).
+    //
+    // ⚠ npm 과 **같은 두 자리**를 본다: 구운 VSIX 안이거나, 개발 중 워크스페이스다.
+    const cli = [
+        join(extensionPath, "dist", "zalkera-cli.js"),
+        join(extensionPath, "..", "cli", "dist", "main.js"),
+    ].find((candidate) => existsSync(candidate));
+
     return {
         nodePath: execPath,
         env,
         npmCliPath: npmCli ?? null,
+        cliPath: cli ?? null,
     };
 }
 
-/**
- * 이 컴퓨터에 깔린 npm 을 **경로로** 찾아 판본을 읽는다. 없거나 못 읽으면 `null` — **추측하지 않는다.**
- *
- * ■ 왜 `npm --version` 을 안 부르나
- *   이름으로 부르면 실행 파일 탐색이 OS 손에 넘어간다. Windows 의 `npm` 은 `npm.cmd` 배치라 shell 없이는
- *   안 돌고, shell 을 켜면 cmd.exe 가 **현재 폴더부터** 뒤진다 — 우리가 도는 곳은 **남이 준 zip 을 푼
- *   폴더**다. 그래서 `npm-cli.js` 를 찾아 **우리 Node 로** 부른다. 셸도, 배치도, 폴더 탐색도 없다.
- *
- * 3초를 넘기면 없는 것으로 본다 — 느린 네트워크 드라이브에서 멈추는 형상이 있다.
- */
-export function systemNpm(excludeUnder: readonly string[] = []): { version: string; path: string } | null {
-    const entries = (process.env.PATH ?? "").split(delimiter);
-    for (const step of systemNpmSearchSteps(entries, PATH_OPS, excludeUnder)) {
-        if (!existsSync(step.path)) continue;
-        // `link` 는 따라가 봐야 안다 — 그리고 따라간 **결과**를 다시 검사한다.
-        let cli = step.path;
-        if (step.kind === "link") {
-            try {
-                cli = realpathSync(step.path);
-            } catch {
-                continue;
-            }
-            if (!acceptsResolvedNpmCli(cli, PATH_OPS, excludeUnder)) continue;
-        }
-        try {
-            const out = execFileSync(execPath, [cli, "--version"], {
-                encoding: "utf8",
-                timeout: 3_000,
-                stdio: ["ignore", "pipe", "ignore"],
-                // VS Code 의 Node 는 이것 없이는 Electron 으로 뜬다.
-                env: {...process.env, ELECTRON_RUN_AS_NODE: "1"},
-            });
-            const version = out.trim();
-            if (version) return {version, path: cli};
-        } catch {
-            // 이 걸음은 못 쓴다 — 다음을 본다. **없는 것으로 단정하지 않는다.**
-        }
-    }
-    return null;
-}
 
 /**
  * 설정과 실측을 합쳐 **어느 npm 으로 설치할지** 정한다. 판정은 `core` 의 순수 함수가 든다.
@@ -136,7 +113,12 @@ export function resolveNpm(
     //   그런데 `chooseNpm` 은 bundled 선호 + 동봉 부재면 `probe.system` 을 **보지도 않고** unavailable
     //   을 낸다 — 즉 순수 낭비이면서, 배송 문서의 「bundled 로 두시면 이 컴퓨터의 npm 은 찾지도
     //   실행하지도 않습니다」를 거짓으로 만든다.
-    const system = preference === "bundled" ? null : systemNpm(excludeUnder);
+    // ⚠ **껍데기도 코어 것을 쓴다** — 확장과 CLI 가 같은 npm 을 골라야 한다.
+    //   VS Code 의 Node 는 `ELECTRON_RUN_AS_NODE` 없이는 Electron 으로 뜬다.
+    const system =
+        preference === "bundled"
+            ? null
+            : probeSystemNpm(execPath, excludeUnder, {...process.env, ELECTRON_RUN_AS_NODE: "1"});
     return chooseNpm(preference, {bundled, system});
 }
 
