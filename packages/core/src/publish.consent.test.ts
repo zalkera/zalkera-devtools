@@ -243,3 +243,124 @@ test("발행 동의 콜백은 서버 문장과 **코드**를 함께 받는다", 
   });
   deepStrictEqual(codes, ["PENDING_AI_CHANGES_CONFIRM_REQUIRED"], "코드가 콜백에 안 왔다");
 });
+
+/**
+ * 🔴 **결과를 모르는 실패를 「안 만들어졌다」로 접지 않는다**(설계자 심의 0.17.0).
+ *
+ * `confirm` 이 나간 뒤 응답이 유실되면(`SERVER_UNREACHABLE` — 30초 상한·연결 유실) 그것은
+ * **판이 만들어졌는지 모르는** 사건이다. 취소 중이라고 그것을 `CANCELLED` 로 접으면 화면이
+ * 「새 버전은 만들어지지 않았습니다」라고 **단정**한다.
+ *
+ * 서버가 만들었었다면 표식은 옛 판인 채라 다음 발행이 **자기 유령 판**에 409 를 맞는다 —
+ * 이 판이 사냥한 「제조된 거짓말」 그 얼굴이다. 취소 버튼은 confirm 이 **느릴 때** 눌리는 것이라
+ * 이 창은 우연히 겹치는 창이 아니다.
+ */
+test("🔴 confirm 응답이 유실되면 취소 중이어도 **모른다고 말한다** — CANCELLED 로 접지 않는다", async () => {
+  const controller = new AbortController();
+  const confirms: unknown[] = [];
+  const fetchImpl = (async (input: URL | string, init?: RequestInit) => {
+    const url = String(input);
+    if (url.endsWith("/api/partner/site-archive/presign")) {
+      return new Response(
+        JSON.stringify({
+          data: { uploadUrl: "https://s3.example.test/put", storageKey: "k/1.zip", expiresAt: "" },
+        }),
+        { status: 200 },
+      );
+    }
+    if (url.startsWith("https://s3.example.test/")) return new Response("", { status: 200 });
+    if (url.endsWith("/api/partner/site-archive/confirm")) {
+      confirms.push(JSON.parse(String(init?.body ?? "{}")));
+      // confirm 은 **나갔다**. 그 뒤에 사람이 취소를 누르고 연결이 끊긴다 — 서버가 무엇을 했는지
+      // 우리는 모른다.
+      controller.abort();
+      throw new TypeError("fetch failed");
+    }
+    return new Response("{}", { status: 404 });
+  }) as typeof fetch;
+
+  const api = new ZalkeraApi({
+    apiBase: "https://api.example.test",
+    accessToken: async () => "t",
+    tenantCode: () => "bix",
+    fetchImpl,
+  });
+  const error = await publish({
+    projectDir: await project(),
+    api,
+    tenant: "t",
+    fetchImpl,
+    signal: controller.signal,
+    onConsent: async () => true,
+  }).then(
+    () => null,
+    (e: unknown) => e as DevtoolsError,
+  );
+
+  strictEqual(confirms.length, 1, "confirm 이 안 나갔다 — 이 시험의 전제가 성립 안 함");
+  notStrictEqual(error?.code, "CANCELLED", "결과를 모르는 실패를 취소라고 단정했다");
+  strictEqual(error?.code, "SERVER_UNREACHABLE", `모호를 그대로 안 올렸다: ${error?.code}`);
+});
+
+/**
+ * 반대편도 지킨다 — **판이 안 만들어졌다는 증명이 있는 거절**(409 계열)에서는 취소를 존중한다.
+ * 그것까지 던지면 그만두겠다고 한 사람에게 서버 오류창이 뜬다.
+ *
+ * ⚠ 취소는 **실행 중에** 걸려야 한다. `await` 뒤에 `abort()` 를 부르면 이 시험은 `onConsent` 가
+ *   던진 것으로 초록이 되어, 취소 의미를 하나도 안 잰다(초판이 그랬다).
+ */
+test("409 계열에서는 취소를 존중한다 — 판이 안 만들어졌다는 증명이 있다", async () => {
+  const controller = new AbortController();
+  let asked = 0;
+  const confirms: unknown[] = [];
+  const fetchImpl = (async (input: URL | string, init?: RequestInit) => {
+    const url = String(input);
+    if (url.endsWith("/api/partner/site-archive/presign")) {
+      return new Response(
+        JSON.stringify({
+          data: { uploadUrl: "https://s3.example.test/put", storageKey: "k/1.zip", expiresAt: "" },
+        }),
+        { status: 200 },
+      );
+    }
+    if (url.startsWith("https://s3.example.test/")) return new Response("", { status: 200 });
+    if (url.endsWith("/api/partner/site-archive/confirm")) {
+      confirms.push(JSON.parse(String(init?.body ?? "{}")));
+      // 서버가 **판을 만들기 전에** 409 로 막았고, 그 응답이 오는 사이 사람이 취소를 눌렀다.
+      controller.abort();
+      return new Response(
+        JSON.stringify({
+          errorCode: "PENDING_AI_CHANGES_CONFIRM_REQUIRED",
+          message: "게시 대기 중인 AI 변경 3건이 취소됩니다. 계속하려면 확인해 주세요.",
+        }),
+        { status: 409 },
+      );
+    }
+    return new Response("{}", { status: 404 });
+  }) as typeof fetch;
+
+  const api = new ZalkeraApi({
+    apiBase: "https://api.example.test",
+    accessToken: async () => "t",
+    tenantCode: () => "bix",
+    fetchImpl,
+  });
+  const error = await publish({
+    projectDir: await project(),
+    api,
+    tenant: "t",
+    fetchImpl,
+    signal: controller.signal,
+    onConsent: async () => {
+      asked += 1;
+      return true;
+    },
+  }).then(
+    () => null,
+    (e: unknown) => e as DevtoolsError,
+  );
+
+  strictEqual(confirms.length, 1, "취소했는데 다시 보냈다");
+  strictEqual(asked, 0, "그만두겠다고 한 사람에게 「버리는 데 동의하십니까」를 물었다");
+  strictEqual(error?.code, "CANCELLED", `증명된 거절인데 취소로 안 접었다: ${error?.code}`);
+});

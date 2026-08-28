@@ -171,10 +171,19 @@ async function confirmWithConsent(
         } catch (error) {
             const rejected = error instanceof DevtoolsError ? error : null;
             const message = rejected?.message ?? String(error);
-            // ⚠ **409 는 「판이 안 만들어졌다」는 증명이다.** 그러니 취소를 존중할 수 있다 —
-            //    그런데 여기서 모달을 띄우면 **방금 그만두겠다고 한 사람에게 「버리는 데 동의하십니까」**
-            //    를 묻게 된다. 그 답은 이미 나와 있다. 모달을 띄우기 **직전**에 본다.
-            if (options.signal?.aborted) throw cancelled();
+            // 🔴 **취소로 접는 것은 「판이 안 만들어졌다」가 증명된 거절뿐이다.**
+            //
+            //    409 계열(동의 요구·기반 이동)은 서버가 **판을 만들기 전에** 막았다는 증명이라
+            //    취소를 존중할 수 있다. 그러니 모달을 띄우기 직전에 본다 — 안 그러면 방금
+            //    그만두겠다고 한 사람에게 「버리는 데 동의하십니까」를 묻게 된다.
+            //
+            //    ⚠ **종류를 안 가르면 `SERVER_UNREACHABLE` 까지 삼킨다**(설계자 심의 실측). 그 오류는
+            //      confirm 이 **이미 나갔고 결과를 모르는** 사건이다. 그것을 취소로 접으면 화면이
+            //      「새 버전은 만들어지지 않았습니다」라고 **단정**하는데, 서버가 만들었을 수 있다.
+            //      그러면 표식은 옛 판인 채라 다음 발행이 **자기 유령 판**에 409 를 맞는다 —
+            //      이 판이 사냥한 「제조된 거짓말」 그 얼굴이다. 모르는 것은 모른다고 말한다.
+            const provesNoRevision = needsDiscardConsent(error) || isUploadBaseMoved(error);
+            if (provesNoRevision && options.signal?.aborted) throw cancelled();
             if (needsDiscardConsent(error) && options.onConsent && !consentAsked) {
                 consentAsked = true;
                 if (!(await options.onConsent(message, rejected?.serverCode ?? null))) {

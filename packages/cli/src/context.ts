@@ -186,17 +186,32 @@ export function version(): string {
         throw new DevtoolsError(
             "INSTALL_BROKEN",
             "이 도구의 설치가 온전하지 않습니다 — 자기 버전을 읽지 못했습니다.",
-            "`npm i -g @zalkera/cli@latest` 로 다시 설치하거나, `npx @zalkera/cli@latest <명령>` 으로 실행해 주세요.",
+            REINSTALL_HOW,
             error,
         );
     }
-    const declared = (raw as {version?: unknown}).version;
-    if (typeof declared !== "string" || declared === "") {
+    return versionFrom(raw);
+}
+
+/**
+ * 읽은 매니페스트에서 **판을 판정한다** — 읽기와 가른 이유가 이것이다.
+ *
+ * 🔴 **여기가 `"0.0.0"` 교착을 막는 자리다.** 읽기와 붙어 있으면 이 판정을 물 자리가 없어,
+ *    다음 손이 접기를 폴백으로 되돌려도 게이트가 초록이다(설계자 심의 실측 — 변이 넷 전부 생존).
+ *    이음매를 만든 것이 아니라 **읽는 일과 판정하는 일을 갈랐다.**
+ */
+export function versionFrom(raw: unknown): string {
+    const declared = (raw as {version?: unknown} | null)?.version;
+    if (typeof declared !== "string" || declared.trim() === "") {
         throw new DevtoolsError(
             "INSTALL_BROKEN",
             "이 도구의 설치가 온전하지 않습니다 — 버전 표기가 비어 있습니다.",
-            "`npm i -g @zalkera/cli@latest` 로 다시 설치하거나, `npx @zalkera/cli@latest <명령>` 으로 실행해 주세요.",
+            REINSTALL_HOW,
         );
     }
     return declared;
 }
+
+/** 설치가 깨졌을 때 나가는 길. **두 갈래가 같은 문장을 쓴다** — 원인이 달라도 처방은 하나다. */
+const REINSTALL_HOW =
+    "`npm i -g @zalkera/cli@latest` 로 다시 설치하거나, `npx @zalkera/cli@latest <명령>` 으로 실행해 주세요.";
