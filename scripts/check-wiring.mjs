@@ -855,6 +855,13 @@ const WIRES = [
     ],
     [
         "packages/vscode/src/extension.ts",
+        "await tellDraftBlocked(tenant, (retried as Error).message);",
+        "**동의를 받은 뒤**의 재시도가 5층에 걸렸을 때 조용히 `return` 한다 — 사용자는 확인 창까지 " +
+            "눌러 놓고 아무 일도 안 일어난 화면을 본다. 위 앵커는 판정 줄만 핀하고 인자가 `error` 인 " +
+            "두 자리만 세므로 이 자리를 못 본다(변이 실측: 이 줄만 지워도 배선·시험 전건 초록)",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
         "const notice = say.draftBlocked(tenant, serverMessage);",
         "안내 문면을 core 가 아닌 확장이 짓게 되어, 소독·동의어휘 금지 시험이 무는 자리를 벗어난다",
     ],
