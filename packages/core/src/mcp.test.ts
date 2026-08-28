@@ -244,6 +244,9 @@ test("🔴 **우리가 적은 것은 다시 적을 수 있다** — 판이 붙�
         // 🔴 **확장 동봉본.** 이 모양을 못 알아보면 우리가 적은 항목을 남의 것으로 보고 거절해
         //    **영구 잠김**이 된다 — 사람이 손으로 지우기 전까지 다시 등록을 못 한다(실측).
         {type: "stdio", command: "/usr/bin/node", args: ["/ext/dist/zalkera-cli.js", "mcp", "--folder", "/x"]},
+        // 🔴 **개발 배치도.** `runtime.ts` 가 워크스페이스 자리를 찾으므로, 이 모양을 못 알아보면
+        //    개발 기계에서 우리가 적은 항목을 우리가 거절한다(심의 실측).
+        {type: "stdio", command: "/usr/bin/node", args: ["/w/packages/cli/dist/main.js", "mcp"]},
     ];
     for (const entry of ours) {
         const dir = await tempDir("zalkera-ours-");

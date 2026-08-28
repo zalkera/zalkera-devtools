@@ -31,6 +31,23 @@ const read = (p) => readFileSync(join(root, p), "utf8");
 
 /** [파일, 있어야 하는 조각, 사라지면 무슨 일이 나는가] */
 const WIRES = [
+    // ── 동봉 Node 는 **환경과 짝이다** ────────────────────────────────────────────
+    // 🔴 `runtime.nodePath` 는 `process.execPath` 이고 데스크톱 VS Code 에서 그것은 **Electron** 이다.
+    //    `ELECTRON_RUN_AS_NODE=1`(＝`runtime.env`)이 함께 가야 Node 로 돈다 — 안 주면 MCP 클라이언트가
+    //    그 항목을 띄울 때 **VS Code 새 창**이 뜨고 stdio 핸드셰이크가 영영 안 온다. 사람에게는
+    //    「도구가 안 뜬다」로만 보인다(같은 레포 `runtime.ts` KDoc 의 실측).
+    [
+        "packages/vscode/src/extension.ts",
+        "    env: runtime.env,",
+        "**동봉 Node 를 환경 없이 부르면 Node 가 아니라 VS Code 새 창이 뜬다.** `.mcp.json` 에 적히는 " +
+            "그 항목은 남의 프로세스가 띄우므로 우리가 고칠 기회가 없다 — 사람은 「도구가 안 뜬다」만 본다",
+    ],
+    [
+        "packages/vscode/src/runtime.ts",
+        'join(extensionPath, "..", "cli", "dist", "main.js"),',
+        "**개발 배치의 CLI 자리다.** 빠지면 워크스페이스에서 「소스 다루게 하기」가 실물을 못 찾고, " +
+            "그 모양을 아는 `OUR_BUNDLE` 과도 어긋나 우리가 적은 항목을 우리가 거절한다",
+    ],
     // ── CLI 파괴 동사 (memo184 T3) ──────────────────────────────────────────────
     // ⚠ `packages/cli` 는 종전에 이 검사기 관할 밖이었다. 그 사이 되돌릴 수 없는 폐기를 다루는
     //   동사 셋이 생겼고, 그 급소를 되돌리는 변이가 **전 게이트를 초록으로 통과했다**(심의 실측).

@@ -34,10 +34,24 @@ export interface McpRegistration {
  */
 export interface LocalMcpRegistration {
     serverName: McpServerName;
-    /** 실행할 명령(예: `npx`). */
+    /** 실행할 명령. */
     command: string;
     /** 그 인자. **우리 패키지 이름이 여기 있어야** 나중에 이 항목이 우리 것으로 판별된다. */
     args: readonly string[];
+    /**
+     * 그 명령에 줄 환경변수.
+     *
+     * 🔴 **이 자리가 없으면 확장이 띄우는 것이 Node 가 아니다.** VS Code 는 Node 를 동봉하되
+     *    별도 바이너리로 주지 않는다 — `process.execPath` 는 **Code 실행 파일(Electron)** 이고,
+     *    `ELECTRON_RUN_AS_NODE=1` 이 함께 가야 그것이 Node 로 돈다. 안 주면 MCP 클라이언트가
+     *    그 항목을 띄울 때 **VS Code 새 창**이 뜨고 stdio 핸드셰이크가 영영 안 온다 —
+     *    사람에게는 「도구가 안 뜬다」로만 보인다(같은 레포의 `runtime.ts` KDoc 이 그 사실을
+     *    실측으로 적어 뒀다).
+     *
+     * ⚠ **자격증명을 여기 담지 않는다.** 이 파일은 팀이 공유하고 레포에 들어간다 — 담을 것은
+     *   「무엇을 어떻게 띄우는가」뿐이다.
+     */
+    env?: Readonly<Record<string, string>>;
 }
 
 export interface RegisterMcpResult {
@@ -97,14 +111,6 @@ function isOurEntry(value: unknown): boolean {
     return false;
 }
 
-/**
- * 로컬 항목의 **소유 표식** — 인자에 이 중 하나가 있으면 우리가 적은 것이다.
- *
- * ⚠ **옛 이름도 남긴다.** 이 도구는 발행 전에 이미 이름이 한 번 갈렸다(npm 유사도 거절). 목록이
- *   「지금 이름 하나」로 좁아지면 개명한 날 **우리가 적은 항목을 남의 것으로 보고 거절한다** —
- *   그러면 사람이 손으로 지우기 전까지 다시 등록을 못 한다.
- */
-const LOCAL_TOOL_ARGS = new Set(["@zalkera/cli", "zalkera", "zalkera-cli", "@zalkera/devtools"]);
 
 /**
  * npm 인자로 받아들이는 이름. **맨 낱말 `zalkera` 는 빠진다** — 남의 항목이 그 낱말 하나로 우리
@@ -119,10 +125,14 @@ const SCOPED_TOOL_ARGS = new Set(["@zalkera/cli", "zalkera-cli", "@zalkera/devto
 /**
  * 확장이 동봉한 CLI 번들의 **파일 이름**. 경로는 설치 자리마다 다르므로 이름으로 잰다.
  *
- * ⚠ 이 이름을 바꾸면 `package-vsix.mjs` 의 스테이징·검수와 `runtime.ts` 의 탐색 자리도 같이
+ * ⚠ **개발 배치도 함께 본다.** `runtime.ts` 는 vsix 안(`dist/zalkera-cli.js`)과 워크스페이스
+ *   (`packages/cli/dist/main.js`) 두 자리를 찾는데, 이름만 재면 뒤엣것을 못 알아봐 **개발
+ *   기계에서 영구 잠김**이 된다(심의 실측 — 우리가 적은 항목을 우리가 거절한다).
+ *
+ * ⚠ 이 모양을 바꾸면 `package-vsix.mjs` 의 스테이징·검수와 `runtime.ts` 의 탐색 자리도 같이
  *   바꿔야 한다 — 한쪽만 바꾸면 등록이 우리 항목을 못 알아본다.
  */
-const OUR_BUNDLE = /(?:^|[/\\])zalkera-cli\.js$/;
+const OUR_BUNDLE = /(?:^|[/\\])(?:zalkera-cli\.js|packages[/\\]cli[/\\]dist[/\\]main\.js)$/;
 
 /** 프로젝트 스코프 `.mcp.json` 에 우리 서버를 적는다(팀이 공유하는 자리 — 시크릿은 담기지 않는다). */
 export async function registerMcpServer(
@@ -153,6 +163,7 @@ export async function registerLocalMcpServer(
         type: "stdio",
         command: registration.command,
         args: [...registration.args],
+        ...(registration.env === undefined ? {} : {env: {...registration.env}}),
     });
 }
 

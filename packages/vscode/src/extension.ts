@@ -3213,6 +3213,10 @@ async function connectAgentSource(): Promise<void> {
     //   `@latest` 로 두면 그 계약이 설정 파일에서 풀린다.
     // ⚠ `--ignore-scripts` 로 설치 스크립트를 막는다(형제 `npmArgvOf` 와 같은 규율).
     command: runtime.nodePath,
+    // 🔴 **이 짝이 없으면 Node 가 아니라 VS Code 새 창이 뜬다.** `nodePath` 는 `process.execPath`
+    //    이고 데스크톱에서 그것은 Electron 이다 — 형제 `startPreview` 도 `extraEnv: runtime.env`
+    //    를 반드시 짝으로 넘긴다(`runtime.ts` KDoc 이 그 실측을 적어 뒀다).
+    env: runtime.env,
     args: [
       runtime.cliPath,
       "mcp",
@@ -3244,7 +3248,9 @@ async function connectAgentSource(): Promise<void> {
       "로그인 열기",
     );
     if (go === "로그인 열기") {
-      const terminal = vscode.window.createTerminal("잘커라 로그인");
+      // ⚠ **환경은 터미널에 준다 — 명령줄에 안 적는다.** `VAR=1 cmd` 는 bash 문법이고
+      //   PowerShell·cmd 에서는 안 돈다(사장님 기계의 기본 셸이 그쪽이다).
+      const terminal = vscode.window.createTerminal({name: "잘커라 로그인", env: runtime.env});
       terminal.show();
       // ⚠ 등록에 적은 것과 **같은 판·같은 레지스트리**로 부른다 — 다른 것을 띄우면 그 로그인이
       //   엉뚱한 자리에 저장될 수 있다.
