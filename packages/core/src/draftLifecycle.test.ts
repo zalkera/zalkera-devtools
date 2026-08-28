@@ -66,6 +66,21 @@ interface Fake {
         discardedPendingChanges?: number;
     };
     sourceFails?: boolean;
+    /**
+     * `GET /draft/files` 가 던진다 — 망 단절·5xx 의 형상.
+     *
+     * ⚠ 이 갈래가 없어서 **버리기 사전 재검의 「못 읽음 → 멈춤」 접기가 무시험**이었다
+     *   (설계자 심의 실측 — `now === null ||` 를 `now !== null &&` 로 뒤집어도 전건 초록).
+     */
+    draftFilesFails?: boolean;
+    /**
+     * 이 서버가 **우리보다 앞서** 같은 불리언으로 걷는 자산군. 버리기 거절의 `errors[].field` 에
+     * 함께 실린다 — 서버가 앞서고 설치된 CLI 가 낡는 것이 이 제품의 상시 형상이다.
+     *
+     * ⚠ 손으로 오류를 만들지 않고 **대역 자신의 경로**로 던지게 하는 이유: 손으로 넣으면 실서버가
+     *   안 던지는 형상도 초록이 된다(이 파일이 이미 한 번 그 방식으로 죽은 레일을 덮었다).
+     */
+    extraMarks?: readonly string[];
 }
 function server(opts: Fake = {}) {
     const calls: string[] = [];
@@ -82,6 +97,7 @@ function server(opts: Fake = {}) {
             draftState: async () => ({revertTargetRevisionNo: opts.revertTarget ?? null}),
             draftFiles: async () => {
                 calls.push("draftFiles");
+                if (opts.draftFilesFails === true) throw new Error("못 읽음");
                 return (
                     opts.draft ?? {generation: "G1", changed: [], deleted: [], baseRevisionNo: 8, strandedOnOldRevision: true}
                 );
@@ -142,6 +158,7 @@ function server(opts: Fake = {}) {
                         [
                             ...(opts.hasDraft === true ? ["draft"] : []),
                             ...(pending > 0 ? ["pendingAiChanges"] : []),
+                            ...(opts.extraMarks ?? []),
                         ],
                     );
                 }
@@ -522,4 +539,43 @@ test("🔴 되돌리기의 동의 요구도 사람에게 올린다 — 같은 �
         api: s2.api, folder: await site({}), revisionNo: 5, discardPending: true, fetchImpl: s2.fetchImpl,
     });
     ok(s2.calls.includes("activate:5:true"), `동의가 안 실렸다: ${s2.calls}`);
+});
+
+test("🔴 재검을 **못 읽으면 멈춘다** — 「모르니 같다」로 접지 않는다", async () => {
+    // 설계자 심의 실측: `now === null ||` 를 `now !== null &&` 로 뒤집어도 core 시험 전건과
+    // `check:wiring` 133 자리가 전부 초록이었다. 배선 앵커가 세대 비교 **부분문자열**만 핀해서
+    // 술어가 접는 방향을 못 본다 — 부분문자열은 뚫린다.
+    //
+    // 이 접기를 잃으면 조회가 죽은 회차가 「달라진 적 없다」로 지나가, 사이트 쪽이 그 사이 얹은
+    // 편집을 **보여 준 적 없이** 태운다. 못 읽는 것과 같은 것은 다르다.
+    const s = server({active: 9, draftFilesFails: true});
+    const plan: StrandedPlan = {verdict: "mine", empty: false, paths: ["a.tsx"], generation: "G1", reason: "ledger-matches"};
+    const dir = await site({});
+    await rejects(() => discardDraft({api: s.api, folder: dir, plan}), (e: unknown) => {
+        ok(e instanceof DevtoolsError);
+        strictEqual(e.code, "DRAFT_MOVED_WHILE_CONFIRMING");
+        return true;
+    });
+    ok(!s.calls.some((c) => c.startsWith("activate:")), `못 읽었는데 버렸다: ${s.calls}`);
+});
+
+test("🔴 **모르는 표식**이 섞이면 멈춘다 — 차단목록이면 여기가 뚫린다", async () => {
+    // 설계자 심의가 잡은 자리. 판정이 `includes("pendingAiChanges")` 였을 때 서버가
+    // `["draft","futureAsset"]` 을 주면 「안 걸렸다」로 접혀 동의가 **자동으로 이어졌고**,
+    // 사람에게 보여 준 적 없는 제3 자산군이 그대로 소각됐다.
+    //
+    // ⚠ 부재는 안전 쪽으로 접으면서 「모르는 존재」만 반대로 접히는 비대칭이 이 게이트가 죽이려던
+    //   병(동의받은 것 ≠ 지운 것)을 되살린다.
+    const s = server({active: 9, hasDraft: true, extraMarks: ["futureAsset"]});
+    const plan: StrandedPlan = {verdict: "mine", empty: false, paths: ["a.tsx"], generation: "G1", reason: "ledger-matches"};
+    const dir = await site({});
+    await rejects(() => discardDraft({api: s.api, folder: dir, plan}), (e: unknown) => {
+        ok(e instanceof DevtoolsError);
+        strictEqual(e.code, "DISCARD_CONSENT_REQUIRED");
+        // ⚠ **멈추되 겁은 주지 않는다.** 모르는 표식이 크레딧이라는 근거가 없다 — 멈추는 것과
+        //   「쓴 크레딧은 돌아오지 않습니다」라고 말하는 것은 다른 질문이다(거짓 겁주기 금지).
+        ok(!/쓴 크레딧/.test(e.humanMessage ?? ""), `모르는 표식에 크레딧 문면을 붙였다: ${e.humanMessage}`);
+        return true;
+    });
+    ok(!s.calls.includes("activate:9:true"), `모르는 표식인데 동의를 이었다: ${s.calls}`);
 });

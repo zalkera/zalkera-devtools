@@ -339,7 +339,7 @@ export async function discardDraft(options: DiscardOptions): Promise<DiscardOutc
             //    ⑴ 크레딧이 걸렸으면 **여기서 멈춘다.** 그 자산은 사람에게 보여 준 적이 없다.
             //    ⑵ 편집만 걸렸으면 그것은 **방금 확인받은 바로 그 목록**이므로 동의를 실어 잇는다.
             if (!needsDiscardConsent(error) || !(error instanceof DevtoolsError)) throw error;
-            if (creditsAtStake(error)) throw asConsentRequired(error);
+            if (stopsHere(error)) throw asConsentRequired(error);
             // 세대는 이 문 **앞에서** 이미 쟀다 — 두 갈래가 같은 문을 지나야 한쪽만 뚫리지 않는다.
             report("서버가 확인을 한 번 더 요구해 방금 주신 동의를 그대로 잇습니다…");
             return options.api.activateRevision(active, true);
@@ -461,11 +461,36 @@ function asConsentRequired(error: DevtoolsError): DevtoolsError {
  */
 const PENDING_MARK = "pendingAiChanges";
 
+/** 이 자산군만이 **사람에게 이미 보여 준 것**이다 — `GET /draft/files` 가 나열한 그 목록. */
+const SHOWN_MARK = "draft";
+
+/**
+ * 여기서 **멈추는가** — 동의를 이어 붙여도 되는가의 판정.
+ *
+ * 🔴 **허용목록이다. 차단목록으로 쓰지 마라.** 종전에는 [creditsAtStake] 하나가 이 자리와 문면
+ *    고르기를 겸했는데, 그것은 「모르는 표식」을 **안전이 아니라 위험 쪽**으로 접었다(설계자 심의
+ *    실측): 서버가 `["draft","futureAsset"]` 을 주면 `includes(PENDING_MARK)` 가 거짓이라 동의를
+ *    자동으로 이어, **보여 준 적 없는 제3 자산군**이 그대로 소각됐다.
+ *
+ * ⚠ 바로 옆 [creditsAtStake] 는 **부재**를 「걸렸다」로 접는다. 부재는 안전 쪽인데 「모르는 존재」만
+ *   반대로 접히는 비대칭이 이 게이트가 죽이려던 병(동의받은 것 ≠ 지운 것)을 되살린다.
+ *
+ * ⚠ 서버가 앞서고 설치된 CLI 가 낡는 것은 이 제품의 **상시 형상**이다. 백엔드가 같은 불리언으로
+ *   걷는 자산군을 하나 더 붙이는 날, 낡은 CLI 가 그것을 무경고로 태우면 안 된다.
+ */
+function stopsHere(error: DevtoolsError): boolean {
+    return error.paths.length === 0 || error.paths.some((p) => p !== SHOWN_MARK);
+}
+
 /**
  * 이 거절에 **쓴 크레딧이 걸려 있는가.**
  *
  * ⚠ **결여는 「걸렸다」로 접는다.** 표식을 안 보내는 서버(이 표식보다 먼저 배포된 판)에서는
  *   걸렸는지 알 수 없고, 그때 「안 걸렸다」로 접으면 크레딧이 걸린 회차를 **경고 없이** 태운다.
+ *
+ * ⚠ **이것은 「멈추나」가 아니라 「무엇이라 말하나」다**([stopsHere] 와 분리한 이유). 여기서
+ *   허용목록을 쓰면 크레딧이 아닌 모르는 표식에도 「쓴 크레딧은 돌아오지 않습니다」가 붙어
+ *   **거짓 겁주기**가 된다. 멈추는 것과 겁주는 것은 다른 질문이다.
  */
 function creditsAtStake(error: DevtoolsError): boolean {
     return error.paths.length === 0 || error.paths.includes(PENDING_MARK);
