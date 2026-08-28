@@ -37,6 +37,7 @@ import {
     plainNotice,
     readLedger,
     syncStatus,
+    TENANT_CODE,
     type DraftFiles,
     type SyncStatus,
 } from "@zalkera/devtools-core";
@@ -106,13 +107,12 @@ export function describeForAgent(status: SyncStatus, draft: DraftFiles | null): 
  *    출처는 폴더 안 `.zalkera/sync.json` 이고, 그 파일은 **남이 준 zip·시작 소스 팩에 실려 온다.**
  *    서버 탈취가 필요 없다.
  *
- * ⚠ **형태로 잰다** — 사이트 코드는 모양이 정해져 있다(콘솔 입력이 같은 잣대를 쓴다). 아니면
- *   「모름」이다: 모르는 것을 그대로 옮기느니 모른다고 말하는 쪽이 정직하고 안전하다.
+ * ⚠ **형태로 잰다** — 사이트 코드는 모양이 정해져 있다. 그 잣대는 **코어 한 벌**이다
+ *   ([TENANT_CODE]) — 사본을 두면 한쪽만 조여지고, 그때 뚫리는 쪽이 이 자리다.
+ *   아니면 「모름」이다: 모르는 것을 그대로 옮기느니 모른다고 말하는 쪽이 정직하고 안전하다.
  */
-const SITE_CODE = /^[a-z0-9][a-z0-9-]{0,62}$/;
-
 function siteCodeOf(raw: string | null): string {
-    return raw !== null && SITE_CODE.test(raw) ? raw : "모름";
+    return raw !== null && TENANT_CODE.test(raw) ? raw : "모름";
 }
 
 /** 막힌 사유를 사람 말로. 다음에 할 일이 문장 안에 있어야 한다. */
