@@ -56,7 +56,7 @@ function server(opts: { at?: "presign" | "put" | "confirm"; needsConsent?: boole
       if (opts.at === "confirm") stop.abort();
       if (opts.needsConsent && body.discardPendingChanges !== true) {
         return new Response(
-          JSON.stringify({ errorCode: "PENDING_AI_CHANGES_CONFIRM_REQUIRED", message: "3건이 취소됩니다." }),
+          JSON.stringify({ errorCode: "DRAFT_DISCARD_CONFIRM_REQUIRED", message: "3건이 취소됩니다." }),
           { status: 409 },
         );
       }

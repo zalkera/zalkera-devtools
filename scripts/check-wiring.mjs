@@ -705,13 +705,6 @@ const WIRES = [
         "판이 안 움직인 전환을 「바꿨습니다」로 말한다 — 되돌리기가 작업만 버린 경우도 성공으로 보인다",
     ],
     [
-        // ⚠ **동의 문면이 코드를 안 보면 갈래가 하나로 접힌다** — 판이 그대로인데 「버리고 계속」을
-        //    묻게 되고, 사람은 전환에 동의한 줄 안다.
-        "packages/vscode/src/extension.ts",
-        "error instanceof DevtoolsError ? error.serverCode ?? null : null,",
-        "되돌리기 동의가 전환 문면으로 뜬다 — 다른 행위에 대한 동의를 받는다",
-    ],
-    [
         // ⚠ **재시도도 안내 분기를 지나야 한다.** 백엔드 가드는 게시 대기 AI 변경(4층)을
         //    편집(5층)보다 **먼저** 던지므로, 둘이 겹친 테넌트에서는 동의 뒤 재시도가
         //    `DRAFT_IN_PROGRESS` 로 거절된다. 맨몸으로 두면 빨간창에 서버 문장만 뜨고 행선지가
@@ -787,7 +780,7 @@ const WIRES = [
         "packages/vscode/src/extension.ts",
         // ⚠ **호출까지 문다.** 화살표 머리만 잡으면 본문을 `Promise.resolve(true)` 로 갈아도
         //    안 걸린다 — 안 묻고 자동 동의하는 변이가 그렇게 살아남았다(심의 실측).
-        "askDiscardConsent(tenant, serverMessage, serverCode),",
+        "onConsent: (serverMessage) => askDiscardConsent(tenant, serverMessage),",
         "새 버전 배포가 zip 을 다 올린 뒤 409 를 받고 「계속하려면 확인해 주세요」만 반복한다 — 확인할 자리가 없는 막다른 길이 된다",
     ],
     [
@@ -809,7 +802,7 @@ const WIRES = [
         // ⚠ **`!` 와 `return` 까지 문다.** 앵커를 현행화하며 짧게 잡았더니 「아니오를 눌렀는데
         //    진행한다」 변이가 살아남았다 — 종전 판에서는 잡히던 것이다(심의 실측). 이 배선이
         //    스스로 선언한 피해가 정확히 그 변이다.
-        "!(await askDiscardConsent(\n        tenant,\n        (error as Error).message,\n        error instanceof DevtoolsError ? error.serverCode ?? null : null,\n      ))\n    )\n      return;",
+        "!(await askDiscardConsent(tenant, (error as Error).message))\n    )\n      return;",
         "전환에서 거절해도 그대로 진행한다 — 사람이 「아니오」를 눌렀는데 AI 변경이 사라진다",
     ],
     [

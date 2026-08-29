@@ -52,7 +52,7 @@ interface Fake {
     hasDraft?: boolean;
     /**
      * 게시 대기 AI 변경 건수. 0 이 아니면 **발행·되돌리기**를 베이스라인 이동 가드가 동의 없이
-     * 거절한다(`PENDING_AI_CHANGES_CONFIRM_REQUIRED`).
+     * 거절한다(`DRAFT_DISCARD_CONFIRM_REQUIRED`).
      */
     pendingAi?: number;
     revisions?: Array<{revisionNo: number; status: string; isActive: boolean}>;
@@ -110,17 +110,9 @@ function server(opts: Fake = {}) {
             publishDraft: async (label?: string, discard?: boolean) => {
                 calls.push(`publish:${label ?? ""}:${discard === true}`);
                 if (opts.publish instanceof Error) throw opts.publish;
-                // ⚠ **발행의 동의 코드는 버리기의 것과 다르다.** 발행은 베이스라인 이동 가드를
-                //   지나므로 `PENDING_AI_CHANGES_CONFIRM_REQUIRED` 다 — 종전 대역이 여기에
-                //   `DRAFT_DISCARD_CONFIRM_REQUIRED` 를 실어, 실서버에서 죽어 있던 레일을
-                //   초록으로 덮었다(3축 심의 실측 · 세 축이 같이 짚었다).
-                if ((opts.pendingAi ?? 0) > 0 && discard !== true) {
-                    throw new DevtoolsError(
-                        "SERVER_REJECTED",
-                        `게시 대기 중인 AI 변경 ${opts.pendingAi}건이 취소됩니다. 이미 사용한 AI 크레딧은 돌아오지 않습니다. 계속하려면 확인해 주세요.`,
-                        undefined, undefined, "PENDING_AI_CHANGES_CONFIRM_REQUIRED",
-                    );
-                }
+                // ⚠ **발행은 동의를 안 묻는다.** 요청 DTO 에 그 인자가 없고(`SiteDraftPublishRequest`
+                //   = label 하나) 지나는 가드에 동의 층이 없다. 여기에 동의 갈래를 두면 실서버에
+                //   없는 계약을 시험이 못박는다 — 종전에 그렇게 죽은 레일이 초록으로 덮였다.
                 return opts.publish ?? {revisionNo: 10, siteType: "NEXT_SOURCE", status: "BUILDING", capabilityNote: ""};
             },
             activateRevision: async (n: number, discard: boolean) => {
@@ -137,15 +129,8 @@ function server(opts: Fake = {}) {
                 //   ⑵ `discardedDraft` 는 **활성 대상**(= 버리기) 갈래에서만 참이다.
                 const toCurrent = n === (landed ?? opts.active ?? 9);
                 const pending = opts.pendingAi ?? 0;
-                //   ⑶ **비활성 대상**은 베이스라인 이동 가드를 지난다 — 게시 대기 AI 변경이 있으면
-                //      동의 없이 거절하고, 그 코드는 버리기의 것과 **다르다**.
-                if (!toCurrent && pending > 0 && !discard) {
-                    throw new DevtoolsError(
-                        "SERVER_REJECTED",
-                        `게시 대기 중인 AI 변경 ${pending}건이 취소됩니다. 이미 사용한 AI 크레딧은 돌아오지 않습니다. 계속하려면 확인해 주세요.`,
-                        undefined, undefined, "PENDING_AI_CHANGES_CONFIRM_REQUIRED",
-                    );
-                }
+                //   ⑶ **비활성 대상**(`activateByPointer`)은 게시 대기 AI 변경을 아예 안 본다 —
+                //      동의를 묻지 않고 그냥 판을 옮긴다. 여기에 동의 갈래를 두면 안 된다.
                 //   ⑷ **활성 대상**(= 버리기)은 `discardToCurrent` 의 게이트다 — 게시 대기 AI 변경이
                 //      **0건이어도** 드래프트만 있으면 동의를 요구한다. 종전 대역에 이 갈래가 아예
                 //      없어, 실서버가 던지는 호출을 성공으로 재고 있었다(3축 심의 실측).
@@ -503,42 +488,6 @@ test("🔴 좌초한 편집의 발행 거절은 **참인 출구**를 댄다 — 
         ok(!/zalkera rollback/.test(e.humanMessage), `막힌 명령을 출구로 댄다: ${e.humanMessage}`);
         return true;
     });
-});
-
-test("🔴 발행의 동의 요구를 사람에게 올린다 — 그 코드는 버리기의 것과 **다르다**", async () => {
-    // 🔴 종전 시험은 발행 자리에 `DRAFT_DISCARD_CONFIRM_REQUIRED` 를 **손으로 주입**했다. 실서버는
-    //    그 문에서 그 코드를 안 낸다 — 발행은 베이스라인 이동 가드를 지나 `PENDING_AI_CHANGES_…` 다.
-    //    그래서 「코드 하나만 보는」 판정이 실물에서 죽어 있는데도 초록이었다(3축 심의 실측).
-    //    대역이 실물 코드를 내게 하고, 여기서는 **주입하지 않는다.**
-    const s = server({pendingAi: 2});
-    const dir = await site({});
-    await rejects(() => publishDraft({api: s.api, folder: dir, fetchImpl: s.fetchImpl}), (e: unknown) => {
-        ok(e instanceof DevtoolsError);
-        strictEqual(e.code, "DISCARD_CONSENT_REQUIRED", "동의 레일이 발행에서 죽어 있다");
-        match(e.message, /AI 변경 2건/, "서버 문면을 우리 문장으로 갈았다");
-        match(e.humanMessage, /--discard-pending/, "확인할 자리를 안 알려 준다");
-        return true;
-    });
-});
-
-test("🔴 되돌리기의 동의 요구도 사람에게 올린다 — 같은 가드, 같은 코드", async () => {
-    const s = server({active: 9, pendingAi: 3});
-    const dir = await site({});
-    await rejects(
-        () => rollbackRevision({api: s.api, folder: dir, revisionNo: 5, fetchImpl: s.fetchImpl}),
-        (e: unknown) => {
-            ok(e instanceof DevtoolsError);
-            strictEqual(e.code, "DISCARD_CONSENT_REQUIRED", "동의 레일이 되돌리기에서 죽어 있다");
-            match(e.humanMessage, /--discard-pending/);
-            return true;
-        },
-    );
-    // 동의를 실으면 지나간다.
-    const s2 = server({active: 9, pendingAi: 3});
-    await rollbackRevision({
-        api: s2.api, folder: await site({}), revisionNo: 5, discardPending: true, fetchImpl: s2.fetchImpl,
-    });
-    ok(s2.calls.includes("activate:5:true"), `동의가 안 실렸다: ${s2.calls}`);
 });
 
 test("🔴 재검을 **못 읽으면 멈춘다** — 「모르니 같다」로 접지 않는다", async () => {

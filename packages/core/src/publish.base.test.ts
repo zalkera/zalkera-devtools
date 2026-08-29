@@ -33,7 +33,7 @@ async function project(): Promise<string> {
 
 /**
  * 서버 대역. `opts.tail` 이 있으면 **선언이 그것과 다를 때** `UPLOAD_BASE_MOVED` 409 를 낸다.
- * `opts.needsConsent` 면 동의 전까지 `PENDING_AI_CHANGES_CONFIRM_REQUIRED` 를 **먼저** 낸다
+ * `opts.needsConsent` 면 동의 전까지 `DRAFT_DISCARD_CONFIRM_REQUIRED` 를 **먼저** 낸다
  * (백엔드 순서 그대로 — 그 순서가 급소 ⑴의 원인이다).
  */
 function server(opts: {
@@ -72,7 +72,7 @@ function server(opts: {
       if (wantsConsent && body.discardPendingChanges !== true) {
         return new Response(
           JSON.stringify({
-            errorCode: "PENDING_AI_CHANGES_CONFIRM_REQUIRED",
+            errorCode: "DRAFT_DISCARD_CONFIRM_REQUIRED",
             message: "게시 대기 중인 AI 변경 3건이 취소됩니다. 계속하려면 확인해 주세요.",
           }),
           { status: 409 },

@@ -158,7 +158,7 @@ test("동의로 넘어갈 수 있는 거절만 그렇다고 말한다", async ()
   const reject = (errorCode: string) =>
     new Response(JSON.stringify({ errorCode, message: "거절" }), { status: 409 });
   for (const [code, expected] of [
-    ["PENDING_AI_CHANGES_CONFIRM_REQUIRED", true],
+    ["DRAFT_DISCARD_CONFIRM_REQUIRED", true],
     ["AI_WORK_IN_PROGRESS", false],
     ["PUBLISH_IN_PROGRESS", false],
     ["REPO_ALREADY_CONNECTED", false],
@@ -186,7 +186,7 @@ test("동의로 넘어갈 수 있는 거절만 그렇다고 말한다", async ()
 test("동의 판정은 오류 코드만 본다 — 메시지 문면으로 흉내 낼 수 없다", () => {
   const impostor = new DevtoolsError(
     "SERVER_REJECTED",
-    "PENDING_AI_CHANGES_CONFIRM_REQUIRED 게시 대기 중인 AI 변경 3건이 취소됩니다.",
+    "DRAFT_DISCARD_CONFIRM_REQUIRED 게시 대기 중인 AI 변경 3건이 취소됩니다.",
   );
   strictEqual(needsDiscardConsent(impostor), false);
   strictEqual(needsDiscardConsent(new Error("아무거나")), false);
@@ -198,7 +198,7 @@ test("발행 전 편집 거절만 그렇다고 말한다", async () => {
     new Response(JSON.stringify({ errorCode, message: "거절" }), { status: 409 });
   for (const [code, expected] of [
     ["DRAFT_IN_PROGRESS", true],
-    ["PENDING_AI_CHANGES_CONFIRM_REQUIRED", false],
+    ["DRAFT_DISCARD_CONFIRM_REQUIRED", false],
     ["AI_WORK_IN_PROGRESS", false],
     ["PUBLISH_IN_PROGRESS", false],
     ["", false],
@@ -224,7 +224,7 @@ test("두 판정은 **동시에 참일 수 없다** — 물을 것인가 알릴 
     new Response(JSON.stringify({ errorCode, message: "거절" }), { status: 409 });
   for (const code of [
     "DRAFT_IN_PROGRESS",
-    "PENDING_AI_CHANGES_CONFIRM_REQUIRED",
+    "DRAFT_DISCARD_CONFIRM_REQUIRED",
     "AI_WORK_IN_PROGRESS",
     "PUBLISH_IN_PROGRESS",
     "",
@@ -279,9 +279,8 @@ const rejected = (code: string) =>
  *   `DRAFT_CONCURRENT_EDIT` 가 있고 셋 다 동의로 못 뚫는다. `*_CONFIRM_REQUIRED` 접미로 잡으면
  *   **뚫을 수 없는 거절에 동의 창을 띄운다** — 가짜 코드 한 칸이 그 회귀를 문다.
  */
-test("동의 인자가 실제로 통과시키는 두 코드만 참이다", () => {
+test("동의 인자가 실제로 통과시키는 코드만 참이다", () => {
   const 진리표: [string, boolean][] = [
-    ["PENDING_AI_CHANGES_CONFIRM_REQUIRED", true],
     ["DRAFT_DISCARD_CONFIRM_REQUIRED", true],
     ["DRAFT_IN_PROGRESS", false],
     ["DRAFT_BASE_MOVED", false],

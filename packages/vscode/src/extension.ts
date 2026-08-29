@@ -2159,11 +2159,7 @@ async function switchVersion(): Promise<void> {
     }
     if (!needsDiscardConsent(error)) throw error;
     if (
-      !(await askDiscardConsent(
-        tenant,
-        (error as Error).message,
-        error instanceof DevtoolsError ? error.serverCode ?? null : null,
-      ))
+      !(await askDiscardConsent(tenant, (error as Error).message))
     )
       return;
     // ⚠ **재시도도 안내 분기를 지난다.** 백엔드 가드는 **게시 대기 AI 변경(4층)을 편집(5층)보다
@@ -2638,15 +2634,14 @@ async function tellDraftBlocked(
 /**
  * 게시 대기 중인 AI 변경을 **버리는 데 동의**할지 묻는다.
  *
- * 백엔드는 재업로드·버전 전환·프리셋 재개시 **세 문이 같은 가드**를 지난다. 그러니 사람이 보는
- * 문면도 하나여야 한다 — 자리마다 다른 말을 하면 같은 일인 줄 모른다.
+ * 서버가 동의를 묻는 자리는 「이미 켜진 판을 다시 고른 것」 하나다 — 판은 안 옮기고 작업만
+ * 버린다. 문면이 그 사실을 말한다.
  */
 async function askDiscardConsent(
   tenant: CapturedTenant,
   serverMessage: string,
-  serverCode: string | null,
 ): Promise<boolean> {
-  const ask = say.discardPendingConfirm(tenant, serverMessage, serverCode);
+  const ask = say.discardPendingConfirm(tenant, serverMessage);
   const answer = await vscode.window.showWarningMessage(
     ask.message,
     { modal: true, detail: ask.detail },
@@ -2722,10 +2717,9 @@ async function publishCommand(): Promise<void> {
           api,
           tenant,
           onProgress: log,
-          // 서버가 「계속하려면 확인해 주세요」라고 말한 자리 — 확인할 곳을 준다. 전환 쪽과
-          // **같은 문면**을 쓴다: 두 문이 같은 가드를 지나므로 사람이 보는 말도 같아야 한다.
-          onConsent: (serverMessage, serverCode) =>
-            askDiscardConsent(tenant, serverMessage, serverCode),
+          // ⚠ 이 문(zip 올리기)에서는 서버가 동의를 안 묻는다 — 배선만 남아 있고 도달하지
+          //    않는다. 걷는 것은 별건이다(요청 본문의 `discardPendingChanges` 와 한 몸이라).
+          onConsent: (serverMessage) => askDiscardConsent(tenant, serverMessage),
           baseRevisionNo,
           // 이 문이 없으면 화면은 **막다른 길**이 된다 — 표식은 발행 성공에서만 갱신되므로 다음
           // 올리기도 같은 번호를 선언해 같은 409 를 무한히 맞는다. 사람이 최신 변경을 손으로 합쳐

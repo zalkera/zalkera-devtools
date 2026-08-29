@@ -50,7 +50,7 @@ function server() {
       if (body.discardPendingChanges !== true) {
         return new Response(
           JSON.stringify({
-            errorCode: "PENDING_AI_CHANGES_CONFIRM_REQUIRED",
+            errorCode: "DRAFT_DISCARD_CONFIRM_REQUIRED",
             message: "게시 대기 중인 AI 변경 3건이 취소됩니다. 계속하려면 확인해 주세요.",
           }),
           { status: 409 },
@@ -241,7 +241,7 @@ test("발행 동의 콜백은 서버 문장과 **코드**를 함께 받는다", 
       return true;
     },
   });
-  deepStrictEqual(codes, ["PENDING_AI_CHANGES_CONFIRM_REQUIRED"], "코드가 콜백에 안 왔다");
+  deepStrictEqual(codes, ["DRAFT_DISCARD_CONFIRM_REQUIRED"], "코드가 콜백에 안 왔다");
 });
 
 /**
@@ -330,7 +330,7 @@ test("409 계열에서는 취소를 존중한다 — 판이 안 만들어졌다�
       controller.abort();
       return new Response(
         JSON.stringify({
-          errorCode: "PENDING_AI_CHANGES_CONFIRM_REQUIRED",
+          errorCode: "DRAFT_DISCARD_CONFIRM_REQUIRED",
           message: "게시 대기 중인 AI 변경 3건이 취소됩니다. 계속하려면 확인해 주세요.",
         }),
         { status: 409 },

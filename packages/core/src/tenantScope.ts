@@ -58,9 +58,6 @@ const PUBLISH_OUTCOME =
     "올리면 방문자가 보는 사이트가 이 소스로 바뀝니다.\n" +
     "이전에 올리신 판은 「버전 전환」에 남습니다.";
 
-/** 「지금으로 되돌리기」로 갈린 거절. 판은 안 옮기고 작업만 버린다. */
-const DISCARD_TO_CURRENT = "DRAFT_DISCARD_CONFIRM_REQUIRED";
-
 /**
  * 「바꿨습니다」 한 문장.
  *
@@ -400,10 +397,9 @@ export const say = {
      * 몇 건이 사라지는지는 **서버만 안다.** 그래서 서버 문장을 그대로 싣되, 나가는 자리가 모달
      * `detail` 이라 여기서 소독한다.
      *
-     * ⚠ **동의는 하나인데 결과가 둘이다 — 그래서 문면이 갈린다.** 인자(`discardPendingChanges=true`)
-     *   하나로 뚫리는 코드가 둘이고, 하나는 **판이 옮겨지고** 하나는 **판이 그대로**다.
-     *   사람은 방금 「버전 N 으로 바꿉니다」 모달에 동의했다 — 그 프레임을 여기서 안 바로잡으면
-     *   **다른 행위에 대한 동의**를 받는 셈이다.
+     * ⚠ **판은 옮겨지지 않는다 — 그래서 프레임을 바로잡는다.** 사람은 방금 「버전 N 으로 바꿉니다」
+     *   모달에 동의했는데, 이 거절이 오는 자리는 이미 켜진 판을 다시 고른 것이라 **전환할 것이 없다**.
+     *   그 사실을 여기서 안 말하면 **다른 행위에 대한 동의**를 받는 셈이다.
      *
      * ⚠ **건수를 되풀이하지 않는다.** 서버 문장이 이미 「편집 중인 파일 N개 · 게시 대기 AI 변경
      *   M건(쓴 크레딧은 돌아오지 않습니다)」로 **세어서** 온다. 확장이 그 위에 사본을 얹으면
@@ -412,24 +408,14 @@ export const say = {
     discardPendingConfirm(
         tenant: CapturedTenant,
         serverMessage: string,
-        serverCode: string | null,
     ): { message: string; detail: string; action: string } {
-        if (serverCode === DISCARD_TO_CURRENT) {
-            return {
-                message: `「${shown(tenant)}」 — 고르신 버전이 이미 켜져 있습니다.`,
-                detail:
-                    `${plainNotice(serverMessage, 200)}\n` +
-                    "판은 그대로 두고 위 작업만 사라집니다. 되돌릴 수 없습니다.",
-                // 「버리고 계속」이 아니다 — **계속할 전환이 없다.**
-                action: "버리기",
-            };
-        }
         return {
-            message: `「${shown(tenant)}」 에 아직 게시하지 않은 AI 변경이 있습니다.`,
+            message: `「${shown(tenant)}」 — 고르신 버전이 이미 켜져 있습니다.`,
             detail:
                 `${plainNotice(serverMessage, 200)}\n` +
-                "계속하면 그 변경은 사라집니다. 되돌릴 수 없습니다.",
-            action: "버리고 계속",
+                "판은 그대로 두고 위 작업만 사라집니다. 되돌릴 수 없습니다.",
+            // 「버리고 계속」이 아니다 — **계속할 전환이 없다.**
+            action: "버리기",
         };
     },
     /**

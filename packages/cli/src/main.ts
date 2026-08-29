@@ -70,7 +70,7 @@ function help(): string {
   --discard-local                pull 이 막힐 때 고친 것을 옆 폴더로 옮기고 진행한다
   --overwrite-unseen             push 가 막힐 때 사이트 쪽 편집을 덮어쓰고 진행한다(그 편집은 사라진다)
   --label <이름>                 publish 가 붙일 버전 이름
-  --discard-pending              게시 대기 AI 변경을 함께 버린다(publish·rollback·discard)
+  --discard-pending              게시 대기 AI 변경을 함께 버린다(discard)
                                  ⚠ 쓴 크레딧은 돌아오지 않는다 — 편집만 버릴 때는 필요 없다
   --yes                          discard 확인을 미리 준다 — **내가 올린 것과 같을 때만** 먹는다
   --confirm 버립니다               여기 없는 편집을 버릴 때 필요한 문구(터미널이 아닐 때)

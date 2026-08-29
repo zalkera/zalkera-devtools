@@ -386,19 +386,13 @@ export class ZalkeraApi {
      *   만들기 전에 원장 꼬리와 대조하고 다르면 `UPLOAD_BASE_MOVED` 409 로 멈춘다.
      *   `null` 은 **무선언 — 현행 그대로 통과**다(모르는 것으로 막지 않는다).
      *
-     * ⚠ **동의 재시도에서도 같은 값을 실어야 한다.** 백엔드는 `BaselineShiftGuard`(동의)를 기반
-     *   대조보다 **먼저** 지나므로, 동의 409 를 받고 재호출할 때 이 값을 빠뜨리면 **그 경로만 조용히
-     *   무선언**이 된다 — 방어가 있는 줄 알았는데 하필 편집이 있는 사이트에서만 없다.
      */
     confirmArchive(
         storageKey: string,
         discardPendingChanges = false,
         baseRevisionNo: number | null = null,
     ): Promise<ArchiveConfirmed> {
-        // ⚠ **`discardPendingChanges` 를 실을 수 있어야 한다.** 백엔드는 재업로드(confirm)·버전
-        //    전환(activate)·프리셋 재개시 **세 문이 같은 `BaselineShiftGuard` 를 지난다.**
-        //    종전에는 activate 만 동의를 보낼 수 있어서, 올리기는 zip 을 다 올린 뒤 409 를 받고
-        //    「계속하려면 확인해 주세요」만 반복했다 — 확인할 자리가 없는 막다른 길이었다.
+        // ⚠ 이 문은 동의를 안 묻는다 — 서버 DTO 에 그 인자가 없다. 필드는 서버가 무시한다.
         return this.request<ArchiveConfirmed>("POST", "/api/partner/site-archive/confirm", {
             // 선언이 없으면 **필드 자체를 안 보낸다** — `null` 을 보내도 서버는 같게 다루지만, 안 보내는
             // 쪽이 「주장하지 않는다」는 뜻에 정확하고 구 서버와도 같은 와이어다.
@@ -545,18 +539,17 @@ async function toError(response: Response): Promise<DevtoolsError> {
  * **집합에 넣는 조건은 하나다**: 백엔드에서 그 코드를 던지는 자리가 이 인자를 받아 통과시키는가.
  */
 const DISCARD_CONSENT_CODES: ReadonlySet<string> = new Set([
-    // 판이 옮겨진다 — 전환은 진행되고, 게시 안 한 AI 변경이 함께 사라진다(`BaselineShiftGuard`).
-    "PENDING_AI_CHANGES_CONFIRM_REQUIRED",
-    // **판은 그대로다** — 이미 켜진 판을 다시 고른 것이라 「지금으로 되돌리기」로 갈리고,
-    // 편집과 게시 대기 AI 변경만 버린다(`discardToCurrent`). 잃는 것이 더 크므로 문면이 다르다.
+    // 이미 켜진 판을 다시 고르면 「지금으로 되돌리기」로 갈려, 편집과 게시 대기 AI 변경을
+    // 함께 버린다(`discardToCurrent`). 서버가 사라지는 것을 한 문장에 열거해 보낸다.
     "DRAFT_DISCARD_CONFIRM_REQUIRED",
 ]);
 
 /**
  * 이 거절이 **사용자 동의 한 번으로 넘어갈 수 있는가.**
  *
- * 게시 대기 중인 AI 변경이 있어 서버가 **동의를 요구한** 거절. 백엔드 `BaselineShiftGuard` 가
- * `discardPendingChanges=true` 를 받으면 통과시킨다.
+ * 서버가 **동의를 요구한** 거절. 던지는 자리는 「이미 켜진 판을 다시 고른 것」 하나이고
+ * (`SiteRevisionActivationService.discardToCurrent`), 거기서 `discardPendingChanges=true` 를
+ * 받으면 통과시킨다. `BaselineShiftGuard` 에는 동의 층이 없다.
  *
  * 다른 409(게시 진행 중·AI 작업 중·레포 연결 테넌트)에는 동의로 뚫는 길이 없다 — 그래서 코드를
  * 정확히 하나만 본다. 「409 면 물어본다」로 넓히면 뚫을 수 없는 거절에도 동의 창을 띄우게 된다.

@@ -192,7 +192,6 @@ test("동의 문면은 서버 문장을 싣되 소독한다", () => {
   const ask = say.discardPendingConfirm(
     captureTenant("bix"),
     "게시 대기 중인 AI 변경 3건이 취소됩니다. [열기](command:workbench.action.terminal.new)",
-    null,
   );
   match(ask.detail, /3건이 취소됩니다/);
   match(ask.detail, /되돌릴 수 없습니다/);
@@ -201,7 +200,7 @@ test("동의 문면은 서버 문장을 싣되 소독한다", () => {
 });
 
 test("동의 문면도 사이트 이름을 소독한다", () => {
-  const ask = say.discardPendingConfirm(captureTenant(EVIL), "", null);
+  const ask = say.discardPendingConfirm(captureTenant(EVIL), "");
   ok(!/\]\(command:/.test(ask.message), ask.message);
 });
 
@@ -241,7 +240,7 @@ test("발행 전 편집 안내도 긴 서버 문장에 밀리지 않는다", () 
 });
 
 test("서버 문장이 길어도 모달을 밀어내지 않는다", () => {
-  const ask = say.discardPendingConfirm(captureTenant("bix"), "가".repeat(5000), null);
+  const ask = say.discardPendingConfirm(captureTenant("bix"), "가".repeat(5000));
   ok(ask.detail.length < 400, `detail 이 ${ask.detail.length}자다`);
 });
 
@@ -297,24 +296,27 @@ test("되돌리기 동의는 「바꾼다」고 말하지 않는다 — 판은 �
   const ask = say.discardPendingConfirm(
     captureTenant("bix"),
     "되돌리면 사라집니다 — 편집 중인 파일 2개. 계속하려면 확인해 주세요.",
-    "DRAFT_DISCARD_CONFIRM_REQUIRED",
   );
   ok(!/바꿉니다|바꾸기|바꿨/.test(ask.message + ask.action), `전환 어휘가 남았다: ${ask.message} / ${ask.action}`);
   ok(ask.detail.includes("판은 그대로"), "판이 안 바뀐다는 사실이 없다");
   ok(ask.detail.includes("편집 중인 파일 2개"), "서버가 센 것을 안 실었다");
 });
 
-test("전환 동의 갈래의 문면은 그대로다 — 회귀 고정", () => {
-  const ask = say.discardPendingConfirm(captureTenant("bix"), "서버 문장", "PENDING_AI_CHANGES_CONFIRM_REQUIRED");
-  strictEqual(ask.action, "버리고 계속");
-  ok(ask.message.includes("게시하지 않은 AI 변경"));
+/**
+ * 🔴 **문면 회귀 고정.** 위 시험은 전환 어휘 부재(`message`+`action`)와 `detail` 만 본다 —
+ * 실측: `action` 을 「버리고 계속」으로, `message` 를 옛 AI 문면으로 되돌려도 전건 초록이었다.
+ * 「계속」은 계속할 전환이 있다는 뜻이라, 판을 안 옮기는 이 갈래에서 거짓이다.
+ */
+test("🔴 되돌리기 동의의 제목과 라벨을 값으로 못박는다", () => {
+  const ask = say.discardPendingConfirm(captureTenant("bix"), "서버 문장");
+  strictEqual(ask.action, "버리기");
+  ok(ask.message.includes("이미 켜져 있습니다"), `제목이 갈렸다: ${ask.message}`);
 });
 
 test("건수를 되풀이하지 않는다 — 서버가 셌다", () => {
   const ask = say.discardPendingConfirm(
     captureTenant("bix"),
     "게시 대기 AI 변경 3건(쓴 크레딧은 돌아오지 않습니다). 계속하려면 확인해 주세요.",
-    "DRAFT_DISCARD_CONFIRM_REQUIRED",
   );
   strictEqual((ask.detail.match(/크레딧/g) ?? []).length, 1, "크레딧 문구가 두 번 나온다");
   strictEqual((ask.detail.match(/3건/g) ?? []).length, 1, "건수가 두 번 나온다");

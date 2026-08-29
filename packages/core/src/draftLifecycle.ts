@@ -420,11 +420,9 @@ async function activeRevisionNo(api: ZalkeraApi): Promise<number> {
  * ⚠ **여기서 자동으로 참으로 바꾸지 않는다.** 서버 문면은 편집 N개와 AI M건을 **나눠 세므로**,
  *   그것을 사람에게 보여 주고 다시 묻는 것이 정석이다. 우리가 만든 문장으로 대신하지 않는다.
  *
- * 🔴 **코드 하나로 재지 않는다 — [needsDiscardConsent] 집합으로 잰다.** 문마다 코드가 다르다:
- *    발행·되돌리기는 `PENDING_AI_CHANGES_CONFIRM_REQUIRED`(베이스라인 이동 가드), 버리기는
- *    `DRAFT_DISCARD_CONFIRM_REQUIRED`(`discardToCurrent`). 하나만 보면 **나머지 두 동사에서
- *    이 레일이 통째로 죽고**, 사람은 「계속하려면 확인해 주세요」를 받고도 확인할 자리를 못 찾는다.
- *    형제 `publish.ts` 가 이미 그 집합을 쓰고, 백엔드 `ConsentRetryableErrorCodes` KDoc 도
+ * 🔴 **코드 하나로 재지 않는다 — [needsDiscardConsent] 집합으로 잰다.** 지금 집합에 든 코드가
+ *    하나라고 상수 비교로 바꾸면, 백엔드가 코드를 더하는 날 이 레일이 조용히 죽는다. 형제
+ *    `publish.ts` 가 이미 그 집합을 쓰고, 백엔드 `ConsentRetryableErrorCodes` KDoc 도
  *    「술어를 늘리지 말고 집합을 넓혀라」라고 못박아 두었다.
  *
  * ⚠ **크레딧 문장을 우리가 만들지 않는다.** 버리기 갈래는 게시 대기 AI 변경이 **0건이어도**
