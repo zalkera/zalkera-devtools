@@ -160,7 +160,6 @@ export {
 } from "./precheck.ts";
 export {
   registerMcpServer,
-  registerLocalMcpServer,
   type McpRegistration,
   type RegisterMcpResult,
 } from "./mcp.ts";

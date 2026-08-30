@@ -35,7 +35,10 @@ export interface NodeRuntime {
     nodePath: string;
     env: Record<string, string>;
     /**
-     * 동봉한 CLI 번들 경로. 「소스 다루게 하기」가 `.mcp.json` 에 **이 절대경로**를 적는다.
+     * 동봉한 CLI 번들 경로.
+     *
+     * ⚠ **지금 확장 안에 부르는 자리가 없다.** 이 경로를 쓰던 「소스 다루게 하기」를 걷었다.
+     *   번들은 계속 실린다 — 배송물 구성을 바꾸는 것은 위험 성격이 달라 별건으로 둔다.
      *
      * ⚠ **`npx` 로 부르지 않는 이유가 이 필드의 존재 이유다.** `.mcp.json` 은 사이트 소스 폴더에
      *   씌어지고 그 폴더가 MCP 클라이언트의 cwd 다 — `npm exec` 은 그 폴더의
@@ -73,9 +76,7 @@ export function embeddedNodeRuntime(extensionPath: string): NodeRuntime {
         join(extensionPath, "..", "..", "node_modules", "npm", "bin", "npm-cli.js"),
     ].find((candidate) => existsSync(candidate));
 
-    // 🔴 **CLI 는 동봉본을 절대경로로 부른다.** `npx` 로는 사이트 폴더의 `node_modules` 를 못
-    //    이긴다 — `npm exec` 은 그 폴더의 패키지가 자기 `package.json.version` 으로 스펙을
-    //    만족한다고 주장하면 그것을 쓰고, 그 버전 문자열은 공격자가 적는다(심의 실측).
+    // ⚠ **지금 이 값을 읽는 자리가 없다**(필드 KDoc 참조). 번들과 함께 남겨 둔 계산이다.
     //
     // ⚠ npm 과 **같은 두 자리**를 본다: 구운 VSIX 안이거나, 개발 중 워크스페이스다.
     const cli = [

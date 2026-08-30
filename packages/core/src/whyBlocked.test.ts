@@ -104,7 +104,6 @@ test("어긋난 폴더 — 폴더를 만지는 명령은 막고, 탈출구는 �
     "zalkera.preview.start",
     "zalkera.preview.restart",
     "zalkera.agent.connect",
-    "zalkera.agent.source",
     "zalkera.precheck",
     "zalkera.publish",
     "zalkera.site.updateZip",

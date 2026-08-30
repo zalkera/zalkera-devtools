@@ -26,34 +26,6 @@ export interface McpRegistration {
     authServerMetadataUrl: string;
 }
 
-/**
- * **로컬(stdio) 서버 등록.** 원격과 달리 주소·OAuth 가 없다 — 에이전트가 이 명령을 **직접 띄운다.**
- *
- * ⚠ **토큰을 여기 담지 않는다.** `.mcp.json` 은 팀이 공유하는 파일이고 레포에 들어간다. 로그인은
- *   그 명령이 자기 보관소(`~/.config/zalkera/auth.json`)에서 읽는다 — 이 파일은 「무엇을 띄울지」만 안다.
- */
-export interface LocalMcpRegistration {
-    serverName: McpServerName;
-    /** 실행할 명령. */
-    command: string;
-    /** 그 인자. **우리 패키지 이름이 여기 있어야** 나중에 이 항목이 우리 것으로 판별된다. */
-    args: readonly string[];
-    /**
-     * 그 명령에 줄 환경변수.
-     *
-     * 🔴 **이 자리가 없으면 확장이 띄우는 것이 Node 가 아니다.** VS Code 는 Node 를 동봉하되
-     *    별도 바이너리로 주지 않는다 — `process.execPath` 는 **Code 실행 파일(Electron)** 이고,
-     *    `ELECTRON_RUN_AS_NODE=1` 이 함께 가야 그것이 Node 로 돈다. 안 주면 MCP 클라이언트가
-     *    그 항목을 띄울 때 **VS Code 새 창**이 뜨고 stdio 핸드셰이크가 영영 안 온다 —
-     *    사람에게는 「도구가 안 뜬다」로만 보인다(같은 레포의 `runtime.ts` KDoc 이 그 사실을
-     *    실측으로 적어 뒀다).
-     *
-     * ⚠ **자격증명을 여기 담지 않는다.** 이 파일은 팀이 공유하고 레포에 들어간다 — 담을 것은
-     *   「무엇을 어떻게 띄우는가」뿐이다.
-     */
-    env?: Readonly<Record<string, string>>;
-}
-
 export interface RegisterMcpResult {
     path: string;
     action: "created" | "updated" | "unchanged";
@@ -146,24 +118,6 @@ export async function registerMcpServer(
             clientId: registration.clientId,
             authServerMetadataUrl: registration.authServerMetadataUrl,
         },
-    });
-}
-
-/**
- * 로컬(stdio) 서버를 같은 파일에 적는다.
- *
- * ⚠ **병합 규율은 원격과 한 벌이다** — 남의 항목을 안 덮고, 형태가 틀리면 멈추고, 최상위의 다른
- *   키를 살린다. 두 벌이 되면 한쪽만 조여진다.
- */
-export async function registerLocalMcpServer(
-    projectDir: string,
-    registration: LocalMcpRegistration,
-): Promise<RegisterMcpResult> {
-    return writeEntry(projectDir, registration.serverName, {
-        type: "stdio",
-        command: registration.command,
-        args: [...registration.args],
-        ...(registration.env === undefined ? {} : {env: {...registration.env}}),
     });
 }
 
