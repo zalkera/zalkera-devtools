@@ -211,8 +211,6 @@ async function main(argv: readonly string[]): Promise<number> {
                 api: context.api,
                 folder: context.folder,
                 label: flagValue(flags, "label") ?? undefined,
-                // ⚠ **명시 동의다.** 게시 대기 AI 변경이 함께 사라진다.
-                discardPendingChanges: flagOn(flags, "discard-pending"),
                 onProgress: (message: string) => process.stderr.write(`${message}\n`),
             });
             const lines = [

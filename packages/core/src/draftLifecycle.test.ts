@@ -107,8 +107,8 @@ function server(opts: Fake = {}) {
                 calls.push(`source:${n}`);
                 return {url: "http://127.0.0.1:1/s", sha256: createHash("sha256").update(payload).digest("hex")};
             },
-            publishDraft: async (label?: string, discard?: boolean) => {
-                calls.push(`publish:${label ?? ""}:${discard === true}`);
+            publishDraft: async (label?: string) => {
+                calls.push(`publish:${label ?? ""}`);
                 if (opts.publish instanceof Error) throw opts.publish;
                 // ⚠ **발행은 동의를 안 묻는다.** 요청 DTO 에 그 인자가 없고(`SiteDraftPublishRequest`
                 //   = label 하나) 지나는 가드에 동의 층이 없다. 여기에 동의 갈래를 두면 실서버에
@@ -187,7 +187,7 @@ test("발행은 **새 문을 안 내고** 콘솔이 쓰는 그 문을 쓴다", a
     const dir = await site({"a.tsx": "새 판"});
     const out = await publishDraft({api: s.api, folder: dir, fetchImpl: s.fetchImpl, label: "봄맞이"});
     strictEqual(out.revisionNo, 10);
-    ok(s.calls.includes("publish:봄맞이:false"), `보낸 것: ${s.calls}`);
+    ok(s.calls.includes("publish:봄맞이"), `보낸 것: ${s.calls}`);
 });
 
 test("🔴 발행 뒤 `files` 를 **새 판에서 다시 읽는다** — 직전 작업본으로 추정하지 않는다", async () => {
@@ -223,16 +223,6 @@ test("🔴 새 매니페스트를 못 읽어도 **던지지 않는다** — 판�
     const dir = await site({"a.tsx": "새 판"});
     const out = await publishDraft({api: s.api, folder: dir, fetchImpl: s.fetchImpl});
     strictEqual(out.revisionNo, 10, "발행이 성공했는데 실패로 끝냈다");
-});
-
-test("🔴 게시 대기 변경 폐기는 **명시 동의가 있을 때만** 참으로 나간다", async () => {
-    const s = server();
-    const dir = await site({"a.tsx": "새 판"});
-    await publishDraft({api: s.api, folder: dir, fetchImpl: s.fetchImpl});
-    ok(s.calls.includes("publish::false"), `동의 없이 참으로 보냈다: ${s.calls}`);
-    const s2 = server();
-    await publishDraft({api: s2.api, folder: await site({"a.tsx": "새 판"}), discardPendingChanges: true, fetchImpl: s2.fetchImpl});
-    ok(s2.calls.includes("publish::true"));
 });
 
 // ── rollback ────────────────────────────────────────────────────────────────────
