@@ -74,14 +74,30 @@ npm run pack:cli                                  # verify → 번들 → npm pa
 npm publish ./shared/zalkera-cli-<version>.tgz    # 오너만
 ```
 
-⚠ **판을 올릴 때마다 둘 다 발행한다.** 서버의 최소판 게이트는 **하나**다
-(`min-extension-version` · `check-version-lockstep.mjs` KDoc). 확장만 올리고 CLI 를 안 올리면,
-게이트가 새 판을 요구하는데 npm 최신은 옛 판이라 **터미널로 쓰는 사람이 갇힌다** — 그들이 받는
-안내는 「업데이트하세요」인데 받을 새 판이 없다.
+⚠ **판을 올릴 때마다 둘 다 발행한다.** CLI 전용 게이트가 없다 — CLI 는 자기 판을 확장 판
+자리에 실어 보내고(`packages/cli/src/context.ts` 의 `fetchHandshake(serverUrl, version(), …)`),
+서버는 `min-extension-version` 하나로 판정한다. 그래서 두 판이 갈리면 한쪽이 게이트를 못 넘는다.
 
-⚠ **다만 순서 제약은 없다.** 확장은 CLI 를 **동봉**해 절대경로로 부르므로(`npx` 를 안 쓴다 —
-근거는 `runtime.ts` 의 `cliPath` KDoc) 마켓 판이 npm 판을 기다리지 않는다. 어느 쪽을 먼저 내도
-그 사이에 깐 사람이 깨지지 않는다.
+⚠ **다만 이것은 조건문이다 — 지금 갇히는 사람은 없다.** 상용 값이 `0.1.0` 이라 아무도 거절되지
+않는다. 이 절이 막는 것은 **그 값을 올리는 날** 확장만 새 판이고 npm 최신은 옛 판인 상태다 —
+그때 터미널 사용자가 받는 안내는 「업데이트하세요」인데 받을 새 판이 없다.
+
+재현:
+
+```bash
+curl -s 'https://api.zalkera.com/api/devtools/handshake?extensionVersion=0.23.0' \
+  | python3 -c 'import sys,json; print(json.load(sys.stdin)["data"]["minExtensionVersion"])'
+```
+
+⚠ **`minClientVersion` 은 이 축이 아니다.** 같은 응답에 있지만 그 값은 스토어프론트 소스가 써야
+하는 **`@zalkera/client`(SDK)** 최소판이다(`DevtoolsProperties.kt` KDoc). CLI 와 무관하다 —
+이름이 닮아 실제로 오독된 적이 있다. 그리고 응답은 `ApiResponse` 봉투라 **`data` 안**에 있다.
+
+⚠ **순서 제약은 없다.** 확장은 CLI 를 **부르지 않는다**(`runtime.ts` 의 `cliPath` 는 읽는 자리가
+0이다 — 그 경로를 쓰던 「소스 다루게 하기」를 0.23.0 에서 걷었다). 두 배송물이 런타임으로
+안 엮이므로 어느 쪽을 먼저 내도 그 사이에 깐 사람이 깨지지 않는다.
+
+`check-version-lockstep.mjs` 는 **두 판이 갈리지 않았는가**만 잰다. 서버 값이 얼마인지는 모른다.
 
 ⚠ **발행 계정 위생.** 이 이름은 `npm i -g` / `npx` 로 **남의 기계에서 실행되는 바이너리**다.
 토큰 하나가 그 전부에 닿으므로, 발행 계정은 **2FA(publish 단계까지)** 를 켜고 **발행 전용
