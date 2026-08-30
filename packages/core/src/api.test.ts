@@ -1,6 +1,6 @@
 import assert, { ok, rejects, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
-import { ZalkeraApi, needsDiscardConsent, isDraftInProgress, reflectionOf, revisionWhen, switchCandidates } from "./api.ts";
+import { ZalkeraApi, needsDiscardConsent, isDraftInProgress, isUploadBaseMoved, reflectionOf, revisionWhen, switchCandidates } from "./api.ts";
 import { DevtoolsError } from "./errors.ts";
 
 function api(handler: (url: string, init: RequestInit) => Response): ZalkeraApi {
@@ -344,6 +344,14 @@ test("두 술어는 서로의 코드를 안 문다 — 겹치면 한쪽이 죽�
   assert.strictEqual(isDraftInProgress(rejected(동의)), false, "안내가 동의 코드를 삼킨다");
   assert.strictEqual(needsDiscardConsent(rejected(동의)), true);
   assert.strictEqual(needsDiscardConsent(rejected(안내)), false, "동의가 안내 코드를 삼킨다");
+
+  // ⚠ **기반 이동도 진리표에 넣는다.** 「409 면 동의로 뚫는다」로 넓히면 CLI 의 `discard`·
+  //    `rollback` 이 기반 이동 거절을 「AI 변경 폐기 동의」로 프레이밍한다 — 사라지는 것이
+  //    다른 두 문인데 같은 동의로 승인받게 된다.
+  const 기반 = "UPLOAD_BASE_MOVED";
+  assert.strictEqual(isUploadBaseMoved(rejected(기반)), true);
+  assert.strictEqual(needsDiscardConsent(rejected(기반)), false, "동의가 기반 이동 코드를 삼킨다");
+  assert.strictEqual(isUploadBaseMoved(rejected(동의)), false, "기반 이동이 동의 코드를 삼킨다");
 });
 
 // ── 반영 확인(백엔드 명세 A) ────────────────────────────────────────────────
@@ -446,4 +454,25 @@ test("🔴 판 전환 본문은 동의 인자를 그대로 싣는다 — 발행 
 
     await client.activateRevision(9);
     assert.deepEqual(body, {discardPendingChanges: false}, "기본값이 참으로 새면 안 묻고 버린다");
+});
+
+/**
+ * 🔴 **업로드 확정 본문은 `storageKey`(+선언한 판) 뿐이다.** 요청 DTO 가 그 둘이고
+ * (`SiteArchiveConfirmRequest`), 이 문이 지나는 가드(`BaselineShiftGuard`)는 전부 거절형이라
+ * 동의 층이 없다 — 백엔드가 그 코드를 여기서 지우면서 **"여기에 다시 만들지 마라"** 고 못박아 뒀다.
+ *
+ * 없는 레버를 실으면 부르는 쪽이 그것으로 재시도한다. 형제 `publishDraft` 와 같은 자리다.
+ */
+test("🔴 업로드 확정 본문에 동의 인자를 싣지 않는다", async () => {
+    let body: Record<string, unknown> = {};
+    const client = api((_url, init) => {
+        body = JSON.parse(String(init.body ?? "{}"));
+        return Response.json({data: {revisionNo: 12, siteType: "NEXT_SOURCE", status: "BUILDING"}});
+    });
+
+    await client.confirmArchive("k/1.zip");
+    assert.deepEqual(Object.keys(body), ["storageKey"], `확정 본문에 없는 필드가 실렸다: ${JSON.stringify(body)}`);
+
+    await client.confirmArchive("k/1.zip", 9);
+    assert.deepEqual(body, {storageKey: "k/1.zip", baseRevisionNo: 9}, "선언한 판이 안 실렸다");
 });

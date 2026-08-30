@@ -385,20 +385,15 @@ export class ZalkeraApi {
      * @param baseRevisionNo 이 올리기가 **딛는다고 선언하는 판**(동시 업로드 최소 방어). 서버가 판을
      *   만들기 전에 원장 꼬리와 대조하고 다르면 `UPLOAD_BASE_MOVED` 409 로 멈춘다.
      *   `null` 은 **무선언 — 현행 그대로 통과**다(모르는 것으로 막지 않는다).
-     *
      */
-    confirmArchive(
-        storageKey: string,
-        discardPendingChanges = false,
-        baseRevisionNo: number | null = null,
-    ): Promise<ArchiveConfirmed> {
-        // ⚠ 이 문은 동의를 안 묻는다 — 서버 DTO 에 그 인자가 없다. 필드는 서버가 무시한다.
+    confirmArchive(storageKey: string, baseRevisionNo: number | null = null): Promise<ArchiveConfirmed> {
+        // ⚠ **동의 인자를 안 싣는다.** 요청 DTO 가 `storageKey` + `baseRevisionNo` 뿐이고
+        //   (`SiteArchiveConfirmRequest`), 이 문이 지나는 가드(`BaselineShiftGuard`)에는 동의 층이
+        //   없다. 없는 레버를 실으면 부르는 쪽이 그것으로 재시도한다.
         return this.request<ArchiveConfirmed>("POST", "/api/partner/site-archive/confirm", {
             // 선언이 없으면 **필드 자체를 안 보낸다** — `null` 을 보내도 서버는 같게 다루지만, 안 보내는
             // 쪽이 「주장하지 않는다」는 뜻에 정확하고 구 서버와도 같은 와이어다.
-            body: baseRevisionNo == null
-                ? { storageKey, discardPendingChanges }
-                : { storageKey, discardPendingChanges, baseRevisionNo },
+            body: baseRevisionNo == null ? { storageKey } : { storageKey, baseRevisionNo },
         });
     }
 

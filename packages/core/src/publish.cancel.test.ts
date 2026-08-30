@@ -32,7 +32,7 @@ async function project(): Promise<string> {
 }
 
 /** `at` 단계에 닿는 순간 취소를 누른다 — 사람이 그 자리에서 버튼을 누른 것과 같다. */
-function server(opts: { at?: "presign" | "put" | "confirm"; needsConsent?: boolean } = {}) {
+function server(opts: { at?: "presign" | "put" | "confirm"; baseMoved?: boolean } = {}) {
   const stop = new AbortController();
   const seen: string[] = [];
   const fetchImpl = (async (input: URL | string, init?: RequestInit) => {
@@ -54,9 +54,10 @@ function server(opts: { at?: "presign" | "put" | "confirm"; needsConsent?: boole
       const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
       seen.push("confirm");
       if (opts.at === "confirm") stop.abort();
-      if (opts.needsConsent && body.discardPendingChanges !== true) {
+      // 다시 물을 수 있는 유일한 거절 — 선언한 판이 원장 꼬리와 어긋났다.
+      if (opts.baseMoved && body.baseRevisionNo != null) {
         return new Response(
-          JSON.stringify({ errorCode: "DRAFT_DISCARD_CONFIRM_REQUIRED", message: "3건이 취소됩니다." }),
+          JSON.stringify({ errorCode: "UPLOAD_BASE_MOVED", message: "버전 9 가 올라왔습니다." }),
           { status: 409 },
         );
       }
@@ -130,29 +131,30 @@ test("확인이 나간 뒤에 눌렀으면 완주하고 「늦었다」를 싣�
 
 test("확인이 409 로 돌아오면 모달을 안 띄우고 그만둔다", async () => {
   // 판이 안 만들어졌다는 증명이다. 그런데 여기서 물으면 **방금 그만두겠다고 한 사람에게**
-  // 「버리는 데 동의하십니까」를 묻는 꼴이 된다.
-  const s = server({ at: "confirm", needsConsent: true });
+  // 「그대로 올릴까요」를 묻는 꼴이 된다.
+  const s = server({ at: "confirm", baseMoved: true });
   let asked = 0;
   let code = "";
   try {
-    await run(s, { onConsent: async () => { asked += 1; return true; } });
+    await run(s, { baseRevisionNo: 5, onBaseMoved: async () => { asked += 1; return true; } });
   } catch (e) {
     code = (e as { code?: string }).code ?? "";
   }
   strictEqual(code, "CANCELLED");
-  strictEqual(asked, 0, "그만두겠다는 사람에게 동의를 물었다");
+  strictEqual(asked, 0, "그만두겠다는 사람에게 다시 올릴지를 물었다");
   strictEqual(s.seen.filter((x) => x === "confirm").length, 1, "재발송이 나갔다");
 });
 
-test("동의를 받은 뒤 그만두면 재발송이 안 나간다 — 검사는 매 발송 직전이다", async () => {
-    // ⚠ `confirm` 은 동의·기반이동 갈래로 **최대 세 번** 나간다. 첫 발송 전만 보면 **동의 후
-    //    재발송이 검사 없이** 나가고, 그러면 그만두겠다고 한 사람의 판이 만들어진다.
-    const s = server({ needsConsent: true });
+test("답을 받은 뒤 그만두면 재발송이 안 나간다 — 검사는 매 발송 직전이다", async () => {
+    // ⚠ `confirm` 은 기반이동 갈래로 **두 번** 나간다. 첫 발송 전만 보면 **재발송이 검사 없이**
+    //    나가고, 그러면 그만두겠다고 한 사람의 판이 만들어진다.
+    const s = server({ baseMoved: true });
     let code = "";
     try {
         await run(s, {
-            // 모달에서 동의는 했는데, 그 사이(또는 그 직후) 진행 자체를 그만뒀다.
-            onConsent: async () => {
+            baseRevisionNo: 5,
+            // 모달에서 답은 했는데, 그 사이(또는 그 직후) 진행 자체를 그만뒀다.
+            onBaseMoved: async () => {
                 s.stop.abort();
                 return true;
             },

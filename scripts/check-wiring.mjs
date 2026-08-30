@@ -731,11 +731,6 @@ const WIRES = [
     ],
     [
         "packages/vscode/src/extension.ts",
-        "await revokeRecordedKeys();",
-        "로그아웃·초기화가 다른 창이 켠 미리보기 열쇠를 안 지워, 그 열쇠가 최대 12시간 상용 데이터를 계속 읽는다",
-    ],
-    [
-        "packages/vscode/src/extension.ts",
         "if (!(await signOut({ quiet: true }))) return;",
         "미리보기 준비 중 초기화가 그대로 진행돼, 로그인은 살아 있고 미리보기는 뒤늦게 뜨는데 사이트 설정만 사라진다",
     ],
@@ -778,16 +773,17 @@ const WIRES = [
     ],
     [
         "packages/vscode/src/extension.ts",
-        // ⚠ **호출까지 문다.** 화살표 머리만 잡으면 본문을 `Promise.resolve(true)` 로 갈아도
-        //    안 걸린다 — 안 묻고 자동 동의하는 변이가 그렇게 살아남았다(심의 실측).
-        "onConsent: (serverMessage) => askDiscardConsent(tenant, serverMessage),",
-        "새 버전 배포가 zip 을 다 올린 뒤 409 를 받고 「계속하려면 확인해 주세요」만 반복한다 — 확인할 자리가 없는 막다른 길이 된다",
+        // ⚠ **문면 함수까지 문다.** 모달을 띄우는 것만 잡으면 그 안의 문장을 형제 동의창
+        //    (`say.discardPendingConfirm`)으로 갈아도 안 걸린다 — 「그대로 올릴까요」 자리에
+        //    「게시 대기 AI 변경을 버리는 데 동의」 창이 뜨는 변이가 살아남았다(심의 실측).
+        //    사라지는 것이 다른 두 문이라, 문면이 바뀌면 **다른 행위에 대한 동의**를 받게 된다.
+        "const ask = say.baseMovedConfirm(tenant, serverMessage);",
+        "「그대로 올릴까요」 자리에 다른 행위의 동의 문면이 뜬다 — 사람이 승인한 것과 실제로 일어나는 일이 갈린다",
     ],
     [
         "packages/core/src/publish.ts",
-        "return await options.api.confirmArchive(storageKey, discard, base);",
-        "동의·기반 두 문이 **차례로** 걸리는데(백엔드가 동의 게이트를 기반 대조보다 먼저 지난다) " +
-            "재호출이 상태를 안 들고 가면 방금 받은 동의가 사라지거나 두 번째 409 가 아무 데도 안 걸린다 — " +
+        "return await options.api.confirmArchive(storageKey, base);",
+        "기반 갈래가 무선언으로 내려놓은 것을 재호출이 안 들고 가면 같은 409 를 다시 맞는다 — " +
             "빠져나갈 단추 없는 빨간창이 영구히 남는다(설계 심의 반려 사유)",
     ],
     [
@@ -986,6 +982,30 @@ function countOccurrences(haystack, needle) {
     let n = 0;
     for (let at = haystack.indexOf(needle); at >= 0; at = haystack.indexOf(needle, at + needle.length)) n += 1;
     return n;
+}
+
+/**
+ * ⚠ **같은 (파일, 앵커) 쌍을 두 번 등재하지 않는다.** 사본을 넣으면 자릿수만 부풀고, 그 자리의
+ *   변이는 **원본이 잡는다** — 새 앵커가 값을 하는지 아무도 모른 채 「자리가 늘었다」로 읽힌다.
+ *   실제로 그렇게 한 판이 있었고, 구별되는 자리는 오히려 하나 줄었다(심의 실측).
+ *
+ * 유도분(`accountWires()`)까지 함께 본다 — 손으로 적은 것과 유도된 것이 겹치는 사고가
+ * 실제로 하나 있었고(`await revokeRecordedKeys();`), 그것이 바로 그 파일 KDoc 이 경고한
+ * 「손으로 옮겨 적으면 목록과 배선이 갈린다」의 얼굴이다.
+ */
+{
+    const seen = new Set();
+    const dups = [];
+    for (const [file, needle] of WIRES) {
+        const key = `${file}\u0000${String(needle)}`;
+        if (seen.has(key)) dups.push(`${file}: ${needle}`);
+        else seen.add(key);
+    }
+    if (dups.length > 0) {
+        console.error("✗ 배선 목록에 같은 자리가 두 번 있다 — 사본은 자릿수만 부풀린다:");
+        for (const x of dups) console.error(`   ${x}`);
+        process.exit(2);
+    }
 }
 
 for (const [file, needle, why, times = 1] of WIRES) {

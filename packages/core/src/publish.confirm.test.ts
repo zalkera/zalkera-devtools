@@ -1,11 +1,10 @@
 /**
- * **올리기도 동의를 받을 수 있는가.**
+ * **올리기의 `confirm` 이 거절을 어떻게 받는가**, 그리고 **발행 확인 모달의 문면**.
  *
- * ■ 왜 생겼나
- *   백엔드는 재업로드(`confirm`)·버전 전환(`activate`)·프리셋 재개시 **세 문이 같은
- *   `BaselineShiftGuard`** 를 지나고, 셋 다 요청 본문의 `discardPendingChanges` 로 동의를 받는다.
- *   확장은 전환 쪽만 동의 경로를 갖고 있었다 — 올리기는 zip 을 다 올린 뒤 409 를 받고
- *   「계속하려면 확인해 주세요」만 반복하는 **막다른 길**이었다(계약축 심의 차단).
+ * ■ 이 문은 동의를 안 묻는다
+ *   요청 DTO 가 `storageKey` + `baseRevisionNo` 뿐이고(`SiteArchiveConfirmRequest`), 지나는
+ *   가드(`BaselineShiftGuard`)는 전부 거절형이다 — 레포 연결·게시 진행 중·AI 작업 중·편집 중.
+ *   동의로 넘어가는 층이 없다. 그래서 여기서 다시 물을 수 있는 것은 **기반 이동** 하나다.
  *
  * 재현: `npm test -w @zalkera/devtools-core`
  */
@@ -21,113 +20,14 @@ import { captureTenant, say } from "./tenantScope.ts";
 
 /** 올릴 것이 있는 최소 프로젝트. */
 async function project(): Promise<string> {
-  const dir = await tempDir("zalkera-consent-");
+  const dir = await tempDir("zalkera-confirm-");
   await writeFile(join(dir, "package.json"), '{"name":"t","version":"1.0.0"}');
   await writeFile(join(dir, "page.tsx"), "export default () => null;\n");
   return dir;
 }
 
-/**
- * 서버 대역. presign·PUT 은 통과시키고 `confirm` 은 **동의 전까지 409** 를 낸다.
- * 받은 confirm 바디를 전부 기록한다 — 「동의를 실제로 보냈는가」가 요점이다.
- */
-function server() {
-  const confirms: unknown[] = [];
-  const fetchImpl = (async (input: URL | string, init?: RequestInit) => {
-    const url = String(input);
-    if (url.endsWith("/api/partner/site-archive/presign")) {
-      return new Response(
-        JSON.stringify({
-          data: { uploadUrl: "https://s3.example.test/put", storageKey: "k/1.zip", expiresAt: "" },
-        }),
-        { status: 200 },
-      );
-    }
-    if (url.startsWith("https://s3.example.test/")) return new Response("", { status: 200 });
-    if (url.endsWith("/api/partner/site-archive/confirm")) {
-      const body = JSON.parse(String(init?.body ?? "{}"));
-      confirms.push(body);
-      if (body.discardPendingChanges !== true) {
-        return new Response(
-          JSON.stringify({
-            errorCode: "DRAFT_DISCARD_CONFIRM_REQUIRED",
-            message: "게시 대기 중인 AI 변경 3건이 취소됩니다. 계속하려면 확인해 주세요.",
-          }),
-          { status: 409 },
-        );
-      }
-      return new Response(
-        JSON.stringify({ data: { revisionNo: 12, siteType: "NEXT_SOURCE", status: "BUILDING" } }),
-        { status: 200 },
-      );
-    }
-    return new Response("{}", { status: 404 });
-  }) as typeof fetch;
-
-  const api = new ZalkeraApi({
-    apiBase: "https://api.example.test",
-    accessToken: async () => "t",
-    tenantCode: () => "bix",
-    fetchImpl,
-  });
-  return { api, confirms, fetchImpl };
-}
-
-test("동의하면 같은 storageKey 로 다시 부른다 — 다시 묶지 않는다", async () => {
-  // 다시 묶으면 사람이 그 사이 파일을 고쳤을 때 **동의한 것과 다른 것**이 올라가고, 100MB 를
-  // 한 번 더 보내게 된다.
-  const { api, confirms, fetchImpl } = server();
-  const asked: string[] = [];
-  const result = await publish({
-    projectDir: await project(),
-    api,
-    tenant: "t",
-    fetchImpl,
-    onConsent: async (message) => {
-      asked.push(message);
-      return true;
-    },
-  });
-  strictEqual(result.revisionNo, 12);
-  strictEqual(confirms.length, 2, "동의 뒤 다시 안 불렀다");
-  deepStrictEqual(confirms[0], { storageKey: "k/1.zip", discardPendingChanges: false });
-  deepStrictEqual(confirms[1], { storageKey: "k/1.zip", discardPendingChanges: true });
-  strictEqual(asked.length, 1, "묻지 않았거나 두 번 물었다");
-  ok(/3건/.test(asked[0] ?? ""), `건수가 안 실렸다: ${asked[0]}`);
-});
-
-test("동의하지 않으면 취소로 끝난다 — 오류창을 띄우지 않는다", async () => {
-  const { api, confirms, fetchImpl } = server();
-  const error = await publish({
-    projectDir: await project(),
-    api,
-    tenant: "t",
-    fetchImpl,
-    onConsent: async () => false,
-  }).then(
-    () => null,
-    (e: unknown) => e as DevtoolsError,
-  );
-  strictEqual(error?.code, "CANCELLED", `취소가 아니다: ${error?.code}`);
-  strictEqual(confirms.length, 1, "거절했는데 다시 불렀다");
-});
-
-test("물을 자리를 안 주면 **조용히 동의하지 않는다** — 그대로 던진다", async () => {
-  // 이미 정산된 토큰이 실린 작업이 사람 모르게 사라지면 안 된다. 화면 없는 자리(CLI·시험)는
-  // 그 문을 안 열면 되고, 그때는 서버 거절이 그대로 올라온다.
-  const { api, confirms, fetchImpl } = server();
-  const error = await publish({ projectDir: await project(), api, tenant: "t", fetchImpl }).then(
-    () => null,
-    (e: unknown) => e as DevtoolsError,
-  );
-  strictEqual(error?.code, "SERVER_REJECTED");
-  strictEqual(confirms.length, 1, "동의 없이 다시 불렀다");
-  deepStrictEqual(confirms[0], { storageKey: "k/1.zip", discardPendingChanges: false });
-});
-
-test("동의로 못 넘어가는 거절에는 묻지 않는다", async () => {
-  // 「409 면 물어본다」로 넓히면 뚫을 수 없는 거절에도 동의 창이 뜨고, 사람은 확인을 누른 뒤
-  // 또 거절당한다.
+test("뚫을 수 없는 거절은 그대로 던진다 — 재시도 루프에 안 걸린다", async () => {
+  // 「409 면 다시 부른다」로 넓히면 뚫을 수 없는 거절에서 같은 요청이 되풀이된다.
   const fetchImpl = (async (input: URL | string) => {
     const url = String(input);
     if (url.endsWith("/presign")) {
@@ -154,7 +54,7 @@ test("동의로 못 넘어가는 거절에는 묻지 않는다", async () => {
     api,
     tenant: "t",
     fetchImpl,
-    onConsent: async () => {
+    onBaseMoved: async () => {
       asked += 1;
       return true;
     },
@@ -162,7 +62,7 @@ test("동의로 못 넘어가는 거절에는 묻지 않는다", async () => {
     () => null,
     (e: unknown) => e as DevtoolsError,
   );
-  strictEqual(asked, 0, "동의로 못 넘어가는 거절에 물었다");
+  strictEqual(asked, 0, "다시 물을 수 없는 거절에 물었다");
   strictEqual(error?.code, "SERVER_REJECTED");
 });
 
@@ -224,27 +124,6 @@ test("정상 경로는 글자 그대로 남는다 — 소독이 축약이 되면
 
 
 /**
- * ⚠ **이 판의 요점이 「문면 재료가 둘이다」인데 발행 쪽만 그 요점이 안 잠겨 있었다** —
- *   `serverCode` 대신 `null` 을 넘겨도 전건 초록이었다(심의 변이 M5). 코드를 안 넘기면 부르는
- *   쪽이 두 갈래를 못 갈라 **다른 행위에 대한 동의**를 받는다.
- */
-test("발행 동의 콜백은 서버 문장과 **코드**를 함께 받는다", async () => {
-  const { api, fetchImpl } = server();
-  const codes: (string | null)[] = [];
-  await publish({
-    projectDir: await project(),
-    api,
-    tenant: "t",
-    fetchImpl,
-    onConsent: async (_message, serverCode) => {
-      codes.push(serverCode);
-      return true;
-    },
-  });
-  deepStrictEqual(codes, ["DRAFT_DISCARD_CONFIRM_REQUIRED"], "코드가 콜백에 안 왔다");
-});
-
-/**
  * 🔴 **결과를 모르는 실패를 「안 만들어졌다」로 접지 않는다**(설계자 심의 0.17.0).
  *
  * `confirm` 이 나간 뒤 응답이 유실되면(`SERVER_UNREACHABLE` — 30초 상한·연결 유실) 그것은
@@ -291,7 +170,6 @@ test("🔴 confirm 응답이 유실되면 취소 중이어도 **모른다고 말
     tenant: "t",
     fetchImpl,
     signal: controller.signal,
-    onConsent: async () => true,
   }).then(
     () => null,
     (e: unknown) => e as DevtoolsError,
@@ -306,8 +184,8 @@ test("🔴 confirm 응답이 유실되면 취소 중이어도 **모른다고 말
  * 반대편도 지킨다 — **판이 안 만들어졌다는 증명이 있는 거절**(409 계열)에서는 취소를 존중한다.
  * 그것까지 던지면 그만두겠다고 한 사람에게 서버 오류창이 뜬다.
  *
- * ⚠ 취소는 **실행 중에** 걸려야 한다. `await` 뒤에 `abort()` 를 부르면 이 시험은 `onConsent` 가
- *   던진 것으로 초록이 되어, 취소 의미를 하나도 안 잰다(초판이 그랬다).
+ * ⚠ 취소는 **실행 중에** 걸려야 한다. `await` 뒤에 `abort()` 를 부르면 이 시험은 콜백이 던진
+ *   것으로 초록이 되어, 취소 의미를 하나도 안 잰다(초판이 그랬다).
  */
 test("409 계열에서는 취소를 존중한다 — 판이 안 만들어졌다는 증명이 있다", async () => {
   const controller = new AbortController();
@@ -330,8 +208,8 @@ test("409 계열에서는 취소를 존중한다 — 판이 안 만들어졌다�
       controller.abort();
       return new Response(
         JSON.stringify({
-          errorCode: "DRAFT_DISCARD_CONFIRM_REQUIRED",
-          message: "게시 대기 중인 AI 변경 3건이 취소됩니다. 계속하려면 확인해 주세요.",
+          errorCode: "UPLOAD_BASE_MOVED",
+          message: "올리는 사이 버전 9 가 올라왔습니다 — 이 올리기에는 그 변경이 담겨 있지 않습니다.",
         }),
         { status: 409 },
       );
@@ -351,7 +229,8 @@ test("409 계열에서는 취소를 존중한다 — 판이 안 만들어졌다�
     tenant: "t",
     fetchImpl,
     signal: controller.signal,
-    onConsent: async () => {
+    baseRevisionNo: 5,
+    onBaseMoved: async () => {
       asked += 1;
       return true;
     },
@@ -361,6 +240,6 @@ test("409 계열에서는 취소를 존중한다 — 판이 안 만들어졌다�
   );
 
   strictEqual(confirms.length, 1, "취소했는데 다시 보냈다");
-  strictEqual(asked, 0, "그만두겠다고 한 사람에게 「버리는 데 동의하십니까」를 물었다");
+  strictEqual(asked, 0, "그만두겠다고 한 사람에게 「그대로 올릴까요」를 물었다");
   strictEqual(error?.code, "CANCELLED", `증명된 거절인데 취소로 안 접었다: ${error?.code}`);
 });
