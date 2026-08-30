@@ -1,5 +1,5 @@
 import type { ArchiveConfirmed, ZalkeraApi } from "./api.ts";
-import { isUploadBaseMoved, needsDiscardConsent } from "./api.ts";
+import { isUploadBaseMoved } from "./api.ts";
 import { DevtoolsError } from "./errors.ts";
 import { apiBaseUrl } from "./serverUrl.ts";
 import { packProject } from "./zip.ts";
@@ -23,20 +23,6 @@ export interface PublishOptions {
     onProgress?: (message: string) => void;
     fetchImpl?: typeof fetch;
     /**
-     * 서버가 **게시 대기 중인 AI 변경을 버리는 데 동의**를 요구할 때 사람에게 묻는다.
-     * `true` 를 돌려주면 동의로 다시 부르고, `false` 면 취소로 끝난다.
-     *
-     * ⚠ **안 주면 묻지 않고 그대로 던진다.** 조용히 동의한 것으로 치면 이미 정산된 토큰이 실린
-     *   작업이 사람 모르게 사라진다. 화면이 없는 자리(CLI·시험)는 그 문을 안 열면 된다.
-     *
-     * @param serverMessage 서버가 보낸 문장(건수가 들어 있다). 표시 자리에서 소독한다.
-     *
-     * ⚠ **문면 재료가 둘이다** — 서버 문장과 **서버 코드**. 같은 동의 인자로 뚫리는 코드가 둘이고
-     *   결과가 다르다(판이 옮겨진다 / 판은 그대로고 작업만 버린다). 코드를 안 넘기면 부르는 쪽이
-     *   그 둘을 못 갈라 **다른 행위에 대한 동의**를 받게 된다.
-     */
-    onConsent?: (serverMessage: string, serverCode: string | null) => Promise<boolean>;
-    /**
      * 이 올리기가 딛는다고 **선언할 판**. `null` 은 무선언 — 서버는 현행 그대로 통과시킨다.
      *
      * 부르는 쪽이 폴더 표식에서 읽어 넘긴다(`declaredBaseRevisionNo`). core 가 다시 읽지 않는 이유는
@@ -51,8 +37,6 @@ export interface PublishOptions {
      *   다음 올리기도 같은 번호를 선언해 **같은 409 를 무한히 맞는다.** 사람이 최신 변경을 손으로
      *   합쳐 넣어도 표식은 옛 번호라 빠져나갈 수 없다. 화면이 없는 자리(시험)는 그 문을 안 열면 된다.
      *
-     * ⚠ **[onConsent] 와 합치지 마라.** 사라지는 것이 다르다 — 저쪽은 내 편집, 이쪽은 남의 변경이다.
-     *
      * @param serverMessage 서버가 보낸 문장(최신 판 번호가 들어 있다). 표시 자리에서 소독한다.
      */
     onBaseMoved?: (serverMessage: string) => Promise<boolean>;
@@ -66,8 +50,8 @@ export interface PublishOptions {
      *   나가면 완주시킨다.
      *
      * ■ 검사 지점은 「보내기 전 한 번」이 아니다
-     *   `confirm` 은 동의·기반이동 갈래로 **최대 세 번** 나간다. 첫 발송 전만 보면 **동의 후
-     *   재발송이 검사 없이** 나간다 — 「되돌릴 수 없는 다음 전송을 시작하기 직전마다」 본다.
+     *   `confirm` 은 기반이동 갈래로 **최대 두 번** 나간다. 첫 발송 전만 보면 **재발송이 검사
+     *   없이** 나간다 — 「되돌릴 수 없는 다음 전송을 시작하기 직전마다」 본다.
      *
      * ■ 취소가 늦었을 때
      *   `confirm` 이 **성공**으로 오면 판은 만들어졌다 — [PublishResult.cancelledLate] 로 알린다.
@@ -136,62 +120,47 @@ const cancelled = () => new DevtoolsError("CANCELLED", "올리기를 그만두�
 /**
  * confirm 을 **문이 열릴 때까지** 다시 부른다.
  *
- * ■ 왜 반복인가 — 문이 둘이고 **차례로** 걸린다
- *   백엔드는 동의 게이트(`BaselineShiftGuard`)를 기반 대조보다 **먼저** 지난다. 그래서 승격 사이트에
- *   게시 대기 작업이 있고 그 사이 남이 올렸으면 **동의를 받은 뒤에 기반 409 가 온다.** 갈래를 평평하게
- *   두면 그 두 번째 409 는 아무 데도 안 걸리고 그대로 던져진다 — 그리고 그 시도는 S3 put·tx 전에
- *   막혀 **아무 상태도 안 바꾸므로**, 다음 올리기도 같은 두 걸음을 그대로 반복한다. 빠져나갈 단추가
- *   없는 빨간창이 영구히 남는다(설계 심의가 반려 사유로 못 박은 그 형상).
+ * ■ 무엇이 열리는가 — **기반 이동 하나**다
+ *   이 문이 지나는 가드(`BaselineShiftGuard`)는 전부 **거절형**이다 — 레포 연결·게시 진행 중·
+ *   AI 작업 중·편집 중. 동의로 넘어가는 층이 없다(그 동의를 요구하는 코드를 던지는 자리는
+ *   백엔드에서 「켜진 판으로 되돌리기」 하나다). 그래서 여기서 다시 물을 수 있는 것은 선언한
+ *   판이 원장 꼬리와 어긋났을 때뿐이고, 답은 **무선언으로 같은 바이트를 다시 올리는 것**이다.
  *
  * ■ 왜 끝나는가
- *   문마다 **한 번만** 묻는다. 같은 문이 두 번 걸리면 사람의 답이 안 통한 것이므로 그대로 던진다 —
- *   되풀이해 묻는 것은 「확인」이 아니라 조르기다. 그래서 시도는 최대 세 번이다.
- *
- * ■ 동의는 **상태**다
- *   `discard` 를 인자가 아니라 상태로 들고 다닌다. 기반 갈래에서 `discard=false` 로 재전송하면
- *   방금 받은 동의가 사라져 곧바로 같은 동의 409 를 다시 맞는다.
+ *   **한 번만** 묻는다. 같은 문이 두 번 걸리면 사람의 답이 안 통한 것이므로 그대로 던진다 —
+ *   되풀이해 묻는 것은 「확인」이 아니라 조르기다.
  */
-async function confirmWithConsent(
+async function confirmWithBaseRetry(
     options: PublishOptions,
     storageKey: string,
     baseRevisionNo: number | null,
 ): Promise<ArchiveConfirmed> {
-    let discard = false;
     let base = baseRevisionNo;
-    let consentAsked = false;
     let baseAsked = false;
     for (;;) {
-        // ⚠ **매 발송 직전에 본다** — 첫 발송 전만 보면 동의 후 재발송이 검사 없이 나간다.
+        // ⚠ **매 발송 직전에 본다** — 첫 발송 전만 보면 재발송이 검사 없이 나간다.
         //    여기서 멈추면 판은 안 만들어졌다(서버가 아직 아무것도 안 받았다).
         if (options.signal?.aborted) throw cancelled();
         try {
-            // ⚠ **같은 `storageKey` 로 다시 부른다 — 절대 다시 묶지 않는다.** 사람이 동의한 것은
-            //    「지금 이 바이트를 그대로 올린다」이고, 재압축하면 **동의한 것과 다른 것**이 올라간다.
-            return await options.api.confirmArchive(storageKey, discard, base);
+            // ⚠ **같은 `storageKey` 로 다시 부른다 — 절대 다시 묶지 않는다.** 사람이 답한 것은
+            //    「지금 이 바이트를 그대로 올린다」이고, 재압축하면 **답한 것과 다른 것**이 올라간다.
+            return await options.api.confirmArchive(storageKey, base);
         } catch (error) {
             const rejected = error instanceof DevtoolsError ? error : null;
             const message = rejected?.message ?? String(error);
             // 🔴 **취소로 접는 것은 「판이 안 만들어졌다」가 증명된 거절뿐이다.**
             //
-            //    409 계열(동의 요구·기반 이동)은 서버가 **판을 만들기 전에** 막았다는 증명이라
-            //    취소를 존중할 수 있다. 그러니 모달을 띄우기 직전에 본다 — 안 그러면 방금
-            //    그만두겠다고 한 사람에게 「버리는 데 동의하십니까」를 묻게 된다.
+            //    기반 이동 409 는 서버가 **판을 만들기 전에** 막았다는 증명이라 취소를 존중할 수
+            //    있다. 그러니 모달을 띄우기 직전에 본다 — 안 그러면 방금 그만두겠다고 한 사람에게
+            //    「그대로 올릴까요」를 묻게 된다.
             //
             //    ⚠ **종류를 안 가르면 `SERVER_UNREACHABLE` 까지 삼킨다**(설계자 심의 실측). 그 오류는
             //      confirm 이 **이미 나갔고 결과를 모르는** 사건이다. 그것을 취소로 접으면 화면이
             //      「새 버전은 만들어지지 않았습니다」라고 **단정**하는데, 서버가 만들었을 수 있다.
             //      그러면 표식은 옛 판인 채라 다음 발행이 **자기 유령 판**에 409 를 맞는다 —
             //      이 판이 사냥한 「제조된 거짓말」 그 얼굴이다. 모르는 것은 모른다고 말한다.
-            const provesNoRevision = needsDiscardConsent(error) || isUploadBaseMoved(error);
+            const provesNoRevision = isUploadBaseMoved(error);
             if (provesNoRevision && options.signal?.aborted) throw cancelled();
-            if (needsDiscardConsent(error) && options.onConsent && !consentAsked) {
-                consentAsked = true;
-                if (!(await options.onConsent(message, rejected?.serverCode ?? null))) {
-                    throw cancelled();
-                }
-                discard = true;
-                continue;
-            }
             if (isUploadBaseMoved(error) && options.onBaseMoved && !baseAsked) {
                 baseAsked = true;
                 if (!(await options.onBaseMoved(message))) {
@@ -284,10 +253,10 @@ export async function publish(options: PublishOptions): Promise<PublishResult> {
     if (options.signal?.aborted) throw cancelled();
 
     report("서버가 확인하는 중…");
-    // ⚠ **여기서 다시 묶지 않는다.** 동의 뒤 재시도는 **같은 `storageKey`** 를 쓴다 — S3 에 이미
-    //    올라간 그 바이트다. 다시 묶으면 사람이 그 사이 파일을 고쳤을 때 **동의한 것과 다른 것**이
+    // ⚠ **여기서 다시 묶지 않는다.** 재시도는 **같은 `storageKey`** 를 쓴다 — S3 에 이미 올라간
+    //    그 바이트다. 다시 묶으면 사람이 그 사이 파일을 고쳤을 때 **답한 것과 다른 것**이
     //    올라가고, 100MB 를 한 번 더 보내게 된다.
-    const confirmed = await confirmWithConsent(options, presigned.storageKey, options.baseRevisionNo ?? null);
+    const confirmed = await confirmWithBaseRetry(options, presigned.storageKey, options.baseRevisionNo ?? null);
     report(`버전 ${confirmed.revisionNo} 로 올렸습니다.`);
 
     return {

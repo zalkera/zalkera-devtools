@@ -7,12 +7,9 @@
  *   **둘 다 담은 판은 만들어진 적이 없다.** 진짜 결함의 자리는 「B 의 귀」다: B 는 A 가 그 사이에
  *   올렸다는 사실을 **어디서도 듣지 못한다.** 이 트랜치는 그 귀를 만드는 것이고, 병합은 안 한다.
  *
- * ■ 급소 둘 — 둘 다 「조용히 무보호」다
- *   ⑴ **동의 재시도의 선언 유지.** 백엔드는 동의 게이트(`BaselineShiftGuard`)를 기반 대조보다
- *      **먼저** 지난다. 그래서 동의 409 를 받고 재호출할 때 선언을 빠뜨리면 **그 경로만** 무선언이
- *      된다 — 하필 편집이 있는 사이트에서만 방어가 없고, 화면 어디에도 그 사실이 안 보인다.
- *   ⑵ **override 재전송의 storageKey 재사용.** 사람이 동의한 것은 「지금 이 바이트를 그대로」다.
- *      다시 묶으면 **동의한 것과 다른 것**이 올라간다.
+ * ■ 급소 — 「조용히 무보호」다
+ *   **override 재전송의 storageKey 재사용.** 사람이 답한 것은 「지금 이 바이트를 그대로」다.
+ *   다시 묶으면 **답한 것과 다른 것**이 올라간다.
  *
  * 재현: `npm test -w @zalkera/devtools-core`
  */
@@ -33,14 +30,12 @@ async function project(): Promise<string> {
 
 /**
  * 서버 대역. `opts.tail` 이 있으면 **선언이 그것과 다를 때** `UPLOAD_BASE_MOVED` 409 를 낸다.
- * `opts.needsConsent` 면 동의 전까지 `DRAFT_DISCARD_CONFIRM_REQUIRED` 를 **먼저** 낸다
- * (백엔드 순서 그대로 — 그 순서가 급소 ⑴의 원인이다).
+ *
+ * ⚠ **동의 갈래는 없다.** 이 문의 요청 DTO 에 그 인자가 없고 지나는 가드에도 동의 층이 없다 —
+ *   대역이 그것을 흉내내면 **실서버가 낼 수 없는 계약**을 시험이 못박는다.
  */
 function server(opts: {
   tail?: number;
-  needsConsent?: boolean;
-  /** 동의 요구를 **동적으로** 켠다 — 모달을 읽는 사이 작업이 생기는 거울상 재현용. */
-  needsConsentWhen?: () => boolean;
   /** 무선언으로 내려놔도 계속 막는다 — 「같은 문이 두 번」 재현용. */
   alwaysBaseMoved?: boolean;
 } = {}) {
@@ -67,16 +62,6 @@ function server(opts: {
       //    (실제로 그랬다 — 성능 축이 서버 코드에서 찾았다).
       if (gone.has(String(body.storageKey))) {
         return new Response(JSON.stringify({ errorCode: "ARCHIVE_NOT_FOUND", message: "아카이브가 없습니다." }), { status: 404 });
-      }
-      const wantsConsent = opts.needsConsent === true || opts.needsConsentWhen?.() === true;
-      if (wantsConsent && body.discardPendingChanges !== true) {
-        return new Response(
-          JSON.stringify({
-            errorCode: "DRAFT_DISCARD_CONFIRM_REQUIRED",
-            message: "게시 대기 중인 AI 변경 3건이 취소됩니다. 계속하려면 확인해 주세요.",
-          }),
-          { status: 409 },
-        );
       }
       if (opts.alwaysBaseMoved || (opts.tail != null && body.baseRevisionNo != null && body.baseRevisionNo !== opts.tail)) {
         return new Response(
@@ -124,21 +109,7 @@ test("선언이 있으면 그대로 실린다", async () => {
   strictEqual(s.confirms.at(0)?.baseRevisionNo, 7);
 });
 
-// ── 급소 ⑴ — 동의 재시도에서 선언이 살아남는가 ──────────────────────────────
-
-test("동의 재시도에도 선언을 싣는다 — 안 그러면 그 경로만 조용히 무보호다", async () => {
-  const s = server({ tail: 7, needsConsent: true });
-  await publish({
-    projectDir: await project(), api: api(s.fetchImpl), tenant: "bix", fetchImpl: s.fetchImpl,
-    baseRevisionNo: 7,
-    onConsent: async () => true,
-  });
-  strictEqual(s.confirms.length, 2, "동의 전 1회 + 동의 후 1회");
-  strictEqual(s.confirms.at(1)?.discardPendingChanges, true);
-  strictEqual(s.confirms.at(1)?.baseRevisionNo, 7, "동의 경로가 무선언이 되면 편집 있는 사이트만 방어가 없다");
-});
-
-// ── 급소 ⑵ — override 가 막다른 길을 여는가, 그리고 같은 바이트인가 ──────────
+// ── 급소 — override 가 막다른 길을 여는가, 그리고 같은 바이트인가 ───────────
 
 test("그대로 올리기에 동의하면 같은 storageKey 로 무선언 재전송한다", async () => {
   const s = server({ tail: 9 });
@@ -189,45 +160,7 @@ test("물을 자리가 없으면 그대로 던진다 — 조용히 동의하지 
   strictEqual(s.confirms.length, 1);
 });
 
-// ── 두 문이 **차례로** 걸린다 — 이 자리가 영구 막다른길이었다 ─────────────────
-//
-// 백엔드는 동의 게이트를 기반 대조보다 **먼저** 지난다. 승격 사이트 + 게시 대기 작업 + 그 사이 남이
-// 올림이면 **동의를 받은 뒤에** 기반 409 가 온다. 갈래를 평평하게 두면 그 두 번째 409 는 아무 데도
-// 안 걸리고, 그 시도는 S3 put·tx 전에 막혀 **아무 상태도 안 바꾸므로** 다음 올리기도 똑같이 막힌다.
-test("동의를 받은 뒤 기반이 막아도 빠져나갈 수 있다", async () => {
-  const s = server({ tail: 9, needsConsent: true });
-  let consentAsked = 0;
-  let baseAsked = 0;
-  await publish({
-    projectDir: await project(), api: api(s.fetchImpl), tenant: "bix", fetchImpl: s.fetchImpl,
-    baseRevisionNo: 5,
-    onConsent: async () => { consentAsked += 1; return true; },
-    onBaseMoved: async () => { baseAsked += 1; return true; },
-  });
-  strictEqual(consentAsked, 1);
-  strictEqual(baseAsked, 1, "두 번째 409 가 아무 데도 안 걸리면 화면은 빠져나갈 단추 없는 빨간창이다");
-  strictEqual(s.confirms.length, 3);
-  const last = s.confirms.at(2);
-  ok(last != null);
-  strictEqual(last.discardPendingChanges, true, "기반 갈래가 동의를 지우면 곧바로 같은 동의 409 를 다시 맞는다");
-  ok(!("baseRevisionNo" in last), "선언을 그대로 실으면 같은 기반 409 를 다시 맞는다");
-  strictEqual(s.keys.length, 1, "세 번을 부르는 동안 zip 은 한 번만 묶인다");
-});
-
-test("반대 순서도 빠져나갈 수 있다 — 기반 뒤에 동의", async () => {
-  // 모달을 읽는 사이 에이전트가 게시 대기 작업을 만들면 이 순서가 된다(거울상).
-  let staged = false;
-  const s = server({ tail: 9, needsConsentWhen: () => staged });
-  await publish({
-    projectDir: await project(), api: api(s.fetchImpl), tenant: "bix", fetchImpl: s.fetchImpl,
-    baseRevisionNo: 5,
-    onBaseMoved: async () => { staged = true; return true; },
-    onConsent: async () => true,
-  });
-  strictEqual(s.confirms.length, 3);
-  strictEqual(s.confirms.at(2)?.discardPendingChanges, true);
-});
-
+// ── 같은 문이 두 번 걸리면 ────────────────────────────────────────────────────
 test("같은 문이 두 번 걸리면 그대로 던진다 — 조르지 않는다", async () => {
   // 사람의 답이 안 통한 것이다. 되풀이해 묻는 것은 확인이 아니라 조르기이고, 끝나지 않는다.
   const s = server({ tail: 9, alwaysBaseMoved: true });

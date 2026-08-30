@@ -2693,8 +2693,8 @@ async function publishCommand(): Promise<void> {
   );
   if (confirm !== ask.action) return;
 
-  // ⚠ **`onConsent` 로는 이 갈래를 못 받는다.** 동의 콜백은 「동의로 넘어갈 수 있는 거절」에만
-  //    불린다(core `needsDiscardConsent`). 발행 전 편집은 동의 인자가 없는 거절형이라 그대로
+  // ⚠ **이 문의 거절은 전부 거절형이라 여기서 받아야 한다.** 올리기가 지나는 가드에는 동의 층이
+  //    없다 — 다시 물을 수 있는 것은 기반 이동(`onBaseMoved`) 하나다. 발행 전 편집은 그대로
   //    던져져 나오고, 여기서 안 받으면 빨간 오류창에 서버 문장만 남는다 — 어디로 가야 하는지가
   //    없는 것이 곧 막다른 길이다(memo183 §7).
   let result: PublishResult;
@@ -2717,9 +2717,6 @@ async function publishCommand(): Promise<void> {
           api,
           tenant,
           onProgress: log,
-          // ⚠ 이 문(zip 올리기)에서는 서버가 동의를 안 묻는다 — 배선만 남아 있고 도달하지
-          //    않는다. 걷는 것은 별건이다(요청 본문의 `discardPendingChanges` 와 한 몸이라).
-          onConsent: (serverMessage) => askDiscardConsent(tenant, serverMessage),
           baseRevisionNo,
           // 이 문이 없으면 화면은 **막다른 길**이 된다 — 표식은 발행 성공에서만 갱신되므로 다음
           // 올리기도 같은 번호를 선언해 같은 409 를 무한히 맞는다. 사람이 최신 변경을 손으로 합쳐
