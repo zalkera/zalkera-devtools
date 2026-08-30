@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { ensureAgentDocs } from "./agents.ts";
 import { DevtoolsError } from "./errors.ts";
-import { registerLocalMcpServer, registerMcpServer, type McpRegistration } from "./mcp.ts";
+import { registerMcpServer, type McpRegistration } from "./mcp.ts";
 import { mcpServerName } from "./serverUrl.ts";
 import { tempDir } from "./testing/tempDir.ts";
 
@@ -152,125 +152,68 @@ test("`.mcp.json` 이 심링크면 쓰지 않는다 — 링크 대상이 남의 
     }
 });
 
-test("로컬(stdio) 서버를 적는다 — 주소·OAuth 가 없고 **토큰도 없다**", async () => {
-    const dir = await tempDir("zalkera-mcp-local-");
-    await registerLocalMcpServer(dir, {serverName: serverName("zalkera-source"), command: "npx", args: ["-y", "@zalkera/cli", "mcp"]});
-    const written = JSON.parse(await readFile(join(dir, ".mcp.json"), "utf8")) as {
-        mcpServers: Record<string, {type: string; command: string; args: string[]; env?: unknown}>;
-    };
-    const entry = written.mcpServers["zalkera-source"];
-    strictEqual(entry?.type, "stdio");
-    strictEqual(entry.command, "npx");
-    ok(entry.args.includes("@zalkera/cli"), "우리 패키지 이름이 인자에 없다 — 소유 판별이 안 된다");
-    // `.mcp.json` 은 팀이 공유하고 레포에 들어간다. 로그인은 그 명령이 자기 보관소에서 읽는다.
-    strictEqual(entry.env, undefined, "설정 파일에 자격증명 자리를 만들었다");
-});
 
-test("🔴 로컬·원격이 **한 파일에 같이** 산다 — 한쪽이 다른 쪽을 안 지운다", async () => {
-    const dir = await tempDir("zalkera-mcp-both-");
-    await registerMcpServer(dir, {
-        serverName: serverName("zalkera"), url: "https://api.example.com/mcp",
-        clientId: "c", authServerMetadataUrl: "https://auth.example.com/.well-known/x",
-    });
-    await registerLocalMcpServer(dir, {serverName: serverName("zalkera-source"), command: "npx", args: ["-y", "@zalkera/cli", "mcp"]});
-    const written = JSON.parse(await readFile(join(dir, ".mcp.json"), "utf8")) as {mcpServers: Record<string, unknown>};
-    deepEqual(Object.keys(written.mcpServers).sort(), ["zalkera", "zalkera-source"]);
-});
+/**
+ * `.mcp.json` 에 **stdio 항목이 우리 이름으로 적혀 있을 때** 그 위에 다시 적는 자리.
+ *
+ * ⚠ **옛 로컬 등록과 키가 겹치지는 않는다** — 그쪽은 `zalkera-source` 로 못박았고 원격은
+ *   핸드셰이크가 준 이름(기본·상용 `zalkera-site`)을 쓴다. 이 갈래가 지키는 것은 **손으로
+ *   적힌 항목**이다: `.mcp.json` 은 사람이 여는 파일이고 서버 이름은 설정으로 바뀐다.
+ *
+ * 판정은 양쪽으로 틀릴 수 있다. 못 알아보면 우리가 적은 항목을 우리가 거절해 「잘커라에
+ * 문의해 주세요」로 **영구 잠김**이 되고, 너무 넓게 알아보면 남의 항목을 **토큰째로** 지운다.
+ */
+const oldLocalEntry = (extra: Record<string, unknown>) => ({ type: "stdio", ...extra });
 
-test("🔴 **남의 stdio 항목은 안 덮는다** — `command` 가 흔해서 그것만 보면 토큰째로 파괴한다", async () => {
-    const dir = await tempDir("zalkera-mcp-theirs-");
-    await writeFile(
-        join(dir, ".mcp.json"),
-        JSON.stringify({mcpServers: {"zalkera-source": {command: "npx", args: ["-y", "somebody-else"], env: {TOKEN: "비밀"}}}}),
-    );
-    await rejects(
-        () => registerLocalMcpServer(dir, {serverName: serverName("zalkera-source"), command: "npx", args: ["-y", "@zalkera/cli", "mcp"]}),
-        (e: unknown) => e instanceof DevtoolsError,
-    );
-    const after = JSON.parse(await readFile(join(dir, ".mcp.json"), "utf8")) as {
-        mcpServers: Record<string, {env?: Record<string, string>}>;
-    };
-    strictEqual(after.mcpServers["zalkera-source"]?.env?.TOKEN, "비밀", "남의 토큰을 지웠다");
-});
-
-test("🔴 **옛 이름으로 적힌 우리 항목도 우리 것으로 본다** — 아니면 개명한 날 다시 등록을 못 한다", async () => {
-    // ⚠ **맨 낱말 `zalkera` 는 뺐다.** 남의 항목이 그 낱말 하나로 우리 것이 되기 때문이고
-    //   (`docker run -i zalkera mcp` · 실측), npm 이 그 이름을 거절해 우리가 쓴 적도 없다.
-    //   실제로 쓰인 옛 이름은 스코프 붙은 것들이다.
-    const dir = await tempDir("zalkera-mcp-old-");
-    await writeFile(
-        join(dir, ".mcp.json"),
-        JSON.stringify({mcpServers: {"zalkera-source": {type: "stdio", command: "npx", args: ["-y", "@zalkera/devtools", "mcp"]}}}),
-    );
-    const result = await registerLocalMcpServer(dir, {
-        serverName: serverName("zalkera-source"), command: "npx", args: ["-y", "@zalkera/cli", "mcp"],
-    });
-    strictEqual(result.action, "updated");
-});
-
-test("🔴 **남의 stdio 항목을 안 덮는다** — 실측 변이 셋(그 env 에 토큰이 있다)", async () => {
-    // 종전 판정은 `args` 에 맨 낱말 `zalkera` 가 한 번 있으면 우리 것으로 봤다.
-    const theirs = [
-        {type: "stdio", command: "node", args: ["srv.js", "zalkera"], env: {GITHUB_TOKEN: "비밀"}},
-        {command: "uvx", args: ["mcp-server", "zalkera"], env: {API_KEY: "비밀"}},
-        {command: "docker", args: ["run", "-i", "zalkera"], env: {TOK: "비밀"}},
-        // ⚠ **우리 하위 명령까지 겹쳐도** 안 덮는다 — 맨 낱말 `zalkera` 로는 우리 것이 안 된다.
-        {command: "docker", args: ["run", "-i", "zalkera", "mcp"], env: {TOK: "비밀"}},
-        {type: "stdio", command: "node", args: ["srv.js", "zalkera", "mcp"], env: {T: "비밀"}},
-    ];
-    for (const entry of theirs) {
-        const dir = await tempDir("zalkera-theirs-");
-        await writeFile(join(dir, ".mcp.json"), JSON.stringify({mcpServers: {"zalkera-source": entry}}));
-        await rejects(
-            () => registerLocalMcpServer(dir, {
-                serverName: serverName("zalkera-source"), command: "npx", args: ["-y", "@zalkera/cli@1.0.0", "mcp"],
-            }),
-            (e: unknown) => e instanceof DevtoolsError,
-            `덮었다: ${JSON.stringify(entry)}`,
-        );
-        const after = JSON.parse(await readFile(join(dir, ".mcp.json"), "utf8")) as {
-            mcpServers: Record<string, {env?: Record<string, string>}>;
-        };
-        ok(after.mcpServers["zalkera-source"]?.env, `남의 env 가 사라졌다: ${JSON.stringify(entry)}`);
-    }
-});
-
-test("🔴 **우리가 적은 것은 다시 적을 수 있다** — 판이 붙어도, 전역 설치 모양이어도", async () => {
-    // 좁히다 못 알아보면 「잘커라에 문의해 주세요」로 **영구 잠김**이 된다(사람이 손으로 지워야 한다).
+test("🔴 옛 판이 적은 stdio 항목은 우리 것으로 알아본다 — 못 알아보면 영구 잠김이다", async () => {
     const ours = [
-        {type: "stdio", command: "npx", args: ["-y", "@zalkera/cli@0.20.2", "mcp", "--folder", "/x"]},
-        {type: "stdio", command: "npx", args: ["-y", "zalkera-cli", "mcp"]},
-        {command: "zalkera", args: ["mcp"]},
-        // 🔴 **확장 동봉본.** 이 모양을 못 알아보면 우리가 적은 항목을 남의 것으로 보고 거절해
-        //    **영구 잠김**이 된다 — 사람이 손으로 지우기 전까지 다시 등록을 못 한다(실측).
-        {type: "stdio", command: "/usr/bin/node", args: ["/ext/dist/zalkera-cli.js", "mcp", "--folder", "/x"]},
-        // 🔴 **개발 배치도.** `runtime.ts` 가 워크스페이스 자리를 찾으므로, 이 모양을 못 알아보면
-        //    개발 기계에서 우리가 적은 항목을 우리가 거절한다(심의 실측).
-        {type: "stdio", command: "/usr/bin/node", args: ["/w/packages/cli/dist/main.js", "mcp"]},
+        oldLocalEntry({ command: "npx", args: ["-y", "@zalkera/cli@0.20.2", "mcp", "--folder", "/x"] }),
+        oldLocalEntry({ command: "npx", args: ["-y", "zalkera-cli", "mcp"] }),
+        { command: "zalkera", args: ["mcp"] },
+        // 🔴 **확장 동봉본**(vsix 안). 이름으로만 재므로 설치 자리가 달라도 알아봐야 한다.
+        oldLocalEntry({ command: "/usr/bin/node", args: ["/ext/dist/zalkera-cli.js", "mcp", "--folder", "/x"] }),
+        // 🔴 **개발 배치.** 이 모양을 못 알아보면 개발 기계에서 우리가 적은 항목을 우리가 거절한다.
+        oldLocalEntry({ command: "/usr/bin/node", args: ["/w/packages/cli/dist/main.js", "mcp"] }),
     ];
     for (const entry of ours) {
-        const dir = await tempDir("zalkera-ours-");
-        await writeFile(join(dir, ".mcp.json"), JSON.stringify({mcpServers: {"zalkera-source": entry}}));
-        const result = await registerLocalMcpServer(dir, {
-            serverName: serverName("zalkera-source"), command: "npx", args: ["-y", "@zalkera/cli@1.0.0", "mcp"],
-        });
-        ok(result.action === "updated" || result.action === "unchanged", `못 알아봤다: ${JSON.stringify(entry)}`);
+        const dir = await tempDir("mcp-old-ours-");
+        try {
+            await writeFile(join(dir, ".mcp.json"), JSON.stringify({ mcpServers: { "zalkera-source": entry } }));
+            const result = await registerMcpServer(dir, { ...registration, serverName: serverName("zalkera-source") });
+            strictEqual(result.action, "updated", `못 알아봤다: ${JSON.stringify(entry)}`);
+        } finally {
+            await rm(dir, { recursive: true, force: true });
+        }
     }
 });
 
-test("🔴 로컬 등록이 **환경을 그대로 적는다** — 안 실리면 Node 가 아니라 VS Code 새 창이 뜬다", async () => {
-    // 확장은 `process.execPath`(＝Electron)로 부르고 `ELECTRON_RUN_AS_NODE=1` 이 함께 가야
-    // Node 로 돈다. 이 한 줄이 없으면 MCP 클라이언트가 그 항목을 띄울 때 창이 뜨고 stdio
-    // 핸드셰이크가 영영 안 온다 — 사람에게는 「도구가 안 뜬다」로만 보인다.
-    const dir = await tempDir("zalkera-mcp-env-");
-    await registerLocalMcpServer(dir, {
-        serverName: serverName("zalkera-source"),
-        command: "/usr/bin/node",
-        args: ["/ext/dist/zalkera-cli.js", "mcp"],
-        env: {ELECTRON_RUN_AS_NODE: "1"},
-    });
-    const written = JSON.parse(await readFile(join(dir, ".mcp.json"), "utf8")) as {
-        mcpServers: Record<string, {env?: Record<string, string>}>;
-    };
-    strictEqual(written.mcpServers["zalkera-source"]?.env?.ELECTRON_RUN_AS_NODE, "1");
+test("🔴 남의 stdio 항목은 안 덮는다 — 그 env 에 남의 토큰이 있다", async () => {
+    // ⚠ 맨 낱말 `zalkera` 로는 우리 것이 안 된다. 하위 명령까지 겹쳐도 마찬가지다 —
+    //   그 둘을 **함께** 봐야 우리 것인데, 하나만 보면 아래가 전부 덮인다(유출이 아니라 파괴다).
+    const theirs = [
+        { type: "stdio", command: "node", args: ["srv.js", "zalkera"], env: { GITHUB_TOKEN: "비밀" } },
+        { command: "uvx", args: ["mcp-server", "zalkera"], env: { API_KEY: "비밀" } },
+        { command: "docker", args: ["run", "-i", "zalkera"], env: { TOK: "비밀" } },
+        { command: "docker", args: ["run", "-i", "zalkera", "mcp"], env: { TOK: "비밀" } },
+        { type: "stdio", command: "node", args: ["srv.js", "zalkera", "mcp"], env: { T: "비밀" } },
+        // 우리 하위 명령만 있고 우리 이름이 없는 모양 — 이것만으로는 우리 것이 아니다.
+        { type: "stdio", command: "npx", args: ["-y", "somebody-else", "mcp"], env: { TOKEN: "비밀" } },
+    ];
+    for (const entry of theirs) {
+        const dir = await tempDir("mcp-old-theirs-");
+        try {
+            await writeFile(join(dir, ".mcp.json"), JSON.stringify({ mcpServers: { "zalkera-source": entry } }));
+            await rejects(
+                () => registerMcpServer(dir, { ...registration, serverName: serverName("zalkera-source") }),
+                (error: unknown) => error instanceof DevtoolsError,
+                `덮었다: ${JSON.stringify(entry)}`,
+            );
+            const after = JSON.parse(await readFile(join(dir, ".mcp.json"), "utf8")) as {
+                mcpServers: Record<string, { env?: Record<string, string> }>;
+            };
+            ok(after.mcpServers["zalkera-source"]?.env, `남의 env 가 사라졌다: ${JSON.stringify(entry)}`);
+        } finally {
+            await rm(dir, { recursive: true, force: true });
+        }
+    }
 });

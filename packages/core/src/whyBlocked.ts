@@ -76,8 +76,6 @@ const NEEDS: Readonly<Record<string, ReadonlyArray<Need>>> = {
     "zalkera.preview.start": ["signedIn", "tenant", "site", "siteMatches"],
     "zalkera.preview.restart": ["signedIn", "tenant", "site", "siteMatches"],
     "zalkera.agent.connect": ["signedIn", "tenant", "site", "siteMatches"],
-    // 로컬 쪽도 요건이 같다 — 어느 사이트의 폴더인지 알아야 `.mcp.json` 에 무엇을 적을지 정해진다.
-    "zalkera.agent.source": ["signedIn", "tenant", "site", "siteMatches"],
     "zalkera.precheck": ["signedIn", "tenant", "site", "siteMatches"],
     "zalkera.publish": ["signedIn", "tenant", "site", "siteMatches"],
     "zalkera.history": ["signedIn", "tenant"],

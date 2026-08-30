@@ -123,7 +123,7 @@ for (const entry of ["dist", "media", "README.md", "CHANGELOG.md", "LICENSE", ".
     const src = join(ext, entry);
     if (existsSync(src)) cpSync(src, join(stage, entry), { recursive: true });
 }
-// CLI 번들을 확장 `dist/` 옆에 싣는다. 확장이 이것을 **절대경로로** 부른다(위 근거).
+// CLI 번들을 확장 `dist/` 옆에 싣는다. 지금 확장 안에 부르는 자리는 없다 — `.vscodeignore` 참조.
 const cliBundle = join(root, "packages", "cli", "dist", "main.js");
 if (!existsSync(cliBundle)) throw new Error(`CLI 번들이 없다: ${cliBundle} — 중단`);
 cpSync(cliBundle, join(stage, "dist", "zalkera-cli.js"));
@@ -240,7 +240,7 @@ if (!existsSync(made)) throw new Error(`VSIX 가 안 나왔다: ${made} — 중�
 const listed = execFileSync("unzip", ["-Z1", made], { encoding: "utf8" }).split("\n");
 const must = [
     "extension/dist/extension.cjs",
-    // 「소스 다루게 하기」가 부르는 실물. 빠지면 그 버튼이 조용히 죽는다.
+    // 동봉 CLI 실물. 아래 판 대조가 이 배치를 전제한다.
     "extension/dist/zalkera-cli.js",
     "extension/package.json",
     "extension/node_modules/npm/bin/npm-cli.js",

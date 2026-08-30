@@ -1,7 +1,5 @@
 import * as vscode from "vscode";
 import {
-  tokenPath,
-  registerLocalMcpServer,
   DevtoolsError,
   diagnose,
   diagnoseClientUsage,
@@ -496,7 +494,6 @@ export function activate(context: vscode.ExtensionContext): void {
     register("zalkera.history", showHistory),
     register("zalkera.precheck", precheckCommand),
     register("zalkera.agent.connect", connectAgent),
-    register("zalkera.agent.source", connectAgentSource),
     register("zalkera.help", showHelp),
     register("zalkera.doctor", doctor),
   );
@@ -3156,105 +3153,9 @@ async function connectAgent(): Promise<void> {
   //   ⑵ 「다시 열면」이 VS Code 인지 폴더인지 **AI 확장**인지 모호했다
   //   ⑶ **적은 파일 셋을 안 말했다** — 로그 패널에만 있어, 사람은 자기 폴더에 무엇이 생겼는지 몰랐다
   void vscode.window.showInformationMessage(
-    "AI 가 이 사이트 데이터를 볼 수 있게 설정했습니다(이 폴더에 .mcp.json · AGENTS.md · CLAUDE.md). " +
+    "AI 가 이 사이트를 다룰 수 있게 설정했습니다 — 상품·설정 조회뿐 아니라 **소스 고치기와 " +
+      "새 버전 발행**도 열립니다(이 폴더에 .mcp.json · AGENTS.md · CLAUDE.md). " +
       "쓰시던 AI 확장을 껐다 켜 주세요 — 그래야 반영됩니다. 처음 쓸 때 브라우저 로그인이 한 번 뜹니다.",
-  );
-}
-
-/** 터미널 한 줄에 넣을 인자. 공백·따옴표가 든 경로가 두 인자로 갈리지 않게 감싼다. */
-function quoteArg(value: string): string {
-    return `"${value.replace(/(["\\$`])/g, "\\$1")}"`;
-}
-
-/**
- * **AI 가 이 폴더의 소스를 직접 다루게 한다**(memo184 T4 · 로컬 MCP).
- *
- * ⚠ **형제 [connectAgent] 와 다른 물건이다.** 그쪽은 우리 백엔드의 **원격** 평면을 열어 **데이터**
- *   (상품·주문·설정)를 보여 준다. 이쪽은 고객 기계에서 도는 서버를 열어 **받기·올리기·발행**을
- *   맡긴다. 둘은 짝이다 — 지금은 AI 가 파일을 고쳐 놓고도 올리는 것은 사람이 터미널에서 한다.
- *
- * ⚠ **토큰을 `.mcp.json` 에 안 담는다.** 그 파일은 팀이 공유하고 레포에 들어간다. 그 명령이
- *   자기 보관소에서 로그인을 읽는다.
- */
-async function connectAgentSource(): Promise<void> {
-  const dir = requireWorkspace();
-  await ensureApi(); // 테넌트를 고르게 한다(아직 안 골랐다면).
-
-  const name = mcpServerName("zalkera-source");
-  if (!name) throw new DevtoolsError("SERVER_REJECTED", "서버 이름을 만들지 못했습니다.", "잘커라에 문의해 주세요.");
-  // 🔴 **동봉본을 절대경로로 부른다.** `npx` 는 이 폴더의 `node_modules` 를 못 이긴다(위 KDoc).
-  const runtime = embeddedNodeRuntime(extensionPath);
-  if (runtime.cliPath === null) {
-    throw new DevtoolsError(
-      "SERVER_REJECTED",
-      "이 확장에 터미널 도구가 안 실려 있습니다.",
-      "확장을 다시 설치해 주세요. 그래도 안 되면 잘커라에 문의해 주세요.",
-    );
-  }
-  const result = await registerLocalMcpServer(dir, {
-    serverName: name,
-    // 🔴 **판과 레지스트리를 고정한다.** `.mcp.json` 은 **사이트 소스 폴더**에 씌어지고 그 폴더가
-    //    MCP 클라이언트의 cwd 가 된다 — 이 레포는 그 폴더를 이미 적대적으로 다룬다
-    //    (`npmChoice.ts`: 「그 폴더의 `package.json` 라이프사이클과 `.npmrc` 의 `node-options` 가
-    //    그대로 임의 코드가 된다 — 둘 다 실측」). 고정하지 않으면 ⑴ 폴더의
-    //    `node_modules/@zalkera/cli` 가 먼저 잡히고 ⑵ 폴더의 `.npmrc` 가 레지스트리를 갈아 끼운다
-    //    (둘 다 실측 재현). 그 프로세스가 읽는 자리에 **평문 refresh 토큰**이 있다.
-    //
-    // ⚠ **판을 확장 판으로 못박는다.** 서버 최소판 게이트가 하나라 두 도구가 같은 판으로 간다 —
-    //   `@latest` 로 두면 그 계약이 설정 파일에서 풀린다.
-    // ⚠ `--ignore-scripts` 로 설치 스크립트를 막는다(형제 `npmArgvOf` 와 같은 규율).
-    command: runtime.nodePath,
-    // 🔴 **이 짝이 없으면 Node 가 아니라 VS Code 새 창이 뜬다.** `nodePath` 는 `process.execPath`
-    //    이고 데스크톱에서 그것은 Electron 이다 — 형제 `startPreview` 도 `extraEnv: runtime.env`
-    //    를 반드시 짝으로 넘긴다(`runtime.ts` KDoc 이 그 실측을 적어 뒀다).
-    env: runtime.env,
-    args: [
-      runtime.cliPath,
-      "mcp",
-      // ⚠ **폴더를 못박는다.** 안 적으면 서버가 **에이전트의 cwd** 로 폴더를 정하고, 그것이 이
-      //   폴더가 아니면 네 도구가 전부 죽는다 — 그때 안내가 「`--site` 를 붙여 주세요」인데
-      //   그 인자는 이 파일 안에 있어 **모델이 붙일 수 없다.**
-      "--folder",
-      dir,
-    ],
-  });
-  const docs = await ensureAgentDocs(dir);
-  log(
-    `.mcp.json ${result.action === "created" ? "생성" : result.action === "updated" ? "갱신" : "변경 없음"} — ${result.path}`,
-  );
-  if (docs.agents === "created") log("AGENTS.md 스텁을 만들었습니다.");
-  if (docs.claude === "created") log("CLAUDE.md 를 만들었습니다.");
-
-  // 🔴 **이 확장의 로그인은 그 프로세스에서 안 보인다.** 확장은 VS Code SecretStorage 를 쓰고,
-  //    설정이 띄우는 것은 **별개 프로세스**라 자기 파일 보관소를 읽는다. 다리가 없으면 사람은
-  //    「로그인은 돼 있는데 AI 도구가 전부 안 된다」를 겪는다(심의 실측 — 네 도구 전부
-  //    「로그인이 필요합니다」로 죽었다).
-  //
-  // ⚠ **토큰을 복제하지 않는다.** 확장이 SecretStorage 의 값을 평문 파일로 옮기면 그 보관소를
-  //   쓰는 이유가 사라진다. 대신 **그 도구가 자기 규율대로 로그인하게** 자리를 열어 준다.
-  if (!existsSync(tokenPath())) {
-    const go = await vscode.window.showInformationMessage(
-      "설정을 적었습니다. 다만 이 통로는 **따로 한 번 로그인**해야 합니다 — AI 가 띄우는 프로그램은 이 창의 로그인을 볼 수 없습니다.",
-      {modal: true, detail: "「로그인 열기」를 누르면 터미널이 열리고, 브라우저에서 한 번 로그인하시면 끝납니다. 그 뒤 AI 확장을 껐다 켜 주세요."},
-      "로그인 열기",
-    );
-    if (go === "로그인 열기") {
-      // ⚠ **환경은 터미널에 준다 — 명령줄에 안 적는다.** `VAR=1 cmd` 는 bash 문법이고
-      //   PowerShell·cmd 에서는 안 돈다(사장님 기계의 기본 셸이 그쪽이다).
-      const terminal = vscode.window.createTerminal({name: "잘커라 로그인", env: runtime.env});
-      terminal.show();
-      // ⚠ 등록에 적은 것과 **같은 판·같은 레지스트리**로 부른다 — 다른 것을 띄우면 그 로그인이
-      //   엉뚱한 자리에 저장될 수 있다.
-      // ⚠ 등록에 적은 것과 **같은 실물**을 부른다 — `npx` 로 부르면 그 폴더가 이겨(위 근거)
-      //   로그인 흐름 자체가 폴더 코드에 잡힌다(평문 토큰을 읽는 정도가 아니라 발급을 받는다).
-      terminal.sendText(`${quoteArg(runtime.nodePath)} ${quoteArg(runtime.cliPath)} login`);
-    }
-    return;
-  }
-
-  void vscode.window.showInformationMessage(
-    "AI 가 이 폴더의 소스를 직접 다룰 수 있게 설정했습니다 — 받기 · 올리기 · 새 버전 만들기. " +
-      "쓰시던 AI 확장을 껐다 켜 주세요 — 그래야 반영됩니다. 되돌리기와 버리기는 안 맡깁니다.",
   );
 }
 
