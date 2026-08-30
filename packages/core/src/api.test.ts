@@ -404,3 +404,46 @@ test("전환 중(null)은 반영이 아니다 — 아무것도 안 떠 있는 �
 test("활성이 아직 없어도(첫 게시 직후) 관측만 있으면 기다린다", () => {
     strictEqual(reflectionOf([obsRev({ revisionNo: 2, isServing: false, servingObservedAt: OBS_AT })], 2), "pending");
 });
+
+/**
+ * 🔴 **발행 본문은 `label` 뿐이다.** 서버 요청 DTO 가 `SiteDraftPublishRequest(label)` 하나이고,
+ * 이 문이 지나는 가드에는 동의 층이 없다 — `DRAFT_DISCARD_CONFIRM_REQUIRED` 를 던지는 자리는
+ * 「켜진 판으로 되돌리기」(`SiteRevisionActivationService`) 하나다.
+ *
+ * 없는 레버를 실으면 부르는 쪽이 그것으로 재시도한다. 백엔드도 같은 이유로 MCP 스키마에서 그
+ * 인자를 걷고 시험으로 못박았다(`PublishConsentTest`) — 이쪽은 그 와이어를 재는 자리다.
+ */
+test("🔴 발행 본문은 label 뿐이다 — 없는 동의 레버를 싣지 않는다", async () => {
+    let body: Record<string, unknown> = {};
+    const client = api((_url, init) => {
+        body = JSON.parse(String(init.body ?? "{}"));
+        return Response.json({data: {revisionNo: 10, siteType: "NEXT_SOURCE", status: "BUILDING", capabilityNote: ""}});
+    });
+
+    await client.publishDraft("봄맞이");
+    assert.deepEqual(Object.keys(body), ["label"], `발행 본문에 없는 필드가 실렸다: ${JSON.stringify(body)}`);
+
+    await client.publishDraft();
+    assert.deepEqual(Object.keys(body), [], `라벨 없는 발행에 필드가 실렸다: ${JSON.stringify(body)}`);
+});
+
+/**
+ * 🔴 **되돌리기·버리기의 동의는 그대로 실린다** — 발행 쪽을 걷으면서 대칭인 이쪽까지 잘리면
+ * 사람이 「버립니다」라고 답해도 서버가 계속 같은 동의를 다시 묻는다.
+ *
+ * `draftLifecycle.test.ts` 의 그물은 **대역 API** 를 보므로 실물 클라이언트의 본문 조립을 못 본다 —
+ * 그 인자를 와이어에서 `false` 로 잘라도 전 게이트가 초록이었다(심의 실측). 여기가 그 자리다.
+ */
+test("🔴 판 전환 본문은 동의 인자를 그대로 싣는다 — 발행 쪽을 걷으며 같이 자르지 않는다", async () => {
+    let body: Record<string, unknown> = {};
+    const client = api((_url, init) => {
+        body = JSON.parse(String(init.body ?? "{}"));
+        return Response.json({data: {revisionNo: 9, siteType: "NEXT_SOURCE", status: "READY", capabilityNote: ""}});
+    });
+
+    await client.activateRevision(9, true);
+    assert.deepEqual(body, {discardPendingChanges: true}, `동의가 와이어에서 사라졌다: ${JSON.stringify(body)}`);
+
+    await client.activateRevision(9);
+    assert.deepEqual(body, {discardPendingChanges: false}, "기본값이 참으로 새면 안 묻고 버린다");
+});

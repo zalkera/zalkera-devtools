@@ -52,13 +52,6 @@ export interface PublishDraftOptions {
     folder: string;
     /** 판에 붙일 이름. 서버가 다듬고 길이를 잰다 — 여기서 두 번 하지 않는다. */
     label?: string;
-    /**
-     * 게시 대기 AI 변경을 **함께 버린다.** 명시 동의가 있을 때만 참이다.
-     *
-     * ⚠ 서버가 그 동의를 요구하면(`DRAFT_DISCARD_CONFIRM_REQUIRED`) 부르는 쪽이 사람에게 묻고
-     *   다시 부른다 — 여기서 자동으로 참으로 바꾸지 않는다.
-     */
-    discardPendingChanges?: boolean;
     onProgress?: (message: string) => void;
     fetchImpl?: typeof fetch;
 }
@@ -81,9 +74,10 @@ export async function publishDraft(options: PublishDraftOptions): Promise<Publis
     const root = resolve(options.folder);
 
     report("편집을 새 버전으로 올리는 중입니다…");
-    const published = await requireConsent(() =>
-        options.api.publishDraft(options.label, options.discardPendingChanges === true),
-    ).catch((error: unknown) => {
+    // ⚠ **동의 재시도로 감싸지 않는다.** 이 문은 `DRAFT_DISCARD_CONFIRM_REQUIRED` 를 던지지 않는다 —
+    //   그 코드를 던지는 자리는 「켜진 판으로 되돌리기」 하나다(`SiteRevisionActivationService`).
+    //   감싸 두면 도달 못 하는 갈래가 초록으로 덮이고, 사람에게 없는 출구를 안내하게 된다.
+    const published = await options.api.publishDraft(options.label).catch((error: unknown) => {
         // 🔴 **서버 문면의 「되돌린 뒤」가 CLI 어휘에서 다른 명령을 가리킨다.** 좌초한 편집은
         //    이 문에서 `DRAFT_BASE_MOVED` 로 막히고 서버는 「되돌린 뒤 지금 버전에서 다시 고쳐
         //    주세요」라 답하는데, CLI 의 `rollback` 은 **편집이 걸려 있으면 그 자체가 막힌다.**

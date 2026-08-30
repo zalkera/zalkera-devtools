@@ -327,12 +327,12 @@ export class ZalkeraApi {
      * ⚠ **새 문을 내지 않는다** — 콘솔이 쓰는 그 문을 그대로 쓴다. 문이 둘이 되면 「발행했는가」를
      *   두 곳에 물어야 하고, 한쪽만 고쳐지는 병이 시작된다.
      * ⚠ **`actor` 를 본문에 안 싣는다.** 서버가 인증에서 만든다 — 실으면 아무 이름이나 박힌다.
-     *
-     * @param discardPendingChanges 게시 대기 AI 변경을 함께 버릴지. **명시 동의가 있을 때만** 참이다.
+     * ⚠ **동의 인자를 안 싣는다.** 요청 DTO 가 `label` 하나이고(`SiteDraftPublishRequest`), 이 문이
+     *   지나는 가드에는 동의 층이 없다. 없는 레버를 실으면 부르는 쪽이 그것으로 재시도한다.
      */
-    publishDraft(label?: string, discardPendingChanges = false): Promise<DraftPublishResult> {
+    publishDraft(label?: string): Promise<DraftPublishResult> {
         return this.request<DraftPublishResult>("POST", "/api/partner/site-upload/draft/publish", {
-            body: {...(label === undefined ? {} : {label}), discardPendingChanges},
+            body: label === undefined ? {} : {label},
         });
     }
 
