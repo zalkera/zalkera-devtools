@@ -8,7 +8,7 @@ npm i -g @zalkera/cli && zalkera pull         # 자주 쓸 때 (명령은 `zalke
 ```
 
 > **상태: 한 바퀴가 돈다.** 받기 → 고치기 → 올리기 → 발행 → 되돌리기·버리기가 전부 선다.
-> 미리보기와 로컬 MCP 서버는 **아직 없다**.
+> 미리보기(`preview`)도 선다.
 
 ⚠ **이것은 `import` 하는 패키지가 아니다.** 사이트 프로젝트의 의존으로 넣지 마라 — 사람이
 터미널에서 치는 명령이다. 넣으면 그 `package.json` 이 사이트와 함께 올라가 **서버가 사이트를
@@ -40,10 +40,12 @@ zalkera logout
 `--discard-local` · `--overwrite-unseen` · `--discard-pending` · `--yes` · `--confirm 버립니다` ·
 `--verbose` · `--version` · `--help`
 
-## 아직 없는 것
+## 여기 없는 것 — 로컬 MCP 서버
 
-`preview` · 로컬 MCP 서버. 설계는 서 있고
-(`backend/doc/design/memos/184-local-source-sync.md`) 트랜치가 T4 부터다.
+`zalkera mcp` 로 AI 도구를 이 폴더에 붙이던 문은 **걷었다.** 같은 권한을 여는 문이 둘이면
+자격 검사도 문면도 두 벌이 되어 갈리기 때문이고, 남긴 쪽은 **원격 MCP** 다 — 그쪽이 더 넓다
+(소스 읽기·고치기에 더해 발행·되돌리기·상품·글 조회까지). 붙이는 자리는 VS Code 확장의
+**「AI 연결」** 이다.
 
 **발행 전에 눈으로 확인하는 자리는 아직 콘솔이다.** `push` 로 올린 것은 사이트 쪽 「편집 중인 것」에
 얹힌 상태이고, 그것을 미리 보려면 콘솔의 미리보기를 써야 한다.

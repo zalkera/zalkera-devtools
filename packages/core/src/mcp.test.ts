@@ -198,6 +198,17 @@ test("🔴 남의 stdio 항목은 안 덮는다 — 그 env 에 남의 토큰이
         { type: "stdio", command: "node", args: ["srv.js", "zalkera", "mcp"], env: { T: "비밀" } },
         // 우리 하위 명령만 있고 우리 이름이 없는 모양 — 이것만으로는 우리 것이 아니다.
         { type: "stdio", command: "npx", args: ["-y", "somebody-else", "mcp"], env: { TOKEN: "비밀" } },
+        // 🔴 **반대 짝** — 우리 이름은 있는데 우리 하위 명령이 없다. `runsOurVerb` 를 지우는
+        //    변이가 이 줄 없이는 **전건 초록**이었다(실측). 우리 CLI 를 `mcp` 가 아닌 다른
+        //    하위 명령으로 쓰는 남의 항목이 그 순간 토큰째로 덮인다.
+        { type: "stdio", command: "npx", args: ["-y", "@zalkera/cli", "doctor"], env: { TOKEN: "비밀" } },
+        { command: "zalkera", args: ["preview"], env: { TOKEN: "비밀" } },
+        { type: "stdio", command: "node", args: ["/ext/dist/zalkera-cli.js", "login"], env: { TOKEN: "비밀" } },
+        // 🔴 **경로 닻** — `OUR_BUNDLE` 이 파일 **이름**으로 재는데 그 닻을 재는 자리가 없었다.
+        //    닻을 느슨하게 하면 아래가 전부 우리 것이 된다(실측: 앞·뒤·경로 닻 셋 다 무그물이었다).
+        { type: "stdio", command: "node", args: ["/opt/other/dist/main.js", "mcp"], env: { TOKEN: "비밀" } },
+        { type: "stdio", command: "node", args: ["/opt/other/notzalkera-cli.js", "mcp"], env: { TOKEN: "비밀" } },
+        { type: "stdio", command: "node", args: ["/w/packages/cli/dist/main.js.bak", "mcp"], env: { TOKEN: "비밀" } },
     ];
     for (const entry of theirs) {
         const dir = await tempDir("mcp-old-theirs-");
@@ -215,5 +226,143 @@ test("🔴 남의 stdio 항목은 안 덮는다 — 그 env 에 남의 토큰이
         } finally {
             await rm(dir, { recursive: true, force: true });
         }
+    }
+});
+
+/**
+ * **원격(http) 항목의 표식은 `oauth` 짝이다** — `type: "http"` 가 아니다.
+ *
+ * ⚠ 그 짝 검사를 지우는 변이가 **전건 초록이었다**(실측 888/888). `type === "http"` 로만 재면
+ * Linear·Sentry 처럼 http 로 붙는 남의 항목이 우리 것이 되어, `headers.Authorization` 에 토큰을
+ * 단 항목이 통째로 사라진다. 그 위험은 `isOurEntry` KDoc 이 이미 적어 뒀는데 **재는 자리가
+ * 없었다** — 적어 둔 것과 지키는 것은 다르다.
+ *
+ * ⚠ **없음만 세지 않는다.** 우리 형상(짝이 갖춰진 항목)은 **실제로 갱신된다**를 함께 문다.
+ * 안 그러면 「전부 거절」로 고쳐도 초록이다.
+ */
+test("🔴 남의 http 항목은 안 덮는다 — 표식은 type 도, oauth 짝도 아니다", async () => {
+    const theirs = [
+        // 🔴 **짝이 갖춰진 남의 항목.** 이것이 이 시험의 핵심이다 — `{type, oauth:{clientId,
+        //    authServerMetadataUrl}}` 는 OAuth 원격 서버를 적는 **일반 스키마**라 우리를 가리키는
+        //    바이트가 하나도 없다. 짝만 보던 판에서 이 항목이 **변이 없이** 덮였다(실측:
+        //    action=updated · Authorization 헤더 소멸). 그래서 주소(origin)를 함께 본다.
+        {
+            type: "http",
+            url: "https://mcp.linear.app/sse",
+            oauth: { clientId: "linear-client-1234", authServerMetadataUrl: "https://linear.app/.well-known/oauth-authorization-server" },
+            headers: { Authorization: "Bearer 비밀" },
+        },
+        {
+            type: "http",
+            url: "https://mcp.sentry.dev/mcp",
+            oauth: { clientId: "sentry", authServerMetadataUrl: "https://sentry.io/.well-known/oauth-authorization-server" },
+            headers: { Authorization: "Bearer 비밀" },
+        },
+        // 짝이 통째로 없다 — 가장 흔한 남의 형상.
+        { type: "http", url: "https://mcp.linear.app/sse", headers: { Authorization: "Bearer 비밀" } },
+        // 짝이 반만 있다. 하나만 보는 판정이면 여기서 샌다.
+        { type: "http", url: "https://x/mcp", oauth: { clientId: "남" }, headers: { Authorization: "비밀" } },
+        { type: "http", url: "https://x/mcp", oauth: { authServerMetadataUrl: "https://남/.well-known" }, headers: { Authorization: "비밀" } },
+        // 짝은 있는데 타입이 아니다 — `typeof` 를 느슨하게 하면 샌다.
+        // ⚠ **`null` 을 쓰지 않는다.** `null` 반쪽은 `!= null`·truthiness 느슨화를 **스스로 무력화**해
+        //    자연스러운 느슨화 셋 중 둘을 못 잡는다(실측). 숫자로 둘 다 물린다.
+        { type: "http", url: "https://x/mcp", oauth: { clientId: 1, authServerMetadataUrl: 2 }, headers: { Authorization: "비밀" } },
+        // 🔴 **주소는 우리 것인데 짝이 반만 있는 항목.** 위의 남의-origin 반쪽 항목은 origin 에서
+        //    먼저 걸려 짝 검사에 하중이 안 갔다 — 한쪽만 보는 변이 둘이 생존했다(실측). 두 검사가
+        //    서로를 가리므로 **한 축만 틀린** 항목이 양쪽에 다 필요하다.
+        {
+            type: "http",
+            url: "https://api.zalkera.com/mcp/source/somebody",
+            oauth: { clientId: "남" },
+            headers: { Authorization: "비밀" },
+        },
+        {
+            type: "http",
+            url: "https://api.zalkera.com/mcp/source/somebody",
+            oauth: { authServerMetadataUrl: "https://남/.well-known" },
+            headers: { Authorization: "비밀" },
+        },
+        // 🔴 **주소는 우리 것인데 짝의 타입이 틀린 항목.** 위 줄은 주소가 남의 것이라 origin 에서
+        //    먼저 걸려, 짝 검사를 느슨하게 해도 초록이었다(실측: `!= null`·truthiness 둘 다 생존).
+        //    두 검사가 서로를 가리지 않게 **한 축만 틀린** 항목을 함께 둔다.
+        {
+            type: "http",
+            url: "https://api.zalkera.com/mcp/source/somebody",
+            oauth: { clientId: 1, authServerMetadataUrl: 2 },
+            headers: { Authorization: "비밀" },
+        },
+        // 🔴 **짝은 온전하고 주소만 «거의» 우리 것.** 여기 있는 다른 남의 항목은 오리진이 멀어서
+        //    (`linear.app`) 판정을 느슨하게 해도 안 걸렸다 — 「같은 오리진인가」를 「비슷한가」로
+        //    바꾸는 변이 넷이 전부 초록이었고, 그 넷은 실제로 **남의 토큰을 지운다**(실측).
+        //    비교를 조이는 유일한 하중이 이 셋이다.
+        // `startsWith`·`includes` 로 느슨해지면 우리 것으로 오인한다 — 남이 산 다른 TLD.
+        {
+            type: "http",
+            url: "https://api.zalkera.community/mcp",
+            oauth: { clientId: "남", authServerMetadataUrl: "https://남/.well-known" },
+            headers: { Authorization: "비밀" },
+        },
+        // 오리진을 호스트(이름)로 낮추면 통과한다 — **평문 http 는 우리 서버가 아니다.**
+        {
+            type: "http",
+            url: "http://api.zalkera.com/mcp",
+            oauth: { clientId: "남", authServerMetadataUrl: "https://남/.well-known" },
+            headers: { Authorization: "비밀" },
+        },
+        // 스킴이 없어 `new URL` 이 던진다. try/catch 를 걷으면 `DevtoolsError` 가 아니라
+        // 날 `TypeError` 가 올라와 이 문의 술어에서 걸린다.
+        {
+            type: "http",
+            url: "api.zalkera.com/mcp",
+            oauth: { clientId: "남", authServerMetadataUrl: "https://남/.well-known" },
+            headers: { Authorization: "비밀" },
+        },
+    ];
+    for (const entry of theirs) {
+        const dir = await tempDir("mcp-http-theirs-");
+        try {
+            await writeFile(join(dir, ".mcp.json"), JSON.stringify({ mcpServers: { "zalkera-site": entry } }));
+            await rejects(
+                () => registerMcpServer(dir, registration),
+                (error: unknown) => error instanceof DevtoolsError,
+                `덮었다: ${JSON.stringify(entry)}`,
+            );
+            const after = JSON.parse(await readFile(join(dir, ".mcp.json"), "utf8")) as {
+                mcpServers: Record<string, { headers?: Record<string, string> }>;
+            };
+            ok(after.mcpServers["zalkera-site"]?.headers, `남의 헤더가 사라졌다: ${JSON.stringify(entry)}`);
+        } finally {
+            await rm(dir, { recursive: true, force: true });
+        }
+    }
+});
+
+/**
+ * 우리 형상은 **실제로 갱신된다.**
+ *
+ * ⚠ **변이 하중은 0 이다.** 이 문을 지워도 관련 변이가 전부 red 로 남는다(실측) — 같은 축을
+ *   위 `mcp.zalkera.com/a`→`/b` 통제군이 이미 물고 있다. 그런데도 두는 이유는 이것이 **실제
+ *   등록 픽스처(`registration`)의 주소**로 「우리 것은 갱신된다」를 이름 붙여 적은 유일한
+ *   자리이기 때문이다. 읽는 사람을 위한 문이지 그물이 아니다.
+ */
+test("🔴 우리 http 항목은 갱신된다 — 같은 서버의 다른 경로도 우리 것이다", async () => {
+    const dir = await tempDir("mcp-http-ours-");
+    try {
+        await writeFile(
+            join(dir, ".mcp.json"),
+            JSON.stringify({
+                mcpServers: {
+                    "zalkera-site": {
+                        type: "http",
+                        url: "https://api.zalkera.com/mcp/source/OLD",
+                        oauth: { clientId: "zalkera-mcp", authServerMetadataUrl: "https://sso/.well-known" },
+                    },
+                },
+            }),
+        );
+        const result = await registerMcpServer(dir, registration);
+        strictEqual(result.action, "updated");
+    } finally {
+        await rm(dir, { recursive: true, force: true });
     }
 });
