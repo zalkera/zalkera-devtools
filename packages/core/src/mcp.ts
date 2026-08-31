@@ -37,8 +37,16 @@ export interface RegisterMcpResult {
  * ⚠ `type === "http"` 는 **우리 표식이 아니라 MCP 규격의 전송 방식**이다. 그것으로 판정하면
  *   Linear·Sentry 처럼 http 로 붙는 남의 항목을 우리 것으로 오인해 덮는다 — `headers.Authorization`
  *   에 토큰을 단 항목이 통째로 사라진다(심의 실측). 우리가 적는 형상 그대로를 표식으로 쓴다.
+ *
+ * 🔴 **`oauth` 짝만으로는 부족하다 — 그것도 남의 형상이다.** `{type, oauth:{clientId,
+ *   authServerMetadataUrl}}` 는 OAuth 원격 서버를 적는 **일반 스키마**라 우리를 가리키는 바이트가
+ *   하나도 없다. 짝을 갖춘 Linear 항목이 **변이 없이** 덮였다(실측: `action=updated` · 남의
+ *   `Authorization` 헤더 소멸). 그래서 **우리 주소인가**(`ourOrigin`)를 함께 묻는다.
+ *
+ * ⚠ 그 대가는 **서버 주소가 바뀌는 날의 잠김**이다 — 그때 우리가 적은 항목을 우리가 거절한다.
+ *   짝만 보는 쪽의 대가는 **남의 토큰 파괴**이고, 이쪽은 사람이 한 줄 지우면 풀린다. 그래서 이 교환을 고른다.
  */
-function isOurEntry(value: unknown): boolean {
+function isOurEntry(value: unknown, ourOrigin: string): boolean {
     if (typeof value !== "object" || value === null) return false;
     const e = value as { type?: unknown; oauth?: unknown; command?: unknown; args?: unknown };
     // ⑴ 원격(HTTP) 항목 — 우리는 항상 `oauth.{clientId,authServerMetadataUrl}` 를 같이 적는다.
@@ -47,7 +55,11 @@ function isOurEntry(value: unknown): boolean {
         const o = e.oauth;
         if (typeof o !== "object" || o === null) return false;
         const oauth = o as { clientId?: unknown; authServerMetadataUrl?: unknown };
-        return typeof oauth.clientId === "string" && typeof oauth.authServerMetadataUrl === "string";
+        if (typeof oauth.clientId !== "string" || typeof oauth.authServerMetadataUrl !== "string") return false;
+        // 🔴 **주소가 우리 것인가.** 위 짝은 남도 적는 형상이라 이 줄이 없으면 남의 OAuth 항목이
+        //    우리 것이 된다(위 KDoc). 경로가 아니라 **origin** 으로 잰다 — 테넌트마다 경로가 다르고
+        //    같은 서버의 다른 경로를 남의 것이라 부를 이유가 없다.
+        return originOf((e as { url?: unknown }).url) === ourOrigin;
     }
     // ⑵ 로컬(stdio) 항목 — 인자에 우리 패키지 이름이 있어야 우리 것이다.
     //
@@ -83,6 +95,16 @@ function isOurEntry(value: unknown): boolean {
     return false;
 }
 
+
+/** 주소의 origin. 못 읽으면 `null` — 그 값과는 아무것도 같지 않다(빈 문자열 대조를 피한다). */
+function originOf(value: unknown): string | null {
+    if (typeof value !== "string") return null;
+    try {
+        return new URL(value).origin;
+    } catch {
+        return null;
+    }
+}
 
 /**
  * npm 인자로 받아들이는 이름. **맨 낱말 `zalkera` 는 빠진다** — 남의 항목이 그 낱말 하나로 우리
@@ -163,11 +185,14 @@ async function writeEntry(
     //   그 자리에 고객이 쓰던 stdio 서버가 있으면 토큰이 든 `env` 째로 사라지고, 우리는 "갱신"이라
     //   보고한다. 유출이 아니라 **파괴**다. **우리가 적는 모양**이 아닌 것은 손대지 않는다
     //   (원격은 `type:"http"` + `oauth` 짝, 로컬은 우리 하위 명령 + 우리 패키지 이름).
-    if (existing !== undefined && !isOurEntry(existing)) {
+    // ⚠ 우리가 **이번에 적을** 항목의 origin 으로 잰다 — 로컬 갈래는 이 값을 안 쓴다(주소가 없다).
+    //    origin 을 못 읽으면 아무것과도 안 같은 센티널이라 http 갈래가 통째로 거절 쪽으로 접힌다.
+    if (existing !== undefined && !isOurEntry(existing, originOf(entry.url) ?? "\u0000")) {
         throw new DevtoolsError(
             "NOT_A_SITE",
             `.mcp.json 에 이미 \`${registration.serverName}\` 항목이 있습니다 — 덮어쓰지 않았습니다.`,
-            "그 항목이 다른 도구의 것이면 이름이 겹친 것입니다. 잘커라에 문의해 주세요.",
+            "그 항목이 다른 도구의 것이면 이름이 겹친 것입니다 — 그대로 두십시오. " +
+                "저희가 적은 것이 맞는데 이 안내가 나오면, `.mcp.json` 에서 그 항목을 지우고 다시 켜 주십시오.",
         );
     }
     servers[registration.serverName] = entry;
