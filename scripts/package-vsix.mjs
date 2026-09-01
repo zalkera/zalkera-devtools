@@ -276,12 +276,17 @@ console.log(`   설치(정본): code --install-extension ${manifest.publisher}.$
 console.log(`   게시(오너 지시가 있을 때 — doc/RELEASE.md §2):`);
 // ⚠ **토큰을 명령줄에 두지 마라.** argv 는 `ps` 로 남이 읽고 셸 히스토리에도 남는다.
 //    `read -rs` 는 에코도 히스토리도 없이 환경변수로만 넣는다.
+// ⚠ **`;` 이지 `&&` 가 아니다.** `&&` 면 발행이 실패한 바로 그때 `unset` 을 건너뛰어 토큰이
+//    그 셸에 export 된 채 남는다. 그 셸에서 띄우는 자식 프로세스는 전부 그것을 상속하므로,
+//    거기서 에이전트를 띄우면 **「에이전트는 스스로 발행하지 못한다」가 깨진다** — 이 배너가
+//    자기 손으로 반례를 여는 자리였다(3축 실측).
+//
 // ⚠ **zsh 기준이다.** `read -p` 는 zsh 에서 코프로세스 뜻이라 죽는다(실측). 프롬프트는
 //    변수명에 붙인다. 그리고 **한 줄씩** 실행해야 한다 — 함께 붙여넣으면 `read` 가 다음 줄을
 //    토큰 값으로 먹고 발행이 안 돈다(실측).
 console.log(`     read -rs "VSCE_PAT?PAT: "; echo; export VSCE_PAT   # 한 줄씩 · 화면에 안 찍힘`);
 console.log(
-    `     npx vsce publish --packagePath shared/${manifest.name}-${manifest.version}.vsix && unset VSCE_PAT`,
+    `     npx vsce publish --packagePath shared/${manifest.name}-${manifest.version}.vsix; unset VSCE_PAT`,
 );
 // ⚠ **평문 저장분이 되살아났는지 여기서 본다.** `vsce login` 은 토큰을 `~/.vsce` 에 **평문으로**
 //    적는다(이 박스는 키링이 없어 폴백이 매번 발동한다). 그러면 이 기계에서 도는 모든
