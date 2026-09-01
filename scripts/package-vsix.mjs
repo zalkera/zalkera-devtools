@@ -274,7 +274,7 @@ console.log(`   설치(정본): code --install-extension ${manifest.publisher}.$
 //    포장은 스크립트로 하고 게시는 손으로 하는 사람이 정확히 그 벽에 부딪힌다(실측 · 두 번).
 //    `--packagePath` 는 포장 단계를 통째로 건너뛰고 준 파일만 올린다.
 console.log(
-    `   게시(오너): npx vsce publish --packagePath shared/${manifest.name}-${manifest.version}.vsix`,
+    `   게시(오너 지시가 있을 때 — doc/RELEASE.md §2): npx vsce publish --packagePath shared/${manifest.name}-${manifest.version}.vsix`,
 );
 // ⚠ **한쪽만 알리면 한쪽만 나간다.** 서버의 최소판 게이트는 **하나**다 — 확장만 올리면 게이트가
 //   새 판을 요구하는데 npm 최신은 옛 판이라 **CLI 사용자가 갇힌다.** 그들이 받는 안내는
