@@ -53,7 +53,7 @@ unzip -p dist/zalkera-devtools-<version>.vsix extension/dist/extension.cjs | gre
 
 ---
 
-## 2. 발행 (오너)
+## 2. 발행
 
 ```bash
 npx vsce publish --packagePath dist/zalkera-devtools-<version>.vsix
@@ -62,8 +62,26 @@ npx vsce publish --packagePath dist/zalkera-devtools-<version>.vsix
 **이미 구운 파일을 올린다.** `--packagePath` 없이 부르면 `vsce` 가 다시 포장하려 들면서 §0 의
 오류가 난다.
 
-발행은 마켓플레이스 자격증명이 필요하다 — **오너만 할 수 있다.** 에이전트는 여기서 멈추고
-그 사실을 말한다.
+■ **누가 부르는가 — 오너가 그 판을 발행하라고 말했을 때만 에이전트가 부른다**
+
+퍼블리셔 `zalkera` 의 자격증명이 이 기계의 `~/.vsce` 에 있어, 에이전트도 부르면 나간다.
+그래서 이 문단은 **능력**이 아니라 **권한**을 정한다.
+
+- **오너의 그 판에 대한 명시 지시가 있어야 한다.** 「푸시 후 발행」처럼 이번 판을 가리켜야 하고,
+  이전 판에서 받은 승인은 다음 판으로 이어지지 않는다.
+- **되돌릴 수 없다.** 마켓은 같은 번호로 다시 못 올린다. 잘못 나가면 **판을 하나 더 쓰는 것**이
+  유일한 수습이다. 그래서 3축 이수·게이트 초록·태그 sha 가 이 문 앞에 선다.
+- 지시가 없으면 **명령만 건네고 멈춘다.** 「구웠으니 발행할까요」까지가 에이전트의 몫이다.
+
+⚠ **자격증명이 평문이다.** `vsce` 가 매번 이렇게 경고한다:
+
+```
+WARNING  Failed to open credential store. Falling back to storing secrets clear-text in: ~/.vsce
+```
+
+이 기계에서 도는 **모든** 에이전트가 그 토큰을 읽을 수 있다는 뜻이다. 위의 「지시가 있어야
+한다」는 규율이지 방어가 아니다 — 방어는 키링을 붙이거나, 발행 때만 `VSCE_PAT` 로 주입하고
+저장분을 지우는 쪽이다.
 
 ---
 
@@ -228,7 +246,7 @@ code --install-extension zalkera.zalkera-devtools --force
     `python3 -c 'import io,sys; b=io.open(sys.argv[1],encoding="utf-8").read();
      print(b.count("".join(c if ord(c)<128 else "\\u%04X"%ord(c) for c in sys.argv[2])))' \
      packages/vscode/dist/extension.cjs '이미 게시됐습니다'`
-[ ] npx vsce publish --packagePath dist/…vsix   (오너)
+[ ] npx vsce publish --packagePath dist/…vsix   (오너 지시가 있을 때 — §2)
 [ ] **CLI 도 같은 판으로** — `npm run pack:cli` → `npm publish ./shared/zalkera-cli-…tgz` (오너)
     ⚠ 서버 최소판 게이트가 **하나**다. 한쪽만 올리면 다른 쪽 사용자가 「업데이트하세요」를 받는데
     받을 새 판이 없다. `npm run package` 배너도 이 두 줄을 같이 찍는다
