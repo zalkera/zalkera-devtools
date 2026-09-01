@@ -30,7 +30,7 @@
 //   node scripts/package-vsix.mjs --bump major    0.1.0 → 1.0.0
 //   → dist/<name>-<version>.vsix  (+ shared/ 로 사본)
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
@@ -273,9 +273,27 @@ console.log(`   설치(정본): code --install-extension ${manifest.publisher}.$
 //    루트를 패키지 루트로 잡아 `invalid relative path: extension/../../tsconfig.base.json` 로 죽는다.
 //    포장은 스크립트로 하고 게시는 손으로 하는 사람이 정확히 그 벽에 부딪힌다(실측 · 두 번).
 //    `--packagePath` 는 포장 단계를 통째로 건너뛰고 준 파일만 올린다.
+console.log(`   게시(오너 지시가 있을 때 — doc/RELEASE.md §2):`);
+// ⚠ **토큰을 명령줄에 두지 마라.** argv 는 `ps` 로 남이 읽고 셸 히스토리에도 남는다.
+//    `read -rs` 는 에코도 히스토리도 없이 환경변수로만 넣는다.
+console.log(`     read -rs VSCE_PAT && export VSCE_PAT   # 비밀번호 관리자에서 붙여넣기`);
 console.log(
-    `   게시(오너 지시가 있을 때 — doc/RELEASE.md §2): npx vsce publish --packagePath shared/${manifest.name}-${manifest.version}.vsix`,
+    `     npx vsce publish --packagePath shared/${manifest.name}-${manifest.version}.vsix && unset VSCE_PAT`,
 );
+// ⚠ **평문 저장분이 되살아났는지 여기서 본다.** `vsce login` 은 토큰을 `~/.vsce` 에 **평문으로**
+//    적는다(이 박스는 키링이 없어 폴백이 매번 발동한다). 그러면 이 기계에서 도는 모든
+//    에이전트가 그것을 읽고, 「오너 지시가 있을 때만」이 규율일 뿐 방어가 아니게 된다.
+//    막지는 않는다 — CI 에는 이 파일이 없고, 여기서 죽이면 남의 기계에서 굽기가 못 돈다.
+try {
+    const stored = JSON.parse(readFileSync(join(homedir(), ".vsce"), "utf8"));
+    if (stored?.publishers?.some((p) => p?.pat)) {
+        console.log("");
+        console.log("   ⚠ ~/.vsce 에 평문 토큰이 있습니다 — `npx vsce logout <퍼블리셔>` 로 지우십시오.");
+        console.log("     (doc/RELEASE.md §2 — 이 자리가 평문이면 위 규율은 방어가 아닙니다)");
+    }
+} catch {
+    // 없는 것이 정상이다.
+}
 // ⚠ **한쪽만 알리면 한쪽만 나간다.** 서버의 최소판 게이트는 **하나**다 — 확장만 올리면 게이트가
 //   새 판을 요구하는데 npm 최신은 옛 판이라 **CLI 사용자가 갇힌다.** 그들이 받는 안내는
 //   「업데이트하세요」인데 받을 새 판이 없다. 규율을 문서에만 두면 언젠가 한쪽이 빠지므로,
