@@ -55,11 +55,17 @@ unzip -p dist/zalkera-devtools-<version>.vsix extension/dist/extension.cjs | gre
 
 ## 2. 발행
 
-```bash
-read -rs VSCE_PAT && export VSCE_PAT     # 비밀번호 관리자에서 붙여넣기
+```zsh
+read -rs "VSCE_PAT?PAT: "; echo; export VSCE_PAT   # 비밀번호 관리자에서 붙여넣기 · 화면에 안 찍힘
 npx vsce publish --packagePath dist/zalkera-devtools-<version>.vsix
 unset VSCE_PAT
 ```
+
+⚠ **한 줄씩 실행한다.** 세 줄을 함께 붙여넣으면 `read` 가 **둘째 줄을 토큰 값으로** 먹고,
+발행 명령은 실행되지 않는다(실측). `echo ${#VSCE_PAT}` 가 84 인지 보고 넘어간다.
+
+⚠ **`read -p` 는 zsh 에서 다른 뜻이다**(코프로세스 — `read: -p: no coprocess`). 프롬프트는
+변수명에 붙인다. bash 라면 `read -rsp "PAT: " VSCE_PAT` 다.
 
 **이미 구운 파일을 올린다.** `--packagePath` 없이 부르면 `vsce` 가 다시 포장하려 들면서 §0 의
 오류가 난다.

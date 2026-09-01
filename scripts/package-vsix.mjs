@@ -276,7 +276,10 @@ console.log(`   설치(정본): code --install-extension ${manifest.publisher}.$
 console.log(`   게시(오너 지시가 있을 때 — doc/RELEASE.md §2):`);
 // ⚠ **토큰을 명령줄에 두지 마라.** argv 는 `ps` 로 남이 읽고 셸 히스토리에도 남는다.
 //    `read -rs` 는 에코도 히스토리도 없이 환경변수로만 넣는다.
-console.log(`     read -rs VSCE_PAT && export VSCE_PAT   # 비밀번호 관리자에서 붙여넣기`);
+// ⚠ **zsh 기준이다.** `read -p` 는 zsh 에서 코프로세스 뜻이라 죽는다(실측). 프롬프트는
+//    변수명에 붙인다. 그리고 **한 줄씩** 실행해야 한다 — 함께 붙여넣으면 `read` 가 다음 줄을
+//    토큰 값으로 먹고 발행이 안 돈다(실측).
+console.log(`     read -rs "VSCE_PAT?PAT: "; echo; export VSCE_PAT   # 한 줄씩 · 화면에 안 찍힘`);
 console.log(
     `     npx vsce publish --packagePath shared/${manifest.name}-${manifest.version}.vsix && unset VSCE_PAT`,
 );
