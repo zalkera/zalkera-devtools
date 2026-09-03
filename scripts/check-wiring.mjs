@@ -406,7 +406,7 @@ const WIRES = [
     ],
     [
         "packages/vscode/src/extension.ts",
-        "`버전 ${option.drift.held} · 서버는 버전 ${option.drift.server} — 「서버 판으로 교체」로 맞출 수 있습니다`",
+        "`로컬 버전 ${option.drift.held} / 서버 버전 ${option.drift.server} — 「서버 판으로 교체」로 동기화 가능합니다`",
         "**문면이 오너 확정본이고 순서가 뜻이다.** 이 줄을 지우면 재료를 다 모으고도 영영 안 그리고, " +
             "`held`·`server` 를 맞바꾸면 되돌린 사이트에서 방향이 **뒤집혀** 뜬다 — 침묵이 아니라 거짓말이라 " +
             "「방향을 단정하지 않는다」가 지키는 것 없이 서 있게 된다",
