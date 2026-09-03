@@ -130,6 +130,21 @@ const WIRES = [
     ],
     [
         "packages/vscode/src/extension.ts",
+        "const ask = say.serverReplaceConfirm(tenant, picked.revisionNo, dir, from, keep, leftovers);",
+        "**`from` 이 빠지면 같은 판 고지가 소리 없이 사라진다.** 인자 기본값이 `null` 이라 빼도 컴파일이 " +
+            "통과하고, core 시험은 값을 손으로 넣으므로 전건 초록이다 — 고객은 「버전 4로 갈아 끼웁니다」만 " +
+            "보고 같은 판 위에서 손댄 것을 지운다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "const from = declaredBaseRevisionNo(readSourceMarkAt(dir), String(tenant));",
+        "**정의가 절단되면 호출 핀은 그대로 초록이다.** `from` 을 상수 `null` 로 바꾸거나 소속 대조 " +
+            "(`String(tenant)`)를 남의 코드로 바꿔도 typecheck·배선·시험이 전건 초록이었다(3축 실측) — " +
+            "같은 판 고지가 소리 없이 사라지거나 남의 사이트 표식 번호로 「같은 판」이 뜬다. 형제 둘 " +
+            "(`baseRevisionNo`·elsewhere)은 읽기 식 전문을 핀한다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
         "i < REFLECT_POLL_MAX",
         "상한이 사라지면 관측이 계속 pending 인 사이트에서 폴링이 **끝나지 않는다** — 종료 조건 둘이 " +
             "있어도 그 둘에 안 걸리는 상태가 있고, 그때 조회가 창이 닫힐 때까지 나간다",
@@ -406,7 +421,7 @@ const WIRES = [
     ],
     [
         "packages/vscode/src/extension.ts",
-        "`버전 ${option.drift.held} · 서버는 버전 ${option.drift.server} — 「서버 판으로 교체」로 맞출 수 있습니다`",
+        "`로컬 버전 ${option.drift.held} / 서버 버전 ${option.drift.server} — 「서버 판으로 교체」로 동기화 가능합니다`",
         "**문면이 오너 확정본이고 순서가 뜻이다.** 이 줄을 지우면 재료를 다 모으고도 영영 안 그리고, " +
             "`held`·`server` 를 맞바꾸면 되돌린 사이트에서 방향이 **뒤집혀** 뜬다 — 침묵이 아니라 거짓말이라 " +
             "「방향을 단정하지 않는다」가 지키는 것 없이 서 있게 된다",

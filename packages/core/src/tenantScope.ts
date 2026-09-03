@@ -441,12 +441,23 @@ export const say = {
         keep: readonly string[] = [],
         leftovers: readonly string[] = [],
     ): { message: string; detail: string; action: string; exportFirst: string } {
+        // ⚠ **같은 판이면 «헤드라인»이 말한다.** 이 폴더가 딛는 판과 받을 판이 같은 번호면 갈아
+        //    끼워서 얻는 것은 그 판 그대로뿐이고 잃는 것은 그 위에 손댄 전부다 — 이 사실을 detail
+        //    둘째 줄에 두면 「버전 4로 갈아 끼웁니다」만 읽고 동의한다(오너 실측). **막지는 않는다** —
+        //    사본이 망가져 같은 판을 다시 받는 길이 이 문 하나다(`DESIGN-server-replace.md` §4 ③).
+        //
+        //    「표시돼 있습니다」에 머문다 — 사본 주장이 아니다. 표식은 기반의 선언이고 폴더 내용은
+        //    그 위에서 달라져 있는 것이 정상이라, 「서버와 같습니다」로 말하면 거짓이 된다.
+        const same = from !== null && from === revisionNo;
         // 중간 변수로 감싸지 않는다 — 소독 검사기는 **보간되는 이름**을 보므로, 한 번 감싸면
         // `countJosa`·`plainNotice` 가 검사 밖으로 사라진다.
         return {
-            message: `「${shown(tenant)}」 이 폴더를 서버의 버전 ${countJosa(revisionNo, "으로/로")} 갈아 끼웁니다. 지금 내용은 사라집니다.`,
+            message: same
+                ? `「${shown(tenant)}」 이 폴더는 이미 서버와 같은 버전 ${countJosa(revisionNo, "으로/로")} 표시돼 있습니다. 그래도 갈아 끼우면 지금 내용은 사라지고 서버의 버전 ${countJosa(revisionNo, "으로/로")} 돌아갑니다.`
+                : `「${shown(tenant)}」 이 폴더를 서버의 버전 ${countJosa(revisionNo, "으로/로")} 갈아 끼웁니다. 지금 내용은 사라집니다.`,
             detail:
-                (from === null ? "" : `버전 ${countJosa(from, "이/가")} 담긴 폴더로 표시돼 있습니다.\n`) +
+                // 같은 판이면 그 줄은 헤드라인으로 올라갔다 — 두 번 말하지 않는다.
+                (from === null || same ? "" : `버전 ${countJosa(from, "이/가")} 담긴 폴더로 표시돼 있습니다.\n`) +
                 `${plainNotice(dir, 512)}\n\n` +
                 `그대로 두는 것: ${keep.length > 0 ? plainNotice(keep.join(" · "), 512) : "없습니다"}` +
                 (leftovers.length === 0

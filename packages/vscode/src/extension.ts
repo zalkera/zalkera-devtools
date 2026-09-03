@@ -3693,7 +3693,7 @@ function describeOption(option: ElsewhereOption): vscode.QuickPickItem {
         description:
           option.drift === null
             ? undefined
-            : `버전 ${option.drift.held} · 서버는 버전 ${option.drift.server} — 「서버 판으로 교체」로 맞출 수 있습니다`,
+            : `로컬 버전 ${option.drift.held} / 서버 버전 ${option.drift.server} — 「서버 판으로 교체」로 동기화 가능합니다`,
         detail: plainNotice(option.dir, 120),
       };
     case "fetch":
