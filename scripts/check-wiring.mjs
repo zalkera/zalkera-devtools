@@ -137,6 +137,14 @@ const WIRES = [
     ],
     [
         "packages/vscode/src/extension.ts",
+        "const from = declaredBaseRevisionNo(readSourceMarkAt(dir), String(tenant));",
+        "**정의가 절단되면 호출 핀은 그대로 초록이다.** `from` 을 상수 `null` 로 바꾸거나 소속 대조 " +
+            "(`String(tenant)`)를 남의 코드로 바꿔도 typecheck·배선·시험이 전건 초록이었다(3축 실측) — " +
+            "같은 판 고지가 소리 없이 사라지거나 남의 사이트 표식 번호로 「같은 판」이 뜬다. 형제 둘 " +
+            "(`baseRevisionNo`·elsewhere)은 읽기 식 전문을 핀한다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
         "i < REFLECT_POLL_MAX",
         "상한이 사라지면 관측이 계속 pending 인 사이트에서 폴링이 **끝나지 않는다** — 종료 조건 둘이 " +
             "있어도 그 둘에 안 걸리는 상태가 있고, 그때 조회가 창이 닫힐 때까지 나간다",
