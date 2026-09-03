@@ -130,6 +130,13 @@ const WIRES = [
     ],
     [
         "packages/vscode/src/extension.ts",
+        "const ask = say.serverReplaceConfirm(tenant, picked.revisionNo, dir, from, keep, leftovers);",
+        "**`from` 이 빠지면 같은 판 고지가 소리 없이 사라진다.** 인자 기본값이 `null` 이라 빼도 컴파일이 " +
+            "통과하고, core 시험은 값을 손으로 넣으므로 전건 초록이다 — 고객은 「버전 4로 갈아 끼웁니다」만 " +
+            "보고 같은 판 위에서 손댄 것을 지운다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
         "i < REFLECT_POLL_MAX",
         "상한이 사라지면 관측이 계속 pending 인 사이트에서 폴링이 **끝나지 않는다** — 종료 조건 둘이 " +
             "있어도 그 둘에 안 걸리는 상태가 있고, 그때 조회가 창이 닫힐 때까지 나간다",

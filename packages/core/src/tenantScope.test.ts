@@ -394,3 +394,33 @@ test("이미 게시된 판을 「준비되면 게시됩니다」로 말하지 �
         ok(말.includes("기다리기만 그만뒀습니다"), `취소가 무엇을 했는지 안 말했다: ${말}`);
     }
 });
+
+// ── 서버 판으로 교체 — 같은 판이면 헤드라인이 말한다 ─────────────────────────
+//
+// 같은 번호를 갈아 끼우면 얻는 것은 그 판 그대로뿐이고 잃는 것은 그 위에 손댄 전부다. 그 사실이
+// detail 둘째 줄에만 있으면 「버전 4로 갈아 끼웁니다」만 읽고 동의한다(오너 실측).
+
+test("서버 판으로 교체 — 같은 판이면 **헤드라인이** 그 사실을 말하고, 옛 표식 줄은 detail 에서 빠진다", () => {
+    const same = say.serverReplaceConfirm(captureTenant("bix"), 4, "/home/u/site", 4);
+    match(same.message, /^「bix」 이 폴더는 이미 서버와 같은 버전 4로 표시돼 있습니다\./);
+    match(same.message, /지금 내용은 사라지고 서버의 버전 4로 돌아갑니다\.$/);
+    ok(!/담긴 폴더로 표시돼 있습니다/.test(same.detail), `같은 판인데 옛 표식 줄이 겹쳐 떴다: ${same.detail}`);
+    match(same.detail, /^\/home\/u\/site\n/);
+    // 단추는 그대로다 — 「막지 않는다」가 이 문의 약속이고, 사본이 망가져 같은 판을 다시 받는 길이 여기뿐이다.
+    strictEqual(same.action, "버전 4로 갈아 끼우기");
+});
+
+test("서버 판으로 교체 — 다른 판이면 헤드라인은 종전대로고 옛 표식 줄이 detail 첫 줄에 선다", () => {
+    const differ = say.serverReplaceConfirm(captureTenant("bix"), 4, "/home/u/site", 3);
+    match(differ.message, /^「bix」 이 폴더를 서버의 버전 4로 갈아 끼웁니다\. 지금 내용은 사라집니다\.$/);
+    ok(!/같은 버전/.test(differ.message), `다른 판인데 같다고 말했다: ${differ.message}`);
+    match(differ.detail, /^버전 3이 담긴 폴더로 표시돼 있습니다\.\n\/home\/u\/site\n/);
+});
+
+test("서버 판으로 교체 — 표식이 없으면 어느 쪽도 말하지 않는다(결여 관용)", () => {
+    const unknown = say.serverReplaceConfirm(captureTenant("bix"), 4, "/home/u/site", null);
+    match(unknown.message, /^「bix」 이 폴더를 서버의 버전 4로 갈아 끼웁니다\./);
+    ok(!/같은 버전/.test(unknown.message), `모르는데 같다고 말했다: ${unknown.message}`);
+    match(unknown.detail, /^\/home\/u\/site\n/);
+    ok(!/표시돼 있습니다/.test(unknown.detail), `모르는 판을 지어냈다: ${unknown.detail}`);
+});
