@@ -110,6 +110,10 @@ import {
   SOURCE_MARK_PATH,
   type SourceMark,
   folderVersionDigest,
+  baselineOf,
+  judgePackingGap,
+  type Baseline,
+  type LedgerSnapshot,
 } from "@zalkera/devtools-core";
 import { lstatSync, readFileSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm } from "node:fs/promises";
@@ -272,6 +276,15 @@ function canSwitchCached(): boolean | null {
  */
 let activeVersionCache: { tenant: string; revisionNo: number; digest: string | null } | null = null;
 /**
+ * **원장 전량 스냅샷**(memo191). 방향 판정이 「이 내용이 원장에 처음 나타난 번호」를 세는 재료다 —
+ * 켜진 판 하나만으로는 순서를 못 말한다.
+ *
+ * ⚠ **상한 페이지를 여기 넣지 않는다.** 잘리면 앞부분이 안 보여 「처음」이 거짓이 되고, 그 거짓은
+ *   화면에서 「서버가 더 최신」 같은 **단정적인 낱말**로 나온다. `listRevisions()` 만 이 자리에 온다
+ *   (상한이 필요한 자리는 `listRecentRevisions`).
+ */
+let ledgerCache: LedgerSnapshot | null = null;
+/**
  * **어느 사이트를 물어봤는가** — 「켜진 판이 없다」와 「아직 안 물어봤다」를 가른다.
  *
  * ⚠ **여기에도 사이트가 붙는다.** 값만 두면 A 를 물어본 사실이 B 에서도 「이미 물어봤다」로 읽혀,
@@ -315,6 +328,31 @@ function noteRevisions(
   activeVersionCache = active
     ? { tenant, revisionNo: active.revisionNo, digest: active.versionDigest ?? null }
     : null;
+  // 목록 전체를 남긴다 — 방향 판정의 재료이고, 이미 손에 있으므로 **새 조회가 0** 이다.
+  ledgerCache = {
+    tenant,
+    revisions: revisions.map((r) => ({ revisionNo: r.revisionNo, versionDigest: r.versionDigest ?? null })),
+    complete: true,
+    askedAt: new Date().toISOString(),
+  };
+}
+
+/** 지금 창의 사이트 원장. **다른 사이트 것이면 모름이다** — 앞 사이트 순서로 방향을 말하면 거짓이다. */
+function ledgerFor(tenant: string): LedgerSnapshot | null {
+  const c = ledgerCache;
+  return c === null || tenant === "" || c.tenant !== tenant ? null : c;
+}
+
+/**
+ * 이 폴더의 **기준점** — 마지막으로 서버와 맞췄던 순간의 사실(memo191 ⑶).
+ *
+ * ⚠ 디스크를 읽는 자리라 그리기 경로에서 부르면 안 된다. 폴더 판을 다시 셀 때 함께 읽어 캐시한다.
+ */
+let baselineCache: { dir: string; baseline: Baseline | null } | null = null;
+
+function baselineFor(dir: string | null | undefined): Baseline | null {
+  const c = baselineCache;
+  return c === null || dir == null || c.dir !== dir ? null : c.baseline;
 }
 
 /**
@@ -389,8 +427,16 @@ async function recomputeFolderVersion(dir: string | null, tenant: string | null)
     do {
       folderVersionPending = false;
       const digest = await folderVersionDigest(dir, tenant).catch(() => null);
-      changed = changed || folderVersionCache?.dir !== dir || folderVersionCache?.digest !== digest;
+      // 기준점도 같은 자리에서 읽는다 — 디스크 읽기라 그리기 경로에서 부르면 안 된다(memo191 ⑶).
+      const baseline = baselineOf(readSourceMarkAt(dir), extensionVersion);
+      changed =
+        changed ||
+        folderVersionCache?.dir !== dir ||
+        folderVersionCache?.digest !== digest ||
+        baselineCache?.dir !== dir ||
+        baselineCache?.baseline?.folderVersion !== baseline?.folderVersion;
       folderVersionCache = { dir, digest };
+      baselineCache = { dir, baseline };
     } while (folderVersionPending);
     return changed;
   } finally {
@@ -1303,11 +1349,16 @@ async function writeSourceMark(
   tenant: CapturedTenant,
   result: FetchSourceResult,
 ): Promise<void> {
+  // **기준점**(memo191 ⑶) — 받은 직후 이 폴더를 접은 값. 사이드바와 같은 함수로 접는다.
+  const folderVersion = await folderVersionDigest(root, String(tenant)).catch(() => null);
   const done = await writeSourceMarkTo(root, {
     tenant: String(tenant),
     revisionNo: result.revisionNo,
     sha256: result.sha256,
     fetchedAt: new Date().toISOString(),
+    ...(folderVersion === null ? {} : { folderVersion }),
+    ...(result.versionDigest == null ? {} : { serverVersion: result.versionDigest }),
+    tool: extensionVersion,
   });
   if (!done.ok) {
     log(`출처 표식을 남기지 못했습니다(${done.reason}) — 받기 자체는 끝났습니다.`);
@@ -2166,6 +2217,7 @@ async function updateFromServerCommand(): Promise<void> {
       {location: vscode.ProgressLocation.Notification, title: "서버 판으로 갈아 끼우는 중"},
       () =>
         refreshSiteSource({
+          tool: extensionVersion,
           api,
           targetDir: dir,
           tenant: String(tenant),
@@ -2950,6 +3002,11 @@ async function publishCommand(): Promise<void> {
     tenant: String(tenant),
     revisionNo: result.revisionNo,
     publishedAt: new Date().toISOString(),
+    // **기준점**(memo191 ⑶) — 이 순간 폴더와 서버가 맞았다는 사실. 다음에 폴더가 이 값과 다르면
+    // 그때는 「고쳤다」고 말할 수 있고, 같은데 서버와 다르면 「확인 필요」다.
+    ...(result.localVersion == null ? {} : { folderVersion: result.localVersion }),
+    ...(result.serverVersion == null ? {} : { serverVersion: result.serverVersion }),
+    tool: extensionVersion,
   });
   if (marked.ok) {
     log(`이 폴더를 ${tenant} 사이트의 소스로 표시했습니다.`);
@@ -2957,6 +3014,7 @@ async function publishCommand(): Promise<void> {
     log(`소속 표식을 남기지 못했습니다(${marked.reason}) — 발행 자체는 끝났습니다.`);
   }
   rememberFolder(String(tenant), dir);
+  reportPackingGap(tenant, result);
 
   if (result.cancelledLate) {
     // ⚠ **취소가 늦었으면 여기서 갈린다.** 판은 만들어졌으니 위 부수효과는 다 했고, 남은 것은
@@ -3066,7 +3124,7 @@ async function pollReflection(
       // ⚠ **전량을 안 받는다.** `reflectionOf` 가 보는 것은 셋뿐이다 — 관측이 도는 사이트인가·활성
       //    판·내 판. 그런데 이 폴링은 관측 없는 사이트에서 유예까지 여러 번 도므로, 전량을 읽으면
       //    판이 쌓인 테넌트에서 그 비용이 폴마다 되풀이된다. 방금 올린 판과 활성 판은 꼬리 쪽이다.
-      state = reflectionOf(await api.listRevisions(REFLECT_PAGE), revisionNo);
+      state = reflectionOf(await api.listRecentRevisions(REFLECT_PAGE), revisionNo);
     } catch (e) {
       // 조회 실패는 반영 실패가 아니다 — 다음 차례에 다시 묻는다. 사람에게는 말하지 않는다.
       log(`반영 확인 조회 실패(계속 시도): ${e instanceof Error ? e.message : String(e)}`);
@@ -4215,6 +4273,11 @@ async function refreshSidebar(): Promise<void> {
     folderVersion: folderVersionFor(dir),
     // 지금 창의 사이트가 켜 놓은 판만 본다 — 앞 사이트 값이 남으면 화면이 남의 판을 말한다.
     activeVersion: activeVersionFor(tenantCode()),
+    ledger: ledgerFor(tenantCode()),
+    baseline: baselineFor(dir),
+    // 다시 세는 중이면 낡은 판정을 사실로 그리지 않는다 — 머리에 결론 낱말이 붙은 뒤로는
+    // 낡은 「일치」가 더 단정적으로 읽힌다.
+    folderStale: folderVersionTimer !== null || folderVersionRunning,
     // 사이트의 판이 아니라 **이 확장의 판**이다 — 묶음이 갈라져 있다(`sidebarPlan`).
     extensionVersion,
   });
@@ -4261,6 +4324,9 @@ async function refreshVersionsInBackground(dir: string | null): Promise<void> {
   sidebar.update({
     folderVersion: folderVersionFor(dir),
     activeVersion: activeVersionFor(tenantCode()),
+    ledger: ledgerFor(tenantCode()),
+    baseline: baselineFor(dir),
+    folderStale: folderVersionTimer !== null || folderVersionRunning,
   });
 }
 
@@ -4292,6 +4358,44 @@ function setStatus(text: string): void {
   //    도는데도 상태바가 주황으로 남고 누르면 엉뚱한 명령이 돈다.
   status.backgroundColor = undefined;
   status.command = "zalkera.preview.start";
+}
+
+/**
+ * **포장 갭을 발행 직후에 잡는다**(memo191 ⑵).
+ *
+ * 🔴 우리가 접은 예측과 서버가 저장한 지문이 다르면 그것은 **우리 결함**이다 — 고객은 아무것도
+ *    잘못하지 않았는데 사이드바가 발행 직후부터 영구히 「다름」이 된다. §10 에서 실제로 그랬고,
+ *    **아무도 몰랐다**: 두 값을 맞대 보는 자리가 없었기 때문이다.
+ *
+ * ⚠ **발행을 막지 않는다.** 이미 성공한 발행이고 판은 서 있다. 여기서 하는 일은 **알리는 것**뿐이다.
+ * ⚠ 모름을 「같음」으로도 「갭」으로도 접지 않는다 — 구서버는 지문을 안 보낸다.
+ */
+function reportPackingGap(tenant: CapturedTenant, result: PublishResult): void {
+  switch (judgePackingGap(result.localVersion, result.serverVersion)) {
+    case "gap": {
+      log(
+        `⚠ 포장 갭 — 빌드 #${result.revisionNo}\n` +
+          `    로컬 예측  ${result.localVersion}\n` +
+          `    서버 저장  ${result.serverVersion}\n` +
+          `    파일 수    로컬 ${result.fileCount} / 서버 ${result.serverFileCount ?? "모름"}\n` +
+          `    확장 ${extensionVersion}\n` +
+          `    이 값이 갈리는 것은 도구의 결함입니다. 위 두 줄을 그대로 알려 주세요.`,
+      );
+      void vscode.window.showWarningMessage(say.packingGap(tenant, result.revisionNo), "자세히").then((pick) => {
+        if (pick !== undefined) output.show(true);
+      });
+      break;
+    }
+    case "server-silent":
+      // 알림을 띄우지 않는다 — 고객이 할 수 있는 일이 없고, 「같음」을 주장하지도 않는다.
+      log("서버가 이 응답에 판 지문을 싣지 않아 포장 규칙을 대조하지 못했습니다.");
+      break;
+    case "local-unknown":
+      log("이 폴더의 판을 못 읽어 포장 규칙을 대조하지 못했습니다.");
+      break;
+    case "match":
+      break;
+  }
 }
 
 function log(message: string): void {

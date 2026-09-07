@@ -193,7 +193,7 @@ const WIRES = [
     ],
     [
         "packages/vscode/src/extension.ts",
-        "reflectionOf(await api.listRevisions(REFLECT_PAGE), revisionNo)",
+        "reflectionOf(await api.listRecentRevisions(REFLECT_PAGE), revisionNo)",
         "반영 확인이 **판 전량**을 읽는다 — 판은 발행할 때마다 늘고 줄지 않으므로 그 비용이 원장 " +
             "크기에 비례해 영원히 자란다. 관측이 없는 사이트에서는 유예까지 여섯 번 되풀이된다",
     ],
@@ -276,7 +276,7 @@ const WIRES = [
     //    옮기고 주석을 두고 가면 통과한다. 그래서 이 조각은 **코드끼리 맞붙은 자리**를 문다.
     [
         "packages/vscode/src/extension.ts",
-        "\n  rememberFolder(String(tenant), dir);\n\n  if (result.cancelledLate) {",
+        "\n  rememberFolder(String(tenant), dir);\n  reportPackingGap(tenant, result);\n\n  if (result.cancelledLate) {",
         "늦은 취소 갈래가 **표식·폴더기억 위로 올라가면** 화면이 아니라 **디스크에 거짓**이 남는다 — " +
             "표식이 옛 판을 든 채라 다음 발행이 낡은 기반을 선언하고 자기가 방금 만든 판에 409 를 맞는다. " +
             "블록의 존재만 세면 이 순서가 안 잡힌다",

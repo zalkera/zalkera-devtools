@@ -3,6 +3,7 @@ import { createWriteStream } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { mkdir, mkdtemp, readdir, rm } from "node:fs/promises";
 import { meaningfulEntries, removeAdded, snapshotEntries } from "./emptyDir.ts";
+import { folderVersionDigest } from "./folderVersion.ts";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createGunzip } from "node:zlib";
@@ -43,6 +44,8 @@ export interface FetchSourceOptions {
 export interface FetchSourceResult {
     revisionNo: number;
     fileCount: number;
+    /** 서버가 이 판에 대해 말한 판 지문(memo191). 모르면 `null`. */
+    versionDigest?: string | null;
     /** 받아서 **대조까지 마친** 정본 tar.gz 의 sha256. 출처 표식이 이 값을 적는다. */
     sha256: string;
 }
@@ -63,6 +66,11 @@ export interface VerifiedSourceTar {
     buffer: Buffer;
     /** 대조에 쓴 값 — **이 tar.gz 의** 것이다. 다시 포장한 zip 의 해시가 아니다. */
     sha256: string;
+    /**
+     * 서버가 이 판에 대해 말한 **판 지문**(memo191). [sha256] 과 묻는 것이 다르다 — 저것은 「받은
+     * 바이트가 온전한가」이고 이것은 「푼 트리가 어느 판인가」다. 모르면 `null`(지문 이전 판·구서버).
+     */
+    versionDigest: string | null;
 }
 
 /**
@@ -125,7 +133,7 @@ export async function fetchVerifiedSourceTar(options: {
             "네트워크 문제일 수 있습니다. 다시 시도해 주세요.",
         );
     }
-    return { revisionNo, buffer, sha256: source.sha256 };
+    return { revisionNo, buffer, sha256: source.sha256, versionDigest: source.versionDigest ?? null };
 }
 
 export async function fetchSiteSource(options: FetchSourceOptions): Promise<FetchSourceResult> {
@@ -176,7 +184,7 @@ export async function fetchSiteSource(options: FetchSourceOptions): Promise<Fetc
         throw cause;
     }
     report(`${fileCount}개 파일을 받았습니다.`);
-    return { revisionNo, fileCount, sha256 };
+    return { revisionNo, fileCount, sha256, versionDigest: got.versionDigest };
 }
 
 /** 「서버 판으로 교체」의 결과. [FetchSourceResult] 에 **갈아 끼우기**의 사실을 더한다. */
@@ -200,6 +208,11 @@ export interface RefreshSourceOptions {
     /** 갈아 끼울 폴더. **비어 있지 않아도 된다** — 그것이 이 문의 존재 이유다. */
     targetDir: string;
     tenant: string;
+    /**
+     * 이 도구의 판(확장 버전). 주면 **기준점**을 표식에 남긴다(memo191 ⑶) — 포장 규칙은 판올림 때
+     * 태그 없이 바뀌므로, 어느 판이 접은 값인지 모르면 그 값을 쓸 수 없다.
+     */
+    tool?: string;
     /** 창의 워크스페이스 링크. 표식이 없을 때 소속 판정이 쓴다. */
     link: WorkspaceLink;
     revisionNo?: number;
@@ -263,11 +276,20 @@ export async function refreshSiteSource(options: RefreshSourceOptions): Promise<
     if (binding.kind !== "bind") {
         return { revisionNo, fileCount, sha256, preserved, kept, mark: { written: false, reason: binding.kind } };
     }
+    // **기준점**(memo191 ⑶) — 받은 직후 이 폴더를 접은 값. 다음에 이 값과 달라져 있으면 그때는
+    // 「고쳤다」고 말할 수 있다. 사이드바와 **같은 함수**로 접어야 발행 직후 거짓 「수정 중」이 안 난다.
+    // ⚠ [options.tool] 을 안 주면 기준점을 안 남긴다 — 어느 도구가 접은 값인지 모르면 못 쓴다.
+    const folderVersion = options.tool === undefined
+        ? null
+        : await folderVersionDigest(options.targetDir, options.tenant).catch(() => null);
     const done = await writeSourceMarkTo(options.targetDir, {
         tenant: options.tenant,
         revisionNo,
         sha256,
         fetchedAt: new Date().toISOString(),
+        ...(folderVersion === null ? {} : { folderVersion }),
+        ...(got.versionDigest === null ? {} : { serverVersion: got.versionDigest }),
+        ...(options.tool === undefined ? {} : { tool: options.tool }),
     });
     return {
         revisionNo,

@@ -125,7 +125,7 @@ async function main(argv: readonly string[]): Promise<number> {
             //    남이 되돌린 뒤에도 참이 된다(memo184 🔴1).
             const draft: DraftFiles | null = await context.api.draftFiles().catch(() => null);
             const active = await context.api
-                .listRevisions(20)
+                .listRecentRevisions(20)
                 .then((rows) => rows.find((r) => r.isActive)?.revisionNo ?? null)
                 .catch(() => null);
             const ledger = await readLedger(context.folder);
