@@ -15,9 +15,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {createHash} from "node:crypto";
-import {mkdtemp, mkdir, readFile, rm, writeFile, readdir} from "node:fs/promises";
-import {tmpdir} from "node:os";
+import {mkdir, readFile, rm, writeFile, readdir} from "node:fs/promises";
 import {join} from "node:path";
+import {tempDir} from "./testing/tempDir.ts";
 import {folderVersionDigest} from "./folderVersion.ts";
 import {serverExcluded} from "./serverNormalization.ts";
 import {sourceVersionDigest, unwrapSingleRoot} from "./sourceVersion.ts";
@@ -34,7 +34,9 @@ async function put(root: string, rel: string, text: string): Promise<void> {
 
 /** 서버가 저장할 목록의 지문 — 실제 zip 을 풀어 서버 순서(언랩 → 배제)대로 접는다. */
 async function serverSideDigest(zip: Buffer): Promise<string | null> {
-    const out = await mkdtemp(join(tmpdir(), "zalkera-srv-"));
+    // ⚠ **`mkdtemp` 를 직접 안 부른다** — `tempDir()` 가 회수 목록에 올려 두 겹으로 지운다
+    //   (`after` + `process.on("exit")`). 손으로 지우면 예외 경로에서 남는다.
+    const out = await tempDir("zalkera-srv-");
     try {
         await extractZip(zip, out);
         const found: {path: string; sha256: string}[] = [];
@@ -64,7 +66,7 @@ async function withFolder(
     files: Record<string, string>,
     run: (dir: string) => Promise<void>,
 ): Promise<void> {
-    const dir = await mkdtemp(join(tmpdir(), "zalkera-fv-"));
+    const dir = await tempDir("zalkera-fv-");
     try {
         for (const [rel, text] of Object.entries(files)) await put(dir, rel, text);
         await run(dir);

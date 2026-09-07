@@ -2126,8 +2126,11 @@ async function updateFromServerCommand(): Promise<void> {
   //    다운로드가 준 것과 이 문이 준 것이 다른」 날이 온다. 형제 셋이 전량을 읽으므로 여기도
   //    전량이다 — 페이지를 걸면 활성 판이 그 밖으로 밀린 사이트에서 **다른 판을 갈아 끼운다.**
   const revisions = await api.listRevisions();
-  noteRevisions(tenant, revisions);
   const picked = pickRevision(revisions);
+  // ⚠ **위 두 줄 사이에 아무것도 끼우지 마라.** `check-wiring` 이 그 **연접**을 앵커로 잡아
+  //    「이 파괴 동사가 판 전량을 읽는가」를 지킨다 — 한 줄을 끼우면 그물이 조용히 눈이 먼다
+  //    (실측으로 이 자리가 그렇게 깨졌다). 목록을 적어 두는 것은 판정 뒤에 해도 같다.
+  noteRevisions(tenant, revisions);
   if (picked === null) throw noRevisionError(revisions);
   // ⚠ **켜져 있는 판이 아닐 때는 말한다.** 사이드바 툴팁이 「서버에 **켜져 있는** 판」이라고
   //    적어 두었으므로, 폴백으로 최신 READY 를 잡은 칸에서 침묵하면 **파괴 동사가 켜져 있지도
