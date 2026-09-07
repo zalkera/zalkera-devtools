@@ -441,11 +441,14 @@ const versionGroup = (state: Partial<SidebarState>) =>
 type Items = {items: {kind: string; label: string}[]};
 const labelsOf = (g: Items) => g.items.map((i) => i.label);
 const infoLabels = (g: Items) => g.items.filter((i) => i.kind === "info").map((i) => i.label);
+/** 로컬 줄의 아이콘 — 판정을 나르는 자리라 시험이 그것이 갈리는지 본다. */
+const localIcon = (g: {items: {kind: string; label: string; icon?: string}[]}) =>
+    g.items.find((i) => i.kind === "info" && i.label.startsWith("로컬"))?.icon;
 
 const AAA = "aa".repeat(32);
 const BBB = "bb".repeat(32);
 
-test("버전 묶음은 켜진 판을 모르면 지어내지 않는다", () => {
+test("버전 묶음은 서버 판을 모르면 지어내지 않는다", () => {
     const g = versionGroup({activeVersion: null, folderVersion: AAA});
     assert.deepEqual(infoLabels(g), [], "모르는 것을 적었다");
     // 그래도 명령 둘은 그대로 선다 — 묶음이 상태에 따라 줄어들면 「고장」으로 읽힌다.
@@ -453,51 +456,82 @@ test("버전 묶음은 켜진 판을 모르면 지어내지 않는다", () => {
     assert.ok(labelsOf(g).includes("버전 전환"));
 });
 
-test("같으면 한 줄로 말한다 — 같은 값을 두 줄에 나누면 사람이 대조하게 된다", () => {
-    const g = versionGroup({activeVersion: {revisionNo: 12, digest: AAA}, folderVersion: AAA});
-    assert.deepEqual(infoLabels(g), ["이 폴더 = 켜진 판 — 빌드 #12 · aaaaaaaa"]);
-    assert.equal(g.description, "빌드 #12 · 같음");
+/**
+ * 🔴 **두 값이 같은 열에 정렬돼야 한다**(오너 확정 문면). 지문을 먼저 두고 빌드 번호를 뒤로 보내는
+ * 이유가 그것이다 — 사람은 「일치」라는 낱말을 읽기 전에 두 값이 같은지를 **본다**.
+ * 번호를 앞에 두면 지문이 밀려 그 정렬이 깨진다.
+ */
+test("같으면 두 줄의 지문이 같은 자리에 온다 — 정렬이 판정을 나른다", () => {
+    const g = versionGroup({activeVersion: {revisionNo: 4, digest: AAA}, folderVersion: AAA});
+    assert.deepEqual(infoLabels(g), ["서버 — aaaaaaaa / 빌드 #4", "로컬 — aaaaaaaa"]);
+    // 두 줄에서 「— 」 뒤 8자가 같은 오프셋에 있어야 눈이 비교한다.
+    const [server, local] = infoLabels(g);
+    assert.equal(server!.slice(5, 13), local!.slice(5, 13), "지문이 같은 열에 안 왔다");
 });
 
-test("다르면 두 줄로 갈라 적는다", () => {
-    const g = versionGroup({activeVersion: {revisionNo: 12, digest: BBB}, folderVersion: AAA});
-    assert.deepEqual(infoLabels(g), ["이 폴더 — aaaaaaaa", "켜진 판 — 빌드 #12 · bbbbbbbb"]);
-    assert.equal(g.description, "빌드 #12 · 다름");
+test("다르면 그 자리의 값만 다르다", () => {
+    const g = versionGroup({activeVersion: {revisionNo: 4, digest: AAA}, folderVersion: BBB});
+    assert.deepEqual(infoLabels(g), ["서버 — aaaaaaaa / 빌드 #4", "로컬 — bbbbbbbb"]);
 });
 
 /**
- * 🔴 **어느 쪽이 새것인지 우리는 모른다.** 지문은 순서를 안 담는다 — 「낡았다」·「뒤처졌다」로 적으면
- * 방금 고친 사람에게 거짓이 되고, 그 사람이 자기 작업을 서버 것으로 덮는다.
+ * ⚠ **판정 낱말을 쓰지 않는다.** 판정은 아이콘이 나르고 다음 할 일은 툴팁이 말한다 —
+ * 낱말로 또 적으면 눈이 이미 본 것을 글자로 반복한다.
+ */
+test("줄에 「일치」·「불일치」를 적지 않는다 — 아이콘과 정렬이 나른다", () => {
+    for (const patch of [
+        {activeVersion: {revisionNo: 4, digest: AAA}, folderVersion: AAA},
+        {activeVersion: {revisionNo: 4, digest: AAA}, folderVersion: BBB},
+    ]) {
+        const g = versionGroup(patch);
+        const text = infoLabels(g).join("\n");
+        assert.ok(!/일치/.test(text), `줄에 판정 낱말이 들어갔다: ${text}`);
+    }
+    // 양성 짝 — 아이콘은 실제로 갈린다(그게 판정을 나르는 자리다).
+    const same = versionGroup({activeVersion: {revisionNo: 4, digest: AAA}, folderVersion: AAA});
+    const diff = versionGroup({activeVersion: {revisionNo: 4, digest: AAA}, folderVersion: BBB});
+    assert.notEqual(localIcon(same), localIcon(diff), "아이콘이 안 갈리면 판정을 나르는 것이 없다");
+});
+
+/**
+ * 🔴 **어느 쪽이 새것인지 우리는 모른다.** 지문은 순서를 안 담는다 — 「낡았다」고 적으면 방금 고친
+ * 사람에게 거짓이 되고, 그 사람이 자기 작업을 서버 것으로 덮는다. 방향 판정은 별도 트랜치다.
  */
 test("다름을 「낡음」으로 말하지 않는다", () => {
-    const g = versionGroup({activeVersion: {revisionNo: 12, digest: BBB}, folderVersion: AAA});
-    const text = [...infoLabels(g), g.description ?? "", g.tooltip ?? ""].join("\n");
-    for (const forbidden of ["낡", "뒤처", "오래된", "최신이 아"]) {
+    const g = versionGroup({activeVersion: {revisionNo: 4, digest: BBB}, folderVersion: AAA});
+    const text = [...infoLabels(g), g.tooltip ?? ""].join("\n");
+    for (const forbidden of ["낡", "뒤처", "오래된", "최신이 아", "앞섰"]) {
         assert.ok(!text.includes(forbidden), `순서를 단정했다: '${forbidden}'`);
     }
 });
 
-test("켜진 판에 지문이 없으면 「같다」고 말하지 않는다", () => {
+test("서버 판에 지문이 없으면 그 자리에 「지문 없음」이라 적는다", () => {
     const g = versionGroup({activeVersion: {revisionNo: 3, digest: null}, folderVersion: AAA});
-    assert.deepEqual(infoLabels(g), ["켜진 판 — 빌드 #3 · 지문 없음", "이 폴더 — aaaaaaaa"]);
-    assert.equal(g.description, "빌드 #3");
-    assert.ok(!(g.description ?? "").includes("같음"), "모름을 같음으로 접었다");
-    assert.ok(!(g.description ?? "").includes("다름"), "모름을 다름으로 접었다");
+    assert.deepEqual(infoLabels(g), ["서버 — 지문 없음 / 빌드 #3", "로컬 — aaaaaaaa"]);
 });
 
-test("내 폴더를 모르면 아는 쪽만 적는다", () => {
+test("로컬을 모르면 아는 쪽만 적는다", () => {
     const g = versionGroup({activeVersion: {revisionNo: 7, digest: BBB}, folderVersion: null});
-    assert.deepEqual(infoLabels(g), ["켜진 판 — 빌드 #7 · bbbbbbbb"]);
-    assert.equal(g.description, "빌드 #7");
+    assert.deepEqual(infoLabels(g), ["서버 — bbbbbbbb / 빌드 #7"]);
 });
 
 /**
- * ⚠ **빌드 번호는 「무엇이 담겼는가」를 말하지 않는다.** 두 판의 지문이 같은데 번호만 다를 수 있고
- * (되돌리기가 그렇다 — 같은 트리로 새 번호를 낸다), 그때 화면이 「다름」이라 말하면 거짓이다.
+ * ⚠ **빌드 번호는 서버 줄에만 붙는다.** 그 번호는 서버가 올릴 때 부여하는 순번이라 로컬은 가질 수
+ * 없다 — 그 자리를 채우면 없는 것을 지어내는 셈이다.
  */
-test("번호가 달라도 지문이 같으면 같음이다 — 되돌린 판이 그 형상이다", () => {
+test("로컬 줄에는 빌드 번호가 없다", () => {
+    const g = versionGroup({activeVersion: {revisionNo: 4, digest: AAA}, folderVersion: BBB});
+    const local = infoLabels(g).find((l) => l.startsWith("로컬"))!;
+    assert.ok(!local.includes("빌드"), `로컬이 없는 번호를 말했다: ${local}`);
+});
+
+/**
+ * ⚠ **번호는 「무엇이 담겼는가」를 말하지 않는다.** 되돌린 판은 번호가 새것인데 지문이 같다 —
+ * 그때 화면이 「다름」쪽으로 기울면 거짓이다.
+ */
+test("번호가 달라도 지문이 같으면 같은 자리에 같은 값이 온다 — 되돌린 판이 그 형상이다", () => {
     const g = versionGroup({activeVersion: {revisionNo: 99, digest: AAA}, folderVersion: AAA});
-    assert.equal(g.description, "빌드 #99 · 같음");
+    assert.deepEqual(infoLabels(g), ["서버 — aaaaaaaa / 빌드 #99", "로컬 — aaaaaaaa"]);
 });
 
 test("확장 판은 「버전」이 아니라 「도움」에 선다 — 사이트 판과 다른 축이다", () => {

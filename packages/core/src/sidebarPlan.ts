@@ -401,9 +401,8 @@ export function sidebarPlan(state: SidebarState): PlanGroup[] {
             id: "version",
             label: "버전",
             icon: "history",
-            // **접어도 보이는 자리다.** 사이트 묶음이 사이트 코드를 여기 두는 것과 같은 이유로,
-            // 「지금 무엇이 켜져 있고 내 폴더가 그것과 같은가」를 한 눈에 둔다.
-            description: version.summary,
+            // ⚠ **머리에는 값을 안 둔다**(오너 확정). 바로 아래 두 줄이 같은 것을 말하므로 머리에
+            //    또 적으면 한 화면이 사실을 두 번 반복한다. 값은 자식 줄이 소유한다.
             // 「되돌리기」가 아니라 「버전」이다 — 여기서 하는 일은 **어느 버전을 켤지 고르는 것**이고,
             // 뒤로 가는 것은 그 한 경우일 뿐이다(오너 확정).
             tooltip: version.tooltip,
@@ -454,7 +453,6 @@ export function sidebarPlan(state: SidebarState): PlanGroup[] {
  *   같은 값을 두 줄에 나눠 적으면 사람이 두 값을 **대조하게** 된다 — 그 대조를 없애려고 만든 화면에서.
  */
 export function versionView(state: SidebarState): {
-    summary?: string;
     tooltip: string;
     lines: PlanItem[];
 } {
@@ -466,81 +464,83 @@ export function versionView(state: SidebarState): {
     if (!active) {
         return {
             tooltip: state.site
-                ? `${ours(hint)}\n켜진 판은 아직 확인 전입니다`
+                ? `${ours(hint)}\n서버 판은 아직 확인 전입니다`
                 : `${ours(hint)} — 소스를 먼저 받아야 씁니다`,
             lines: [],
         };
     }
 
-    // ⚠ **서버 값은 소독을 지난다.** 판 번호도 지문도 서버가 준 글자다 — 트리 라벨은 지금 생 문자열이지만
-    //   그 사실에 기대면 언젠가 `MarkdownString` 이 되는 날 조용히 뚫린다(`notice.ts` 의 규율).
+    // ⚠ **서버 값은 소독을 지난다.** 판 번호도 지문도 서버가 준 글자다(`notice.ts` 의 규율).
     //   `count` 는 숫자가 아닌 값을 **거부**한다 — 서버가 null 을 보내도 「빌드 #0」이 안 뜬다.
     const build = `빌드 #${count(active.revisionNo)}`;
     const theirs = shortVersion(active.digest);
-    // 우리가 우리 폴더를 접어 낸 값이다(hex 8자) — 서버가 정하지 않았다는 판단을 `ours` 로 남긴다.
     const mineShort = shortVersion(mine);
     const verdict = compareVersions(mine, active.digest);
 
-    // 켜진 판이 지문 이전에 만들어졌다 — **「같다」고 말할 근거가 없다.** 그 사실을 그대로 적는다.
+    /**
+     * **지문을 먼저 둔다**(오너 확정 문면). 라벨이 둘 다 두 글자라 값이 **같은 열에 세로로 정렬**되고,
+     * 사람은 「일치」라는 낱말을 읽기 전에 두 값이 같은지를 **본다**. 판정 낱말보다 정렬이 강하다.
+     *
+     * ```
+     * 서버 — 969a61e0 / 빌드 #4
+     * 로컬 — 969a61e0
+     *        ↑ 같은 열
+     * ```
+     *
+     * ⚠ **빌드 번호는 서버 줄에만, 그것도 뒤에 붙는다.** 그 번호는 서버가 올릴 때 부여하는 순번이라
+     *   로컬은 가질 수 없고(그 자리를 채우면 없는 것을 지어내는 셈이다), 앞에 두면 지문이 밀려
+     *   두 줄의 정렬이 깨진다.
+     *
+     * ⚠ 판정은 **아이콘**이 나른다 — 낱말로 또 적으면 눈이 이미 본 것을 글자로 반복한다.
+     *   다음에 할 일은 툴팁이 말한다(그쪽은 낱말이 필요한 자리다).
+     */
+    const serverLine = (value: string): PlanItem => ({
+        kind: "info",
+        label: `서버 — ${ours(value)} / ${ours(build)}`,
+        icon: "cloud",
+    });
+    const localLine = (value: string, icon: string): PlanItem => ({
+        kind: "info",
+        label: `로컬 — ${ours(value)}`,
+        icon,
+    });
+
+    // 서버 판이 지문 이전에 만들어졌다 — **대조할 근거가 없다.** 그 사실을 그대로 적는다.
     if (theirs === null) {
         return {
-            summary: ours(build),
             tooltip:
-                `${ours(hint)}\n켜진 판은 지문이 생기기 전에 올라간 것이라 지금 폴더와 대조할 수 없습니다.\n` +
+                `${ours(hint)}\n서버 판은 지문이 생기기 전에 올라간 것이라 지금 폴더와 대조할 수 없습니다.\n` +
                 `한 번 더 올리시면 그때부터 대조됩니다.`,
             lines: [
-                {kind: "info", label: `켜진 판 — ${ours(build)} · 지문 없음`, icon: "cloud"},
-                ...(mineShort === null
-                    ? []
-                    : [{kind: "info" as const, label: `이 폴더 — ${ours(mineShort)}`, icon: "folder"}]),
+                serverLine("지문 없음"),
+                ...(mineShort === null ? [] : [localLine(mineShort, "folder")]),
             ],
         };
     }
 
+    const theirsShown = plainNotice(theirs, VERSION_DIGEST_SHORT);
+
     if (verdict === "same") {
         return {
-            summary: `${ours(build)} · 같음`,
-            tooltip: `${ours(hint)}\n지금 폴더와 켜진 판이 같은 소스입니다.`,
-            lines: [
-                {
-                    kind: "info",
-                    label: `이 폴더 = 켜진 판 — ${ours(build)} · ${plainNotice(theirs, VERSION_DIGEST_SHORT)}`,
-                    icon: "pass",
-                },
-            ],
+            tooltip: `${ours(hint)}\n지금 폴더와 서버 판이 같은 소스입니다.`,
+            lines: [serverLine(theirsShown), localLine(theirsShown, "pass")],
         };
     }
 
     if (verdict === "differs") {
         return {
-            summary: `${ours(build)} · 다름`,
             // ⚠ **어느 쪽이 새것인지 우리는 모른다.** 지문은 순서를 안 담는다 — 「낡았다」고 적으면
             //   방금 고친 사람에게 거짓이 되고, 그 사람이 자기 작업을 서버 것으로 덮는다.
-            //   두 갈래를 다 적고 고르는 것은 사람이 한다.
             tooltip:
-                `${ours(hint)}\n지금 폴더와 켜진 판이 다른 소스입니다.\n` +
+                `${ours(hint)}\n지금 폴더와 서버 판이 다른 소스입니다.\n` +
                 `이 폴더 것을 올리려면 「새 버전 배포」, 서버 것을 가져오려면 「서버 판으로 교체」.`,
-            lines: [
-                {kind: "info", label: `이 폴더 — ${ours(mineShort ?? "읽는 중")}`, icon: "edit"},
-                {
-                    kind: "info",
-                    label: `켜진 판 — ${ours(build)} · ${plainNotice(theirs, VERSION_DIGEST_SHORT)}`,
-                    icon: "cloud",
-                },
-            ],
+            lines: [serverLine(theirsShown), localLine(ours(mineShort ?? "읽는 중"), "edit")],
         };
     }
 
-    // 켜진 판은 아는데 이 폴더를 모른다(열린 폴더 없음·아직 안 읽음). 아는 쪽만 적는다.
+    // 서버 판은 아는데 이 폴더를 모른다(열린 폴더 없음·아직 안 읽음). 아는 쪽만 적는다.
     return {
-        summary: ours(build),
         tooltip: `${ours(hint)}\n지금 폴더의 판은 아직 모릅니다.`,
-        lines: [
-            {
-                kind: "info",
-                label: `켜진 판 — ${ours(build)} · ${plainNotice(theirs, VERSION_DIGEST_SHORT)}`,
-                icon: "cloud",
-            },
-        ],
+        lines: [serverLine(theirsShown)],
     };
 }
