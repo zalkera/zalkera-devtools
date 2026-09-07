@@ -215,6 +215,15 @@ export interface ArchiveConfirmed {
     status: string;
     /** 유형별 한계·상태를 서버가 사람 말로 적어 보낸다(memo66 §4 — 숨기지 않는다). */
     capabilityNote: string;
+    /**
+     * **서버가 이 판에 대해 저장한 판 지문**(memo191 ⑵). 우리가 접은 예측과 다르면 그것은 **우리 결함**이다
+     * — 포장 규칙이 서버와 갈렸다는 뜻이고, 이 칸이 없으면 그 사실이 조용하다(§10 에서 실제로 그랬다).
+     *
+     * ⚠ 구서버는 이 칸을 안 보낸다 — `undefined` 는 「모름」이지 「같음」이 아니다.
+     */
+    versionDigest?: string | null;
+    /** 그 판에 담긴 파일 수. 지문이 갈렸을 때 「어느 쪽이 더 뺐나」의 첫 단서다. */
+    fileCount?: number;
 }
 
 export interface PresignedUpload {

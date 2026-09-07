@@ -1,6 +1,7 @@
 import type { ArchiveConfirmed, ZalkeraApi } from "./api.ts";
 import { isUploadBaseMoved } from "./api.ts";
 import { DevtoolsError } from "./errors.ts";
+import { folderVersionDigest } from "./folderVersion.ts";
 import { apiBaseUrl } from "./serverUrl.ts";
 import { packProject } from "./zip.ts";
 
@@ -75,6 +76,12 @@ export interface PublishResult {
     /** `READY` 면 바로 켤 수 있고, `BUILDING` 이면 서버가 빌드 중이다. */
     status: string;
     siteType: string;
+    /** 내가 접은 예측 판 지문(memo191 ⑵). 폴더를 못 읽었으면 `null`. */
+    localVersion?: string | null;
+    /** 서버가 이 판에 대해 저장한 판 지문. 구서버면 `undefined`(모름). */
+    serverVersion?: string | null;
+    /** 서버가 센 파일 수. 지문이 갈렸을 때 어느 쪽이 더 뺐는지의 단서. */
+    serverFileCount?: number;
     /** 서버가 보낸 한계·상태 안내. 있으면 **그대로 보여 준다**(memo66 §4). */
     capabilityNote: string;
 }
@@ -259,6 +266,12 @@ export async function publish(options: PublishOptions): Promise<PublishResult> {
     const confirmed = await confirmWithBaseRetry(options, presigned.storageKey, options.baseRevisionNo ?? null);
     report(`버전 ${confirmed.revisionNo} 로 올렸습니다.`);
 
+    // **내가 접은 예측** — 사이드바가 쓰는 바로 그 함수다(memo191 ⑵·⑶). 사본을 두면 예측끼리
+    // 갈려, 발행 직후 「수정 중」이 뜨는 거짓이 난다.
+    // ⚠ 묶은 뒤에 폴더를 다시 훑으므로, 업로드 중에 파일을 고치면 이 값이 올라간 것과 다를 수 있다.
+    //   그때는 갭 경고가 **거짓 경보**로 뜬다 — 조용히 틀리는 것보다 낫다고 보고 그 방향으로 둔다.
+    const localVersion = await folderVersionDigest(options.projectDir, options.tenant);
+
     return {
         // ⚠ **취소가 늦었으면 그 사실을 싣는다 — 삼키지 않는다.** `confirm` 이 성공했으므로 판은
         //    만들어졌다. 부르는 쪽이 이것을 안 보고 「취소했습니다」로 접으면 **서버는 판을 만들었는데
@@ -272,5 +285,26 @@ export async function publish(options: PublishOptions): Promise<PublishResult> {
         status: confirmed.status,
         siteType: confirmed.siteType,
         capabilityNote: confirmed.capabilityNote,
+        localVersion,
+        serverVersion: confirmed.versionDigest,
+        serverFileCount: confirmed.fileCount,
     };
+}
+
+/**
+ * **포장 갭 판정**(memo191 ⑵) — 우리가 접은 예측과 서버가 저장한 값이 갈렸는가.
+ *
+ * 🔴 갈리면 그것은 **우리 결함**이다. 고객이 아무것도 잘못하지 않았는데 발행 직후부터 사이드바가
+ *    영구히 「다름」이 된다 — §10 에서 실제로 일어났고, **아무도 몰랐다**(예측과 서버 값을 맞대 보는
+ *    자리가 없었기 때문이다). 이 판정이 그 침묵을 없앤다.
+ *
+ * ⚠ **모름을 「같음」으로 접지 않는다.** 구서버는 지문을 안 보내고, 빈 폴더는 예측이 없다.
+ *   둘 다 「대조 못 했다」이지 「맞았다」가 아니다.
+ */
+export type PackingGap = "match" | "gap" | "server-silent" | "local-unknown";
+
+export function judgePackingGap(local: string | null | undefined, server: string | null | undefined): PackingGap {
+    if (server === undefined || server === null) return "server-silent";
+    if (local === undefined || local === null) return "local-unknown";
+    return local === server ? "match" : "gap";
 }

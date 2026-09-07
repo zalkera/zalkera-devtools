@@ -85,7 +85,8 @@ export {
   type PackResult,
   type ZipEntry,
 } from "./zip.ts";
-export { publish, type PublishOptions, type PublishResult } from "./publish.ts";
+export { publish, judgePackingGap, type PublishOptions, type PublishResult, type PackingGap } from "./publish.ts";
+export { ledgerFacts, type LedgerSnapshot, type LedgerRow, type LedgerFacts } from "./versionLedger.ts";
 export {
   startPreview,
   type PreviewOptions,
@@ -205,8 +206,9 @@ export {
     writeSourceMarkTo,
     writeBindingMarkTo,
     linkFolderToTenant,
+    baselineOf,
 } from "./localMark.ts";
-export type { SourceMark } from "./localMark.ts";
+export type { SourceMark, Baseline } from "./localMark.ts";
 export {
     folderBinding,
     linkedTenantOf,
@@ -237,6 +239,8 @@ export {
     shortVersion,
     sourceVersionDigest,
     unwrapSingleRoot,
+    isVersionDigest,
+    VERSION_DIGEST_PATTERN,
     VERSION_DIGEST_SHORT,
     VERSION_RULE_TAG,
     type VersionEntry,

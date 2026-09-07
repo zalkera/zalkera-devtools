@@ -22,6 +22,7 @@
 import {readFile} from "node:fs/promises";
 import {join} from "node:path";
 import {ensureOwnDir, writeOwnFile} from "./safeWrite.ts";
+import {isVersionDigest} from "./sourceVersion.ts";
 
 export const SOURCE_MARK_PATH = ".zalkera/source.json";
 
@@ -40,6 +41,16 @@ export interface FetchedMark {
     /** 받은 정본 tar.gz 의 sha256. 같은 판이면 같아야 한다. */
     sha256: string;
     fetchedAt: string;
+    /**
+     * **기준점**(memo191 ⑶) — 받은 직후 이 폴더를 접은 판 지문. 지금 값이 이것과 다르면 **그 뒤로 고친 것**이다.
+     *
+     * ⚠ 구판 표식에는 없다. 없으면 「모른다」이지 「안 고쳤다」가 아니다.
+     */
+    folderVersion?: string;
+    /** 그때 서버가 그 판에 대해 말한 지문. 없으면 서버가 안 줬다는 뜻이다(지문 이전 판·구서버). */
+    serverVersion?: string | null;
+    /** 그 값을 접은 도구 판. 다르면 기준점을 **안 쓴다** — 포장 규칙은 판올림 때 태그 없이 바뀐다. */
+    tool?: string;
 }
 
 /**
@@ -52,6 +63,11 @@ export interface PublishedMark {
     tenant: string;
     revisionNo: number;
     publishedAt: string;
+    /** [FetchedMark.folderVersion] 과 같은 뜻 — 발행 직후 이 폴더를 접은 값. */
+    folderVersion?: string;
+    /** 서버가 그 발행에 대해 돌려준 지문. 이것과 [folderVersion] 이 다르면 **포장 갭**이다(memo191 ⑵). */
+    serverVersion?: string | null;
+    tool?: string;
 }
 
 /** 명시 재연결이 남기는 표식. **판 주장을 하지 않는다.** */
@@ -156,7 +172,10 @@ export function parseSourceMark(text: string | null): SourceMark | null {
         if (typeof o.revisionNo !== "number" || !Number.isInteger(o.revisionNo)) return null;
         if (typeof o.sha256 !== "string" || o.sha256.length === 0) return null;
         if (typeof o.fetchedAt !== "string") return null;
-        return {format: 1, tenant: o.tenant, revisionNo: o.revisionNo, sha256: o.sha256, fetchedAt: o.fetchedAt};
+        return {
+            format: 1, tenant: o.tenant, revisionNo: o.revisionNo, sha256: o.sha256, fetchedAt: o.fetchedAt,
+            ...baselineFields(o),
+        };
     }
     if (o.format === 2 && o.origin === "published") {
         if (typeof o.revisionNo !== "number" || !Number.isInteger(o.revisionNo)) return null;
@@ -167,6 +186,7 @@ export function parseSourceMark(text: string | null): SourceMark | null {
             tenant: o.tenant,
             revisionNo: o.revisionNo,
             publishedAt: o.publishedAt,
+            ...baselineFields(o),
         };
     }
     if (o.format === 2 && o.origin === "linked") {
@@ -174,6 +194,20 @@ export function parseSourceMark(text: string | null): SourceMark | null {
         return {format: 2, origin: "linked", tenant: o.tenant, linkedAt: o.linkedAt};
     }
     return null;
+}
+
+/**
+ * 기준점 칸만 골라 담는다. **깨진 칸은 버리되 표식 자체는 살린다** — 사람이 고칠 수 있는 파일이라
+ * 한 칸이 이상하다고 소속까지 잃으면 폴더가 남의 사이트로 보이거나 무소속이 된다.
+ *
+ * ⚠ 형식 번호를 안 올린다. 구판 판독기는 모르는 칸을 그냥 무시하므로 **아래로도 위로도 안전하다**.
+ */
+function baselineFields(o: Record<string, unknown>): {folderVersion?: string; serverVersion?: string; tool?: string} {
+    const out: {folderVersion?: string; serverVersion?: string; tool?: string} = {};
+    if (isVersionDigest(o.folderVersion)) out.folderVersion = o.folderVersion;
+    if (isVersionDigest(o.serverVersion)) out.serverVersion = o.serverVersion;
+    if (typeof o.tool === "string" && o.tool.length > 0 && o.tool.length <= 64) out.tool = o.tool;
+    return out;
 }
 
 /**
@@ -290,4 +324,39 @@ export async function linkFolderToTenant(root: string, tenant: string): Promise<
     } catch (error) {
         return {ok: false, reason: error instanceof Error ? error.message : String(error)};
     }
+}
+
+/**
+ * **기준점** — 마지막으로 서버와 맞췄던 순간의 사실(memo191 ⑶).
+ *
+ * 이 값이 있어야 「내가 고쳤다」와 「안 고쳤는데 안 맞는다」를 가를 수 있다. 지문만으로는
+ * **「안 맞는다」까지밖에** 모르고, 그 상태를 「수정 중」이라 적으면 포장 갭이 그 낱말 뒤에 숨는다.
+ */
+export interface Baseline {
+    /** 그때 맞춘 판 번호. */
+    revisionNo: number;
+    /** 그때 이 폴더를 접은 값. 지금 값과 다르면 **그 뒤로 폴더가 바뀐 것**이다. */
+    folderVersion: string;
+    /** 그때 서버가 그 판에 대해 말한 지문. 모르면 `null`(구서버·지문 이전 판). */
+    serverVersion: string | null;
+}
+
+/**
+ * 표식에서 기준점을 꺼낸다. **[tool] 이 다르면 `null`** — 포장·배제 규칙은 판올림 때 **태그 없이**
+ * 바뀐다(`.envrc` 가 그렇게 들어왔다). 낡은 판이 접은 값을 오늘 값과 비교하면 아무것도 안 고친
+ * 사람에게 「수정 중」이라 말한다.
+ *
+ * ⚠ 없으면 **중립으로 떨어진다**. 기준점이 없다고 방향이나 원인을 지어내지 않는다 —
+ *   재설치·다른 장치·콘솔 zip 으로 시작한 폴더가 전부 이 자리다.
+ */
+export function baselineOf(mark: SourceMark | null, tool: string): Baseline | null {
+    // `linked` 는 판 칸이 없다 — 소속만 아는 폴더는 기준점을 가질 수 없다.
+    if (mark === null || (mark.format === 2 && mark.origin === "linked")) return null;
+    const folderVersion = mark.folderVersion;
+    if (folderVersion === undefined || mark.tool !== tool) return null;
+    return {
+        revisionNo: mark.revisionNo,
+        folderVersion,
+        serverVersion: mark.serverVersion ?? null,
+    };
 }
