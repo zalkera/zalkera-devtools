@@ -448,22 +448,39 @@ export function sidebarPlan(state: SidebarState): PlanGroup[] {
 }
 
 /**
- * **버전 묶음이 무엇을 말하는가**(memo191). 「이 폴더」와 「켜진 판」을 **갈라서** 말한다.
+ * **버전 묶음이 무엇을 말하는가**(memo191 §12.1 — 오너가 실물을 보고 확정한 문면).
+ *
+ * ```
+ * ▾ 버전
+ *     서버 — 969a61e0 / 빌드 #4
+ *     로컬 — 969a61e0
+ * ```
  *
  * ■ 왜 두 값인가 — 오너가 세운 구분
- *   · **빌드 번호**(`빌드 #12`) — 올릴 때마다 1씩 느는 순번이다. **언제**를 말하지 **무엇**을 말하지
+ *   · **빌드 번호**(`빌드 #4`) — 올릴 때마다 1씩 느는 순번이다. **언제**를 말하지 **무엇**을 말하지
  *     않는다. CI 의 빌드 번호와 같은 역할이다.
- *   · **판 지문**(`3f8a1c9d`) — 그 판에 담긴 소스가 무엇인지를 말한다. 내 폴더도 같은 규칙으로
- *     접을 수 있어서, 이 값 하나로 「같은가」에 답이 난다.
- *   둘을 한 낱말로 부르면 「버전 3」이 무엇을 뜻하는지 아무도 말할 수 없게 된다 — 그것이 이 화면이
- *   생긴 이유다.
+ *   · **판 지문**(`969a61e0`) — 그 판에 담긴 소스가 무엇인지를 말한다. 로컬도 같은 규칙으로 접을 수
+ *     있어서, 이 값 하나로 「같은가」에 답이 난다.
+ *   둘을 한 낱말로 부르면 「버전 4」가 무엇을 뜻하는지 아무도 말할 수 없게 된다 — 이 화면이 생긴 이유다.
+ *
+ * ■ **축 이름은 「로컬 / 서버」다**
+ *   오너가 처음 물은 축이 「내 로컬 · 이 zip · 원격 서버」였으므로 화면도 그 축을 그대로 쓴다.
+ *
+ * ■ **항상 두 줄이고, 지문이 먼저다**
+ *   라벨이 둘 다 두 글자라 값이 **같은 열에 세로로 정렬**되고, 사람은 「일치」라는 낱말을 읽기 전에
+ *   두 값이 같은지를 **본다** — 판정 낱말보다 정렬이 강하다. 그래서 줄에서 판정 낱말을 걷었고,
+ *   빌드 번호는 지문을 밀지 않게 **뒤에** 붙인다(서버 줄에만 — 로컬은 그 번호를 가질 수 없다).
  *
  * ■ 값이 셋이다 — **모름을 「다름」으로도 「같음」으로도 접지 않는다**
- *   모름을 「다름」으로 접으면 근거 없이 사람을 놀래고, 「같음」으로 접으면 다른 소스를 배포한다.
- *   둘 다 틀리므로 화면도 셋을 말한다.
+ *   아이콘 셋(`pass`·`edit`·`folder`)이 가르고, 값 칸의 「지문 없음」이 함께 말한다.
+ *   그리고 `spoken` 이 같은 판정을 **소리로도** 싣는다 — 아이콘은 스크린리더가 안 읽는다.
  *
- * ■ 같으면 한 줄, 다르면 두 줄
- *   같은 값을 두 줄에 나눠 적으면 사람이 두 값을 **대조하게** 된다 — 그 대조를 없애려고 만든 화면에서.
+ * ■ **어느 쪽이 새것인지는 말하지 않는다**
+ *   지문은 순서를 안 담는다. 「낡았다」고 적으면 방금 고친 사람에게 거짓이 되고, 그 사람이 자기
+ *   작업을 서버 것으로 덮는다. 방향 판정은 별도 트랜치다(memo191 §12.2).
+ *
+ * ■ 묶음 머리에는 값을 안 둔다
+ *   바로 아래 두 줄이 같은 것을 말하므로 머리에 또 적으면 한 화면이 사실을 두 번 반복한다.
  */
 export function versionView(state: SidebarState): {
     tooltip: string;
@@ -511,8 +528,15 @@ export function versionView(state: SidebarState): {
      * 🔴 **소독기 호출은 싱크(아래 템플릿) 안에 둔다.** 종전 판은 호출부에서 `plainNotice` 를 부르고
      * 헬퍼가 `${ours(value)}` 로 받았는데, 그러면 검사기(`check-notice`)가 **눈이 먼다** — 그것은
      * 템플릿 보간만 보고, `ours(맨 식별자)` 는 표기의 본래 용도라 무조건 통과시키며, 호출부의
-     * `serverLine(theirs)` 는 템플릿이 아니라 아예 안 본다. 그 상태에서 소독을 빼도 전 게이트가
-     * 초록이었다(심의 실측).
+     * `serverLine(theirs)` 는 템플릿이 아니라 아예 안 본다.
+     *
+     * **실측**(2026-09-07 · 격리 워크트리): 수정 전 판에서 소독을 빼면 검사기 종료코드 **0**,
+     * 지금 판에서 같은 변이는 **1**. 재현:
+     * ```
+     * git worktree add --detach /tmp/wt 1bfae86 && ln -s "$PWD/node_modules" /tmp/wt/node_modules
+     * cd /tmp/wt && sed -i 's/serverLine(theirsShown)/serverLine(theirs)/g' packages/core/src/sidebarPlan.ts
+     * node scripts/check-notice.mjs; echo $?    # 0 — 눈이 멀어 있었다
+     * ```
      *
      * ⚠ **`ours` 를 서버 값에 붙이지 않는다.** 그 표기의 뜻은 「서버가 정하지 않은 값이라고 사람이
      *   판단했다」이고 **소독됐다는 사실과 다른 명제다** — 지문에 붙이면 거짓 서명이다.
@@ -526,13 +550,37 @@ export function versionView(state: SidebarState): {
         label: `서버 — ${digest === null ? "지문 없음" : plainNotice(digest, VERSION_DIGEST_SHORT)} / ${ours(build)}`,
         icon: "cloud",
     });
-    const localLine = (digest: string, icon: string, spoken: string): PlanItem => ({
-        kind: "info",
-        label: `로컬 — ${plainNotice(digest, VERSION_DIGEST_SHORT)}`,
-        icon,
-        // 아이콘을 못 보는 눈에게 판정을 나르는 유일한 자리다(위 [spoken] KDoc).
-        spoken: `로컬 — ${plainNotice(digest, VERSION_DIGEST_SHORT)} · ${ours(spoken)}`,
-    });
+    /**
+     * 로컬 줄. **판정은 키로 받고 아이콘·문면은 이 표가 소유한다.**
+     *
+     * ⚠ 종전 판은 문면을 **문자열 인자**로 받았는데, 그러면 `${ours(spoken)}` 이 맨 식별자라
+     *   검사기가 호출부를 못 본다 — 이 커밋이 방금 걷어낸 `${ours(value)}` 와 **같은 모양**이다
+     *   (보안·기능 두 축이 독립으로 짚었다). 오늘의 호출부가 전부 리터럴이라 구멍은 없었지만,
+     *   이 자리는 스크린리더 사용자에게 판정을 나르는 **유일한 매체**라 서버 문자열이 들어오면
+     *   「서버와 같음」을 위조할 수 있고 검사기는 침묵한다.
+     *
+     * ⚠ 표가 아이콘과 음성을 **함께** 들어 둘이 갈릴 수 없다 — 종전에는 호출부가 따로 넘겨
+     *   「✓ 인데 음성은 다름」이 타입으로 막히지 않았다.
+     */
+    const LOCAL_VERDICT = {
+        same: {icon: "pass", said: "서버와 같음"},
+        differs: {icon: "edit", said: "서버와 다름"},
+        unknown: {icon: "folder", said: "서버와 대조할 수 없음"},
+    } as const;
+
+    const localLine = (digest: string, verdict: keyof typeof LOCAL_VERDICT): PlanItem => {
+        const said = LOCAL_VERDICT[verdict].said;
+        return {
+            kind: "info",
+            // ⚠ **소독기 호출을 지역 변수로 빼지 않는다.** 검사기는 보간이 소독기 호출인지를 보는데,
+            //    변수를 거치면 「이 값이 소독을 지났나」를 정적으로 못 본다(실측: `shown` 으로 빼자
+            //    두 자리를 지목당했다). 같은 호출을 두 번 쓰는 값이 그 정적 판독이다.
+            label: `로컬 — ${plainNotice(digest, VERSION_DIGEST_SHORT)}`,
+            icon: LOCAL_VERDICT[verdict].icon,
+            // 아이콘을 못 보는 눈에게 판정을 나르는 유일한 자리다(위 [spoken] KDoc).
+            spoken: `로컬 — ${plainNotice(digest, VERSION_DIGEST_SHORT)} · ${ours(said)}`,
+        };
+    };
 
     // 서버 판이 지문 이전에 만들어졌다 — **대조할 근거가 없다.** 그 사실을 그대로 적는다.
     if (theirs === null) {
@@ -542,7 +590,7 @@ export function versionView(state: SidebarState): {
                 `한 번 더 올리시면 그때부터 대조됩니다.`,
             lines: [
                 serverLine(null),
-                ...(mineShort === null ? [] : [localLine(mineShort, "folder", "서버와 대조할 수 없음")]),
+                ...(mineShort === null ? [] : [localLine(mineShort, "unknown")]),
             ],
         };
     }
@@ -550,7 +598,7 @@ export function versionView(state: SidebarState): {
     if (verdict === "same") {
         return {
             tooltip: `${ours(hint)}\n로컬과 서버가 같은 소스입니다.`,
-            lines: [serverLine(theirs), localLine(mineShort ?? theirs, "pass", "서버와 같음")],
+            lines: [serverLine(theirs), localLine(mineShort ?? theirs, "same")],
         };
     }
 
@@ -561,7 +609,7 @@ export function versionView(state: SidebarState): {
             tooltip:
                 `${ours(hint)}\n로컬과 서버가 다른 소스입니다.\n` +
                 `로컬을 올리려면 「새 버전 배포」, 서버 것을 가져오려면 「서버 판으로 교체」.`,
-            lines: [serverLine(theirs), localLine(mineShort ?? "읽는 중", "edit", "서버와 다름")],
+            lines: [serverLine(theirs), localLine(mineShort ?? "읽는 중", "differs")],
         };
     }
 

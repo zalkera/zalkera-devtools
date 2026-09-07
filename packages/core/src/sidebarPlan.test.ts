@@ -519,7 +519,10 @@ test("같을 때·모를 때 툴팁이 그 사실을 말한다", () => {
  * 그대로다(`notice.ts`). 소독을 싱크에서 걷으면 이 시험이 붉어져야 한다.
  */
 test("적대 입력이 라벨에 실리지 않는다", () => {
-    const link = "](command:zalkera.reset)" + "a".repeat(40);
+    // ⚠ **8자 안에서 위험이 성립해야 한다.** 긴 페이로드(`](command:zalkera.reset)…`)는 `shortVersion`
+    //    이 **소독 전에** 잘라 `](comman` 이 되므로, 그 단언은 소독을 빼도 참이다 — 동어반복이었다
+    //    (실측: `node -e 'shortVersion(...)'`). 링크 문법이 8자 안에서 닫히는 값을 쓴다.
+    const link = "[a](b:c)" + "0".repeat(56);
     const bidi = "\u202E" + "b".repeat(63);
     // ⚠ **두 줄 다 적대값을 먹인다.** 서버 쪽만 재면 로컬 줄의 소독을 빼도 초록이다(변이 실측).
     //    로컬 값은 우리가 접지만, 소독은 「누가 만들었나」가 아니라 **어디로 나가나**로 건다.
@@ -527,7 +530,7 @@ test("적대 입력이 라벨에 실리지 않는다", () => {
         for (const [server, local] of [[digest, BBB], [AAA, digest]] as const) {
             const g = versionGroup({activeVersion: {revisionNo: 4, digest: server}, folderVersion: local});
             const text = infoLabels(g).join("\n");
-            assert.ok(!text.includes("](command:"), `링크 문법이 실렸다: ${text}`);
+            assert.ok(!/\]\(/.test(text), `링크 문법이 실렸다: ${text}`);
             assert.ok(!text.includes("\u202E"), `방향 재정의 문자가 실렸다: ${text}`);
         }
     }
