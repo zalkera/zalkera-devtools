@@ -4288,6 +4288,11 @@ async function refreshSidebar(): Promise<void> {
 
 /** 저장이 몰려 와도 훑기는 한 번이다. 사람이 손을 멈춘 뒤에 돈다. */
 let folderVersionTimer: ReturnType<typeof setTimeout> | null = null;
+/**
+ * **「확인 중」을 화면에 띄웠는가.** 띄웠으면 값이 안 바뀌었더라도 **반드시 다시 그려서 걷어야 한다** —
+ * 안 걷으면 사이드바가 그 낱말에 매달린 채 다음 명령까지 남는다.
+ */
+let folderStaleShown = false;
 const FOLDER_VERSION_DEBOUNCE_MS = 1_500;
 
 /**
@@ -4298,6 +4303,12 @@ const FOLDER_VERSION_DEBOUNCE_MS = 1_500;
  */
 function scheduleFolderVersion(): void {
   if (folderVersionTimer !== null) clearTimeout(folderVersionTimer);
+  // 🔴 **예약만 하고 다시 그리지 않으면 「확인 중」이 영영 화면에 안 뜬다.** 그 1.5초 동안 화면은
+  //    고치기 **전**의 결론(「일치」 같은)을 사실로 그리고 있다 — 저장은 사람이 「이제 이 상태다」라고
+  //    말하는 순간이라 그 자리가 곧 거짓이다(§6.5 가 없애려던 그것).
+  const first = !folderStaleShown;
+  folderStaleShown = true;
+  if (first) sidebar.update({ folderStale: true });
   folderVersionTimer = setTimeout(() => {
     folderVersionTimer = null;
     void refreshVersionsInBackground(workspaceDir() ?? null);
@@ -4320,7 +4331,11 @@ async function refreshVersionsInBackground(dir: string | null): Promise<void> {
     recomputeFolderVersion(mine === null ? null : dir, mine).catch(() => false),
     ensureActiveVersion(tenant).catch(() => false),
   ]);
-  if (!folderChanged && !activeChanged) return;
+  // ⚠ **「확인 중」을 걷는 그리기는 값이 안 바뀌어도 해야 한다.** 값이 같다고 건너뛰면 그 낱말이
+  //    화면에 남는다(저장했는데 내용이 그대로인 경우가 정확히 그 자리다).
+  const clearing = folderStaleShown;
+  folderStaleShown = false;
+  if (!folderChanged && !activeChanged && !clearing) return;
   sidebar.update({
     folderVersion: folderVersionFor(dir),
     activeVersion: activeVersionFor(tenantCode()),

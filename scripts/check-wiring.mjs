@@ -289,6 +289,19 @@ const WIRES = [
     ],
     [
         "packages/vscode/src/extension.ts",
+        "  const first = !folderStaleShown;\n  folderStaleShown = true;\n  if (first) sidebar.update({ folderStale: true });",
+        "🔴 **예약만 하고 다시 그리지 않으면 「확인 중」이 화면에 영영 안 뜬다** — 상태는 계산되는데 " +
+            "그리기가 없어 죽은 코드가 된다. 그 1.5초 동안 화면은 고치기 **전**의 결론을 사실로 그린다. " +
+            "타입도 시험도 못 잡는 자리다(값은 옳고 배선만 없다)",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "  const clearing = folderStaleShown;\n  folderStaleShown = false;\n  if (!folderChanged && !activeChanged && !clearing) return;",
+        "「확인 중」을 **걷는 그리기**가 값 비교 뒤에 있으면, 저장했는데 내용이 그대로일 때 그 낱말이 " +
+            "화면에 남는다 — 사이드바가 영구히 「확인 중」인 채로 굳는다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
         "if (result.cancelledLate) {",
         "취소가 늦었는데 **빌드 대기에 붙든다** — 그만두겠다고 한 사람을 계속 기다리게 한다. " +
             "반대로 여기서 「취소했습니다」로 접으면 판이 있는데 없다고 말하는 거짓이 된다",
