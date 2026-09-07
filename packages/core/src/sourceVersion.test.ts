@@ -18,7 +18,6 @@ import {join} from "node:path";
 import {createHash} from "node:crypto";
 import {
     compareVersions,
-    digestOfManifest,
     shortVersion,
     sourceVersionDigest,
     unwrapSingleRoot,
@@ -79,7 +78,6 @@ test("JS 기본 정렬로는 같은 답이 안 나온다 — 벡터가 정렬 �
 
 test("빈 목록은 지문이 없다 — 모름이지 같음이 아니다", () => {
     assert.equal(sourceVersionDigest([]), null);
-    assert.equal(digestOfManifest({}), null);
 });
 
 test("입력 순서를 뒤집어도 같다", () => {
@@ -123,9 +121,11 @@ test("무한히 벗기지 않는다 — 상한이 있다", () => {
 });
 
 test("감싼 폴더와 안 감싼 폴더는 같은 판이다", () => {
-    const flat = {"index.html": {sha256: "aa".repeat(32)}, "a/b.css": {sha256: "bb".repeat(32)}};
-    const wrapped = {"mysite/index.html": {sha256: "aa".repeat(32)}, "mysite/a/b.css": {sha256: "bb".repeat(32)}};
-    assert.equal(digestOfManifest(flat), digestOfManifest(wrapped));
+    const fold = (paths: string[]) => {
+        const unwrapped = unwrapSingleRoot(paths);
+        return sourceVersionDigest(paths.map((_, i) => ({path: unwrapped[i]!, sha256: "aa".repeat(32)})));
+    };
+    assert.equal(fold(["index.html", "a/b.css"]), fold(["mysite/index.html", "mysite/a/b.css"]));
 });
 
 test("래퍼 경로를 안 벗기면 다른 판이 된다 — 언랩이 규칙의 일부인 근거", () => {
@@ -157,4 +157,20 @@ test("한쪽이라도 모르면 판정은 모름이다 — 다름이 아니다",
     assert.equal(compareVersions(null, null), "unknown");
     assert.equal(compareVersions(a, a), "same");
     assert.equal(compareVersions(a, "bb".repeat(32)), "differs");
+});
+
+/**
+ * 🔴 **서버가 정하는 값이라 형이 보장되지 않는다.** 종전 판은 `slice` 를 바로 불러 숫자·불린·객체에
+ * `TypeError` 를 던졌고, 그 예외가 트리 `getChildren` 까지 올라가 **사이드바 전체가 안 그려졌다**.
+ */
+test("지문이 문자열이 아니면 모름이다 — 던지지 않는다", () => {
+    for (const bad of [12345678, true, {}, ["a"], 0, Number.NaN]) {
+        assert.equal(shortVersion(bad), null, `${JSON.stringify(bad)} 에서 값을 지어냈다`);
+        assert.equal(compareVersions(bad, "aa".repeat(32)), "unknown");
+        assert.equal(compareVersions("aa".repeat(32), bad), "unknown");
+    }
+});
+
+test("빈 문자열도 모름이다 — 둘 다 빈 값이면 「같음」이 되던 자리", () => {
+    assert.equal(compareVersions("", ""), "unknown");
 });

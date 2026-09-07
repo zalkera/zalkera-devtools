@@ -234,7 +234,6 @@ export { idleStatusPlan, type StatusPlan } from "./statusPlan.ts";
 export type { PlanGroup, PlanItem, SidebarState } from "./sidebarPlan.ts";
 export {
     compareVersions,
-    digestOfManifest,
     shortVersion,
     sourceVersionDigest,
     unwrapSingleRoot,
@@ -242,6 +241,8 @@ export {
     VERSION_RULE_TAG,
     type VersionEntry,
 } from "./sourceVersion.ts";
+export { folderVersionDigest } from "./folderVersion.ts";
+export { serverExcluded, SERVER_NORMALIZATION_SETS } from "./serverNormalization.ts";
 export {
     SYNC_LEDGER_FORMAT,
     SYNC_LEDGER_PATH,

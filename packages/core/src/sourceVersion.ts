@@ -29,9 +29,13 @@
  *     화해 경로다.
  *
  * ■ 규칙이 두 레포에 있다 — 그 드리프트를 무엇이 잡나
- *   컴파일도 CI 도 못 잡는다(레포가 다르다). **발행 직후 예측과 서버 답을 대조하는 것**이 유일한
- *   그물이다(`compareAfterPublish`). 골든 벡터는 같은 규칙이라는 확신을 주지만, 벡터 파일 자체가
- *   낡으면 조용하다.
+ *   타입도 컴파일도 못 잡는다(레포가 다르다). 지금 서 있는 그물은 둘이다:
+ *   · 백엔드 게이트 `detect-version-digest-parity.py` — 규칙 태그·표시 폭·언랩 깊이와
+ *     **골든 벡터 파일 바이트**를 대사한다. 벡터가 낡는 자리를 그것이 막는다.
+ *   · 두 레포 각자의 골든 벡터 시험 — 알고리즘 본문이 규칙대로인가.
+ *
+ *   ⚠ **안 서 있는 것**: 배포된 vsix 가 낡은 판일 때는 위 둘 다 못 본다(대사기는 소스를 본다).
+ *     발행 직후 예측과 서버 답을 런타임에 대조하는 축은 **아직 안 지었다**(memo191 §12).
  */
 import {createHash} from "node:crypto";
 import {Buffer} from "node:buffer";
@@ -83,7 +87,7 @@ export function unwrapSingleRoot(paths: readonly string[]): string[] {
 /**
  * [entries] 의 판 지문(소문자 hex 64자). 빈 목록이면 `null`(= 모름 — 「같음」이 아니다).
  *
- * 입력 경로는 **이미 정규화된** 상대경로여야 한다. 언랩은 [digestOfManifest] 가 해 준다.
+ * 입력 경로는 **이미 정규화된** 상대경로여야 한다. 언랩은 부르는 쪽이 한다([unwrapSingleRoot]) — 서버는 배제 **전** 목록으로 래퍼를 판정하므로 순서가 규칙의 일부다.
  */
 export function sourceVersionDigest(entries: readonly VersionEntry[]): string | null {
     if (entries.length === 0) return null;
@@ -97,21 +101,17 @@ export function sourceVersionDigest(entries: readonly VersionEntry[]): string | 
     return hash.digest("hex");
 }
 
-/**
- * 작업본 매니페스트(`hashWorkdir` 의 결과 형식)를 지문으로 접는다 — 언랩까지 여기서 한다.
- *
- * 형식을 `Record<path, {sha256}>` 로 받는 이유는 그것이 이미 손에 있는 값이기 때문이다.
- * 새로 훑지 않는다.
- */
-export function digestOfManifest(manifest: Readonly<Record<string, {sha256: string}>>): string | null {
-    const paths = Object.keys(manifest);
-    const unwrapped = unwrapSingleRoot(paths);
-    return sourceVersionDigest(paths.map((p, i) => ({path: unwrapped[i]!, sha256: manifest[p]!.sha256})));
-}
 
-/** 화면용 축약. 모르면 `null` — 부르는 쪽이 「모름」 문장을 낸다(빈 문자열로 접으면 「같음」처럼 보인다). */
-export function shortVersion(digest: string | null | undefined): string | null {
-    if (!digest || digest.length < VERSION_DIGEST_SHORT) return null;
+/**
+ * 화면용 축약. 모르면 `null` — 부르는 쪽이 「모름」 문장을 낸다(빈 문자열로 접으면 「같음」처럼 보인다).
+ *
+ * ⚠ **타입을 먼저 본다.** 종전 판은 `!digest` 만 보고 `slice` 를 불러, 서버가 `versionDigest` 에
+ *   숫자·불린·객체를 주면 `TypeError` 를 던졌다. 그 예외는 `sidebarPlan` 을 거쳐 트리 `getChildren`
+ *   까지 올라가 **사이드바 전체가 안 그려지고** 다음 발행·전환까지 복구되지 않는다(심의 실측).
+ *   형제 `count` 가 비숫자를 거부하는 것과 같은 이유다 — 이 값을 정하는 것은 서버다.
+ */
+export function shortVersion(digest: unknown): string | null {
+    if (typeof digest !== "string" || digest.length < VERSION_DIGEST_SHORT) return null;
     return digest.slice(0, VERSION_DIGEST_SHORT);
 }
 
@@ -121,7 +121,8 @@ export function shortVersion(digest: string | null | undefined): string | null {
  * ⚠ 모름을 「다름」으로 접으면 화면이 근거 없이 사람을 놀래고, 「같음」으로 접으면 다른 소스를 배포한다.
  *   둘 다 틀리므로 값이 셋이다.
  */
-export function compareVersions(mine: string | null, theirs: string | null): "same" | "differs" | "unknown" {
-    if (!mine || !theirs) return "unknown";
+export function compareVersions(mine: unknown, theirs: unknown): "same" | "differs" | "unknown" {
+    // 문자열이 아니면 **모름**이다 — 서버가 준 값이라 형이 보장되지 않는다([shortVersion] 의 그 자리).
+    if (typeof mine !== "string" || typeof theirs !== "string" || mine === "" || theirs === "") return "unknown";
     return mine === theirs ? "same" : "differs";
 }

@@ -108,8 +108,7 @@ import {
   type ReflectionState,
   SOURCE_MARK_PATH,
   type SourceMark,
-  digestOfManifest,
-  hashWorkdir,
+  folderVersionDigest,
 } from "@zalkera/devtools-core";
 import { lstatSync, readFileSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm } from "node:fs/promises";
@@ -263,16 +262,28 @@ function canSwitchCached(): boolean | null {
 /**
  * **서버에서 켜져 있는 판.** `null` = 아직 모름.
  *
+ * 🔴 **테넌트를 함께 든다.** 종전 판은 값만 들어서, 사이트 A 를 보다 B 로 전환하면 상단은 B 인데
+ *   「버전」 묶음은 **A 의 판**을 그대로 말했다 — 사용자는 B 가 최신이라 읽고 배포를 건너뛴다.
+ *   쓰기 지점마다 잊게 하는 방식은 다섯째 지점이 생기는 날 다시 샌다. 키를 들면 **구조적으로** 못 샌다.
+ *
  * ⚠ **저장하지 않는다**(형제 `canSwitch` 와 다르다). 「지금 무엇이 켜져 있나」는 다른 창·콘솔·AI 가
  *   바꿀 수 있어서, 창을 다시 열었을 때 지난 세션의 값을 사실로 그리면 **틀린 확답**이 된다.
- *   계정 수(`canSwitch`)는 그렇게 자주 안 변해서 저장이 값싸지만 이건 아니다.
  */
-let activeVersionCache: {revisionNo: number; digest: string | null} | null = null;
+let activeVersionCache: { tenant: string; revisionNo: number; digest: string | null } | null = null;
 /** 조회를 한 번이라도 마쳤는가 — 「켜진 판이 없다」와 「아직 안 물어봤다」를 가른다. */
 let activeVersionAsked = false;
 /** 이 폴더의 판. 키를 폴더 경로로 두어 **다른 폴더의 값을 물려받지 않는다.** */
-let folderVersionCache: {dir: string; digest: string | null} | null = null;
+let folderVersionCache: { dir: string; digest: string | null } | null = null;
 let folderVersionRunning = false;
+/** 훑는 중에 온 요청 — **버리지 않고 모아 둔다**(아래 [recomputeFolderVersion]). */
+let folderVersionPending = false;
+
+/** 지금 창의 사이트가 켜 놓은 판. **다른 사이트 것이면 모름이다.** */
+function activeVersionFor(tenant: string): { revisionNo: number; digest: string | null } | null {
+  const c = activeVersionCache;
+  if (c === null || tenant === "" || c.tenant !== tenant) return null;
+  return { revisionNo: c.revisionNo, digest: c.digest };
+}
 
 /**
  * 지금 폴더의 판. **캐시가 다른 폴더 것이면 모름이다** — 폴더를 옮겼는데 앞 폴더의 값을 그리면
@@ -286,12 +297,18 @@ function folderVersionFor(dir: string | null | undefined): string | null {
 
 /**
  * **이미 손에 든 목록에서 켜진 판을 적어 둔다 — 새 조회가 0이다**(`canSwitch` 와 같은 수법).
- * 목록을 받는 자리마다 부르면 사이드바가 공짜로 최신이 된다.
+ * [tenant] 는 그 목록을 **받아 온** 사이트다 — 지금 창의 사이트와 다를 수 있다(`runElsewhere`).
  */
-function noteRevisions(revisions: readonly {revisionNo: number; isActive: boolean; versionDigest?: string | null}[]): void {
+function noteRevisions(
+  tenant: string,
+  revisions: readonly { revisionNo: number; isActive: boolean; versionDigest?: string | null }[],
+): void {
+  if (tenant === "") return;
   activeVersionAsked = true;
   const active = revisions.find((r) => r.isActive);
-  activeVersionCache = active ? {revisionNo: active.revisionNo, digest: active.versionDigest ?? null} : null;
+  activeVersionCache = active
+    ? { tenant, revisionNo: active.revisionNo, digest: active.versionDigest ?? null }
+    : null;
 }
 
 /**
@@ -305,22 +322,28 @@ function forgetActiveVersion(): void {
   activeVersionAsked = false;
 }
 
-/** 계정·사이트가 바뀌면 **앞사람의 사실**을 지운다. 다음 갱신이 다시 묻는다. */
+/** 계정이 바뀌면 **앞사람의 사실**을 지운다. 다음 갱신이 다시 묻는다. */
 function forgetVersions(): void {
   forgetActiveVersion();
   folderVersionCache = null;
 }
 
 /**
- * 켜진 판을 아직 모르면 한 번 묻는다. **실패해도 조용하다** — 이건 표시용 값이고, 여기서 오류
- * 창을 띄우면 사이드바를 새로 그릴 때마다 사람을 방해한다.
+ * 켜진 판을 아직 모르면 한 번 묻는다. **실패해도 조용하다** — 표시용 값이고, 여기서 오류 창을
+ * 띄우면 사이드바를 새로 그릴 때마다 사람을 방해한다.
+ *
+ * 🔴 **대화형 경로를 배경에서 부르지 않는다.** `ensureApiFor` → `chooseTenant` 는 세션이 없으면
+ *   `signIn()` 을 불러 **브라우저를 연다.** 종전 판은 게이트가 없어 로그아웃 직후 사이드바 갱신이
+ *   곧바로 로그인 창을 띄웠고, 취소하면 다음 명령마다 또 떴다(심의 실측). 세션과 사이트가
+ *   **이미 정해져 있을 때만** 묻는다 — 그 상태에서는 `chooseTenant` 가 아무것도 안 묻는다.
  */
-async function ensureActiveVersion(): Promise<boolean> {
-  if (activeVersionAsked) return false;
+async function ensureActiveVersion(tenant: string): Promise<boolean> {
+  if (activeVersionAsked || tenant === "") return false;
+  if ((await store.read()) === null) return false;
   activeVersionAsked = true;
   try {
-    const {api} = await ensureApiFor();
-    noteRevisions(await api.listRevisions());
+    const { api } = await ensureApiFor();
+    noteRevisions(tenant, await api.listRevisions());
     return true;
   } catch {
     // 못 물어봤다 — 다음 갱신에서 다시 묻도록 되돌린다(영구 모름으로 굳지 않게).
@@ -330,23 +353,37 @@ async function ensureActiveVersion(): Promise<boolean> {
 }
 
 /**
- * 이 폴더의 판을 다시 읽는다. **파일을 흘려 읽어 해시만 남긴다**(`hashWorkdir`).
+ * 이 폴더의 판을 다시 읽는다 — **지금 올리면 서버에 남을 판**(`folderVersionDigest`).
  *
- * ⚠ 실패는 **모름**이다(`null`) — 파일이 너무 많거나 못 읽는 폴더에서 「다름」이라 말하면 근거 없이
- *   사람을 놀래고, 「같음」이라 말하면 다른 소스를 배포한다.
+ * 🔴 **아무 폴더나 훑지 않는다.** 종전 판은 게이트가 없어, 잘커라와 무관한 폴더를 연 창에서도
+ *   활성화 때와 명령마다 전량을 해시했다(심의 실측: 16,047파일 179MB 트리에서 2.0초). 사이트에
+ *   묶인 폴더일 때만 돈다 — 안 묶인 폴더는 견줄 대상도 없다.
+ *
+ * ⚠ 실패는 **모름**이다(`null`) — 못 읽는 폴더에서 「다름」이라 하면 근거 없이 놀래고, 「같음」이라
+ *   하면 다른 소스를 배포한다.
+ *
+ * ⚠ 훑는 중에 온 요청은 **버리지 않는다.** 종전 판은 그냥 돌아가서, 「zip 으로 교체」 직후처럼
+ *   내용이 막 바뀐 자리에서 **교체 전 값이 그대로 앉았다**. 표시해 두었다가 끝나고 한 번 더 돈다.
  */
-async function recomputeFolderVersion(dir: string | null): Promise<boolean> {
-  if (dir === null) {
+async function recomputeFolderVersion(dir: string | null, tenant: string | null): Promise<boolean> {
+  if (dir === null || tenant === null) {
     const had = folderVersionCache !== null;
     folderVersionCache = null;
     return had;
   }
-  if (folderVersionRunning) return false;
+  if (folderVersionRunning) {
+    folderVersionPending = true;
+    return false;
+  }
   folderVersionRunning = true;
   try {
-    const digest = await hashWorkdir(dir).then(digestOfManifest).catch(() => null);
-    const changed = folderVersionCache?.dir !== dir || folderVersionCache?.digest !== digest;
-    folderVersionCache = {dir, digest};
+    let changed = false;
+    do {
+      folderVersionPending = false;
+      const digest = await folderVersionDigest(dir, tenant).catch(() => null);
+      changed = changed || folderVersionCache?.dir !== dir || folderVersionCache?.digest !== digest;
+      folderVersionCache = { dir, digest };
+    } while (folderVersionPending);
     return changed;
   } finally {
     folderVersionRunning = false;
@@ -538,7 +575,13 @@ export function activate(context: vscode.ExtensionContext): void {
     status,
     diagnostics,
     // F2 — 저장할 때와 열 때 본다. 타이핑마다 돌리지 않는다(계약 위반은 저장 시점에 확인해도 늦지 않다).
-    vscode.workspace.onDidSaveTextDocument((doc) => refreshDiagnostics(doc)),
+    vscode.workspace.onDidSaveTextDocument((doc) => {
+      refreshDiagnostics(doc);
+      // 🔴 **고친 뒤에도 「같음」이 남으면 그 화면은 거짓이다**(memo191 §6.5). 저장은 사람이
+      //    「이제 이 상태다」라고 말하는 순간이고, 판 지문이 다시 서야 하는 자리다.
+      //    ⚠ 저장마다 폴더 전량을 해시하지 않는다 — 묶어서 한 번 돈다(`scheduleFolderVersion`).
+      scheduleFolderVersion();
+    }),
     vscode.workspace.onDidOpenTextDocument((doc) => refreshDiagnostics(doc)),
     // F1 — 되돌리기 어려운 자리를 **막지 않고 알린다**(고객 소스는 고객 것이다).
     // ⚠ **여는 것이 아니라 고칠 때 본다.** 읽으려고 여는 것은 해가 없고, 손해는 타이핑을
@@ -1030,7 +1073,8 @@ async function openSite(pinned?: CapturedTenant): Promise<void> {
   // 잡는다.
   const revisions = await api.listRevisions();
   // 이미 손에 든 목록이다 — 사이드바의 「켜진 판」이 공짜로 최신이 된다(memo191).
-  noteRevisions(revisions);
+  // ⚠ **목록을 받아 온 사이트**를 함께 적는다 — 이 문은 다른 사이트를 겨눌 수 있다(`pinned`).
+  noteRevisions(tenant, revisions);
   const choice = pickRevision(revisions);
   // 「없다」의 이유는 둘이고 다음에 할 일이 정반대다 — 판정은 core 가 한다(`noRevisionError`).
   if (!choice) throw noRevisionError(revisions);
@@ -1495,7 +1539,7 @@ async function downloadSourceZipCommand(): Promise<void> {
   // `openSite` 와 같은 규율 — 판을 **먼저 정한다.** 코어 폴백에 맡기면 화면에 말한 판과 받는 판이
   // 갈릴 수 있고, 켜진 판이 없을 때 목록 첫 줄(BUILDING 일 수 있다)을 잡는다.
   const revisions = await api.listRevisions();
-  noteRevisions(revisions);
+  noteRevisions(tenant, revisions);
   const choice = pickRevision(revisions);
   if (!choice) throw noRevisionError(revisions);
   if (choice.why === "latest-ready") log(say.pickedLatestReady(tenant, choice.revisionNo));
@@ -2064,7 +2108,7 @@ async function updateFromServerCommand(): Promise<void> {
   //    다운로드가 준 것과 이 문이 준 것이 다른」 날이 온다. 형제 셋이 전량을 읽으므로 여기도
   //    전량이다 — 페이지를 걸면 활성 판이 그 밖으로 밀린 사이트에서 **다른 판을 갈아 끼운다.**
   const revisions = await api.listRevisions();
-  noteRevisions(revisions);
+  noteRevisions(tenant, revisions);
   const picked = pickRevision(revisions);
   if (picked === null) throw noRevisionError(revisions);
   // ⚠ **켜져 있는 판이 아닐 때는 말한다.** 사이드바 툴팁이 「서버에 **켜져 있는** 판」이라고
@@ -2290,6 +2334,7 @@ async function switchVersion(): Promise<void> {
   log(said);
   // 포인터가 움직였을 수 있다 — 다음 갱신이 다시 묻게 한다(memo191).
   forgetActiveVersion();
+  void refreshSidebar();
   void vscode.window.showInformationMessage(said);
 }
 
@@ -3043,7 +3088,10 @@ async function announcePublished(
   //    붙은 마침표까지 주소로 먹는 자리가 있다.
   log(`버전 ${revisionNo} 게시됐습니다.${site ? ` ${site.url}` : ""}`);
   // 켜진 판이 방금 바뀌었다 — 안 잊으면 사이드바가 옛 판을 사실로 그린다(memo191).
+  // ⚠ **잊는 것만으로는 화면이 안 바뀐다.** 다시 그리지 않으면 방금 올린 사람이 다음 명령까지
+  //    옛 판을 본다 — 그 화면은 「다름」이라 말한다.
   forgetActiveVersion();
+  void refreshSidebar();
   // ⚠ **단추에 어디로 가는지 적는다.** 주소는 서버가 준 값이고 우리는 그것을 보증하지 못한다 —
   //    「사이트 열기」라고만 쓰면 **우리 이름으로 뜬 단추**가 사람을 아무 데나 데려갈 수 있고,
   //    데스크톱에서 http(s) 는 확인 대화 없이 열린다. 호스트를 보이면 사람이 판단할 수 있다.
@@ -3276,7 +3324,8 @@ async function connectAgent(): Promise<void> {
 async function showHistory(): Promise<void> {
   const api = await ensureApi();
   const revisions = await api.listRevisions();
-  noteRevisions(revisions);
+  // 이 문은 `ensureApi()` 라 캡처된 테넌트가 없다 — 창의 설정값이 곧 이 목록의 주인이다.
+  noteRevisions(tenantCode(), revisions);
   if (revisions.length === 0) {
     void vscode.window.showInformationMessage("아직 올린 버전이 없습니다.");
     return;
@@ -4137,7 +4186,8 @@ async function refreshSidebar(): Promise<void> {
     // 여기서는 **손에 있는 값만** 넘긴다. 둘 다 읽는 데 시간이 걸려(폴더 훑기·조회) 여기서 기다리면
     // 사이드바가 명령마다 굳는다. 새 값은 아래에서 뒤로 읽고, 달라졌을 때만 다시 그린다.
     folderVersion: folderVersionFor(dir),
-    activeVersion: activeVersionCache,
+    // 지금 창의 사이트가 켜 놓은 판만 본다 — 앞 사이트 값이 남으면 화면이 남의 판을 말한다.
+    activeVersion: activeVersionFor(tenantCode()),
     // 사이트의 판이 아니라 **이 확장의 판**이다 — 묶음이 갈라져 있다(`sidebarPlan`).
     extensionVersion,
   });
@@ -4146,20 +4196,44 @@ async function refreshSidebar(): Promise<void> {
   void refreshVersionsInBackground(dir ?? null);
 }
 
+/** 저장이 몰려 와도 훑기는 한 번이다. 사람이 손을 멈춘 뒤에 돈다. */
+let folderVersionTimer: ReturnType<typeof setTimeout> | null = null;
+const FOLDER_VERSION_DEBOUNCE_MS = 1_500;
+
+/**
+ * 저장 뒤 이 폴더의 판을 다시 읽는다 — **묶어서 한 번**.
+ *
+ * ⚠ 저장 하나마다 훑으면 큰 폴더에서 저장이 곧 정지가 된다. 반대로 안 훑으면 고친 뒤에도
+ *   화면이 「같음」을 그대로 말한다 — 그쪽이 더 나쁘다(거짓 확답).
+ */
+function scheduleFolderVersion(): void {
+  if (folderVersionTimer !== null) clearTimeout(folderVersionTimer);
+  folderVersionTimer = setTimeout(() => {
+    folderVersionTimer = null;
+    void refreshVersionsInBackground(workspaceDir() ?? null);
+  }, FOLDER_VERSION_DEBOUNCE_MS);
+}
+
 /**
  * 판 값 둘을 뒤로 읽고, **달라졌을 때만** 사이드바를 다시 그린다.
  *
  * ⚠ `refreshSidebar()` 를 다시 부르지 않는다 — 그러면 이 함수가 자기를 다시 부르는 고리가 된다.
  */
 async function refreshVersionsInBackground(dir: string | null): Promise<void> {
+  const tenant = tenantCode();
+  // ⚠ **폴더가 이 사이트 것일 때만 훑는다.** 안 묶인 폴더는 견줄 대상이 없고, 어긋난 폴더의 값을
+  //    이 사이트 옆에 그리면 화면이 남의 폴더를 이 사이트라고 말한다. 게이트가 없던 종전 판은
+  //    잘커라와 무관한 폴더까지 명령마다 전량 해시했다(심의 실측 2.0초/16k파일).
+  const bound = currentFolderBinding();
+  const mine = bound !== null && tenant !== "" && bound === tenant ? tenant : null;
   const [folderChanged, activeChanged] = await Promise.all([
-    recomputeFolderVersion(dir).catch(() => false),
-    ensureActiveVersion().catch(() => false),
+    recomputeFolderVersion(mine === null ? null : dir, mine).catch(() => false),
+    ensureActiveVersion(tenant).catch(() => false),
   ]);
   if (!folderChanged && !activeChanged) return;
   sidebar.update({
     folderVersion: folderVersionFor(dir),
-    activeVersion: activeVersionCache,
+    activeVersion: activeVersionFor(tenantCode()),
   });
 }
 
