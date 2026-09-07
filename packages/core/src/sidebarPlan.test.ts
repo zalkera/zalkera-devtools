@@ -917,6 +917,15 @@ test("적대 판 번호는 접미 자리로도 못 샌다", () => {
     });
     const all = infoLabels(g).join("\n");
     assert.ok(!all.includes("](b:c)"), `접미 자리로 링크가 샜다: ${all}`);
+    // 양성 짝 — 정상 번호면 접미 A 가 실제로 뜬다. 부정 단언 혼자 서 있으면 접미를 통째로 지워도 초록이다.
+    assert.deepEqual(
+        infoLabels(versionGroup({
+            activeVersion: {revisionNo: 5, digest: AAA},
+            folderVersion: BBB,
+            ledger: ledgerOf([3, AAA], [4, BBB], [5, AAA]),
+        })),
+        ["서버 — aaaaaaaa / 빌드 #5 · #3 내용", "로컬 — bbbbbbbb / 빌드 #4 내용"],
+    );
 });
 
 /**
