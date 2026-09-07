@@ -431,3 +431,95 @@ test("🔴 **묶음 목록을 나열하는 자리들이 실물과 같다** — �
         );
     }
 });
+
+// ── 버전 묶음: 빌드 번호와 판 지문을 가른다(memo191) ──────────────────────────
+
+/** 소스가 붙은 정상 상태 — 버전 줄이 서는 칸이다. */
+const WITH_SOURCE: SidebarState = {...base, site: "/x", folderTenant: "credium", folderPath: "/x"};
+const versionGroup = (state: Partial<SidebarState>) =>
+    sidebarPlan({...WITH_SOURCE, ...state}).find((g) => g.id === "version")!;
+type Items = {items: {kind: string; label: string}[]};
+const labelsOf = (g: Items) => g.items.map((i) => i.label);
+const infoLabels = (g: Items) => g.items.filter((i) => i.kind === "info").map((i) => i.label);
+
+const AAA = "aa".repeat(32);
+const BBB = "bb".repeat(32);
+
+test("버전 묶음은 켜진 판을 모르면 지어내지 않는다", () => {
+    const g = versionGroup({activeVersion: null, folderVersion: AAA});
+    assert.deepEqual(infoLabels(g), [], "모르는 것을 적었다");
+    // 그래도 명령 둘은 그대로 선다 — 묶음이 상태에 따라 줄어들면 「고장」으로 읽힌다.
+    assert.ok(labelsOf(g).includes("버전 이력"));
+    assert.ok(labelsOf(g).includes("버전 전환"));
+});
+
+test("같으면 한 줄로 말한다 — 같은 값을 두 줄에 나누면 사람이 대조하게 된다", () => {
+    const g = versionGroup({activeVersion: {revisionNo: 12, digest: AAA}, folderVersion: AAA});
+    assert.deepEqual(infoLabels(g), ["이 폴더 = 켜진 판 — 빌드 #12 · aaaaaaaa"]);
+    assert.equal(g.description, "빌드 #12 · 같음");
+});
+
+test("다르면 두 줄로 갈라 적는다", () => {
+    const g = versionGroup({activeVersion: {revisionNo: 12, digest: BBB}, folderVersion: AAA});
+    assert.deepEqual(infoLabels(g), ["이 폴더 — aaaaaaaa", "켜진 판 — 빌드 #12 · bbbbbbbb"]);
+    assert.equal(g.description, "빌드 #12 · 다름");
+});
+
+/**
+ * 🔴 **어느 쪽이 새것인지 우리는 모른다.** 지문은 순서를 안 담는다 — 「낡았다」·「뒤처졌다」로 적으면
+ * 방금 고친 사람에게 거짓이 되고, 그 사람이 자기 작업을 서버 것으로 덮는다.
+ */
+test("다름을 「낡음」으로 말하지 않는다", () => {
+    const g = versionGroup({activeVersion: {revisionNo: 12, digest: BBB}, folderVersion: AAA});
+    const text = [...infoLabels(g), g.description ?? "", g.tooltip ?? ""].join("\n");
+    for (const forbidden of ["낡", "뒤처", "오래된", "최신이 아"]) {
+        assert.ok(!text.includes(forbidden), `순서를 단정했다: '${forbidden}'`);
+    }
+});
+
+test("켜진 판에 지문이 없으면 「같다」고 말하지 않는다", () => {
+    const g = versionGroup({activeVersion: {revisionNo: 3, digest: null}, folderVersion: AAA});
+    assert.deepEqual(infoLabels(g), ["켜진 판 — 빌드 #3 · 지문 없음", "이 폴더 — aaaaaaaa"]);
+    assert.equal(g.description, "빌드 #3");
+    assert.ok(!(g.description ?? "").includes("같음"), "모름을 같음으로 접었다");
+    assert.ok(!(g.description ?? "").includes("다름"), "모름을 다름으로 접었다");
+});
+
+test("내 폴더를 모르면 아는 쪽만 적는다", () => {
+    const g = versionGroup({activeVersion: {revisionNo: 7, digest: BBB}, folderVersion: null});
+    assert.deepEqual(infoLabels(g), ["켜진 판 — 빌드 #7 · bbbbbbbb"]);
+    assert.equal(g.description, "빌드 #7");
+});
+
+/**
+ * ⚠ **빌드 번호는 「무엇이 담겼는가」를 말하지 않는다.** 두 판의 지문이 같은데 번호만 다를 수 있고
+ * (되돌리기가 그렇다 — 같은 트리로 새 번호를 낸다), 그때 화면이 「다름」이라 말하면 거짓이다.
+ */
+test("번호가 달라도 지문이 같으면 같음이다 — 되돌린 판이 그 형상이다", () => {
+    const g = versionGroup({activeVersion: {revisionNo: 99, digest: AAA}, folderVersion: AAA});
+    assert.equal(g.description, "빌드 #99 · 같음");
+});
+
+test("확장 판은 「버전」이 아니라 「도움」에 선다 — 사이트 판과 다른 축이다", () => {
+    const plan = sidebarPlan({...WITH_SOURCE, extensionVersion: "0.26.0"});
+    const help = plan.find((g) => g.id === "help")!;
+    const version = plan.find((g) => g.id === "version")!;
+    assert.ok(infoLabels(help).includes("확장 0.26.0"));
+    assert.ok(!infoLabels(version).some((l) => l.includes("0.26.0")), "확장 판이 사이트 판 옆에 섰다");
+});
+
+test("확장 판을 모르면 그 줄이 없다", () => {
+    const help = sidebarPlan(WITH_SOURCE).find((g) => g.id === "help")!;
+    assert.ok(!infoLabels(help).some((l) => l.startsWith("확장 ")));
+});
+
+/** 새 필드를 안 넘기는 부르는 쪽(라벨 검사기가 그렇다)이 터지지 않아야 한다. */
+test("버전 필드를 안 넘겨도 선다", () => {
+    const bare = {
+        signedIn: true, tenant: "t", site: "/x", previewUrl: null, keyExpiresAt: null,
+        folderTenant: "t", folderPath: "/x", canSwitch: null,
+    } as SidebarState;
+    const g = sidebarPlan(bare).find((x) => x.id === "version")!;
+    assert.deepEqual(infoLabels(g), []);
+    assert.equal(g.description, undefined);
+});

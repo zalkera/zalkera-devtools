@@ -13,7 +13,8 @@
  */
 
 import {displayPath} from "./displayPath.ts";
-import {ours, plainNotice} from "./notice.ts";
+import {count, ours, plainNotice} from "./notice.ts";
+import {compareVersions, shortVersion, VERSION_DIGEST_SHORT} from "./sourceVersion.ts";
 
 export interface SidebarState {
     signedIn: boolean;
@@ -58,6 +59,31 @@ export interface SidebarState {
      *   기계에 따라 갈린다. 확장이 `node:os` 의 `homedir()` 로 넘긴다.
      */
     home?: string | null;
+    /**
+     * **이 폴더의 판 지문**(memo191). 없거나 `null` 이면 **모름**(열린 폴더가 없거나 아직 안 읽었다).
+     *
+     * ⚠ 뜻은 「지금 이 폴더를 올리면 서버에 남을 판」이다 — 우리 포장 규칙을 지난 목록으로 접기
+     *   때문이다(`sourceVersion.ts`). 「서버가 저장한 바이트 그대로」가 아니다.
+     */
+    folderVersion?: string | null;
+    /**
+     * **서버에서 켜져 있는 판.** 없거나 `null` 이면 모름(로그인 전·조회 전·조회 실패).
+     *
+     * `revisionNo` 는 **빌드 번호**다 — 올릴 때마다 1씩 느는 순번이고 「무엇이 담겼는가」는 말하지
+     * 않는다. 그것을 말하는 것은 `digest` 이고, 그 값이 `null` 이면 **지문 이전에 만들어진 판**이다.
+     *
+     * ⚠ **둘을 한 낱말로 부르지 마라.** 오너가 이 구분을 세운 이유가 그것이다 — 「버전 3」이 무엇을
+     *   뜻하는지 아무도 말할 수 없었다.
+     */
+    activeVersion?: {revisionNo: number; digest: string | null} | null;
+    /**
+     * **이 확장 자신의 판**(예: `0.25.0`). 확장이 자기 `package.json` 에서 읽어 넘긴다 —
+     * 판정이 스스로 읽으면 시험이 배포 형상에 매인다.
+     *
+     * ⚠ **사이트의 판과 다른 축이다.** 그래서 「버전」 묶음이 아니라 「도움」에 둔다 — 한 자리에
+     *   섞으면 지금 없애려는 혼선을 우리가 다시 만든다.
+     */
+    extensionVersion?: string | null;
 }
 
 /**
@@ -370,14 +396,19 @@ export function sidebarPlan(state: SidebarState): PlanGroup[] {
     });
 
     {
+        const version = versionView(state);
         groups.push({
             id: "version",
             label: "버전",
             icon: "history",
+            // **접어도 보이는 자리다.** 사이트 묶음이 사이트 코드를 여기 두는 것과 같은 이유로,
+            // 「지금 무엇이 켜져 있고 내 폴더가 그것과 같은가」를 한 눈에 둔다.
+            description: version.summary,
             // 「되돌리기」가 아니라 「버전」이다 — 여기서 하는 일은 **어느 버전을 켤지 고르는 것**이고,
             // 뒤로 가는 것은 그 한 경우일 뿐이다(오너 확정).
-            tooltip: "어느 버전을 켤지 정합니다",
+            tooltip: version.tooltip,
             items: [
+                ...version.lines,
                 act("버전 이력", "zalkera.history", "list-flat", "읽기 전용 — 아무것도 바뀌지 않습니다"),
                 act("버전 전환", "zalkera.version.switch", "arrow-swap", "방문자가 보는 화면이 바로 바뀝니다"),
             ],
@@ -394,7 +425,122 @@ export function sidebarPlan(state: SidebarState): PlanGroup[] {
             act("도움말", "zalkera.help", "book", "쓰는 방법을 처음부터 봅니다"),
             act("진단", "zalkera.doctor", "pulse", "무엇이 없어서 안 되는지 확인합니다"),
             act("초기화", "zalkera.reset", "clear-all", "처음 상태로 되돌립니다(받은 소스는 남깁니다)"),
+            // ⚠ **사이트의 판이 아니라 이 확장의 판이다.** 「버전」 묶음과 갈라 둔 이유가 그것이다 —
+            //    문의할 때 알려 주실 값이고, 사이트가 어느 판인지와는 아무 상관이 없다.
+            ...(state.extensionVersion
+                ? [{kind: "info" as const, label: `확장 ${plainNotice(state.extensionVersion, 32)}`, icon: "versions"}]
+                : []),
         ],
     });
     return groups;
+}
+
+/**
+ * **버전 묶음이 무엇을 말하는가**(memo191). 「이 폴더」와 「켜진 판」을 **갈라서** 말한다.
+ *
+ * ■ 왜 두 값인가 — 오너가 세운 구분
+ *   · **빌드 번호**(`빌드 #12`) — 올릴 때마다 1씩 느는 순번이다. **언제**를 말하지 **무엇**을 말하지
+ *     않는다. CI 의 빌드 번호와 같은 역할이다.
+ *   · **판 지문**(`3f8a1c9d`) — 그 판에 담긴 소스가 무엇인지를 말한다. 내 폴더도 같은 규칙으로
+ *     접을 수 있어서, 이 값 하나로 「같은가」에 답이 난다.
+ *   둘을 한 낱말로 부르면 「버전 3」이 무엇을 뜻하는지 아무도 말할 수 없게 된다 — 그것이 이 화면이
+ *   생긴 이유다.
+ *
+ * ■ 값이 셋이다 — **모름을 「다름」으로도 「같음」으로도 접지 않는다**
+ *   모름을 「다름」으로 접으면 근거 없이 사람을 놀래고, 「같음」으로 접으면 다른 소스를 배포한다.
+ *   둘 다 틀리므로 화면도 셋을 말한다.
+ *
+ * ■ 같으면 한 줄, 다르면 두 줄
+ *   같은 값을 두 줄에 나눠 적으면 사람이 두 값을 **대조하게** 된다 — 그 대조를 없애려고 만든 화면에서.
+ */
+export function versionView(state: SidebarState): {
+    summary?: string;
+    tooltip: string;
+    lines: PlanItem[];
+} {
+    const hint = "어느 버전을 켤지 정합니다";
+    const active = state.activeVersion ?? null;
+    const mine = state.folderVersion ?? null;
+
+    // 로그인 전이거나 아직 아무것도 못 읽었다 — **지어내지 않는다.** 묶음은 그대로 서고 명령도 그대로다.
+    if (!active) {
+        return {
+            tooltip: state.site
+                ? `${ours(hint)}\n켜진 판은 아직 확인 전입니다`
+                : `${ours(hint)} — 소스를 먼저 받아야 씁니다`,
+            lines: [],
+        };
+    }
+
+    // ⚠ **서버 값은 소독을 지난다.** 판 번호도 지문도 서버가 준 글자다 — 트리 라벨은 지금 생 문자열이지만
+    //   그 사실에 기대면 언젠가 `MarkdownString` 이 되는 날 조용히 뚫린다(`notice.ts` 의 규율).
+    //   `count` 는 숫자가 아닌 값을 **거부**한다 — 서버가 null 을 보내도 「빌드 #0」이 안 뜬다.
+    const build = `빌드 #${count(active.revisionNo)}`;
+    const theirs = shortVersion(active.digest);
+    // 우리가 우리 폴더를 접어 낸 값이다(hex 8자) — 서버가 정하지 않았다는 판단을 `ours` 로 남긴다.
+    const mineShort = shortVersion(mine);
+    const verdict = compareVersions(mine, active.digest);
+
+    // 켜진 판이 지문 이전에 만들어졌다 — **「같다」고 말할 근거가 없다.** 그 사실을 그대로 적는다.
+    if (theirs === null) {
+        return {
+            summary: ours(build),
+            tooltip:
+                `${ours(hint)}\n켜진 판은 지문이 생기기 전에 올라간 것이라 지금 폴더와 대조할 수 없습니다.\n` +
+                `한 번 더 올리시면 그때부터 대조됩니다.`,
+            lines: [
+                {kind: "info", label: `켜진 판 — ${ours(build)} · 지문 없음`, icon: "cloud"},
+                ...(mineShort === null
+                    ? []
+                    : [{kind: "info" as const, label: `이 폴더 — ${ours(mineShort)}`, icon: "folder"}]),
+            ],
+        };
+    }
+
+    if (verdict === "same") {
+        return {
+            summary: `${ours(build)} · 같음`,
+            tooltip: `${ours(hint)}\n지금 폴더와 켜진 판이 같은 소스입니다.`,
+            lines: [
+                {
+                    kind: "info",
+                    label: `이 폴더 = 켜진 판 — ${ours(build)} · ${plainNotice(theirs, VERSION_DIGEST_SHORT)}`,
+                    icon: "pass",
+                },
+            ],
+        };
+    }
+
+    if (verdict === "differs") {
+        return {
+            summary: `${ours(build)} · 다름`,
+            // ⚠ **어느 쪽이 새것인지 우리는 모른다.** 지문은 순서를 안 담는다 — 「낡았다」고 적으면
+            //   방금 고친 사람에게 거짓이 되고, 그 사람이 자기 작업을 서버 것으로 덮는다.
+            //   두 갈래를 다 적고 고르는 것은 사람이 한다.
+            tooltip:
+                `${ours(hint)}\n지금 폴더와 켜진 판이 다른 소스입니다.\n` +
+                `이 폴더 것을 올리려면 「새 버전 배포」, 서버 것을 가져오려면 「서버 판으로 교체」.`,
+            lines: [
+                {kind: "info", label: `이 폴더 — ${ours(mineShort ?? "읽는 중")}`, icon: "edit"},
+                {
+                    kind: "info",
+                    label: `켜진 판 — ${ours(build)} · ${plainNotice(theirs, VERSION_DIGEST_SHORT)}`,
+                    icon: "cloud",
+                },
+            ],
+        };
+    }
+
+    // 켜진 판은 아는데 이 폴더를 모른다(열린 폴더 없음·아직 안 읽음). 아는 쪽만 적는다.
+    return {
+        summary: ours(build),
+        tooltip: `${ours(hint)}\n지금 폴더의 판은 아직 모릅니다.`,
+        lines: [
+            {
+                kind: "info",
+                label: `켜진 판 — ${ours(build)} · ${plainNotice(theirs, VERSION_DIGEST_SHORT)}`,
+                icon: "cloud",
+            },
+        ],
+    };
 }

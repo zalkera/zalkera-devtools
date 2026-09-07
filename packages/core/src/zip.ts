@@ -156,7 +156,7 @@ const ALWAYS_EXCLUDED = new Set([
  *
  * ⚠ **접미만 본다.** `.env.example.bak` 은 여기 안 걸리고 위 `.env` 접두 규칙에 걸려 그대로 빠진다.
  */
-function isValueLessTemplate(lower: string): boolean {
+export function isValueLessTemplate(lower: string): boolean {
     return lower.startsWith(".env") && /\.(example|sample|template)$/.test(lower);
 }
 

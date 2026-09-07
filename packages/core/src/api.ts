@@ -66,6 +66,11 @@ export interface RevisionSource {
     revisionNo: number;
     /** canonical tar.gz 의 sha256. **받는 쪽이 대조하지 않으면 서버의 약속은 말뿐이다.** */
     sha256: string;
+    /**
+     * **판 지문**(memo191). [sha256] 과 묻는 것이 다르다 — 저것은 「받은 바이트가 온전한가」이고
+     * 이것은 「푼 트리가 어느 판인가」다. `null`·`undefined` = 모름.
+     */
+    versionDigest?: string | null;
     expiresAt: string;
 }
 
@@ -88,6 +93,16 @@ export interface SiteRevision {
     label?: string | null;
     /** FAILED 일 때만, 그리고 TENANT_ADMIN+ 에게만 온다 — 빌드 로그 tail. */
     failReason?: string | null;
+    /**
+     * **판 지문**(memo191) — 이 판에 담긴 소스가 무엇인지. 64자 hex.
+     *
+     * ⚠ [revisionNo] 와 **다른 축이다.** 저것은 올릴 때마다 1씩 느는 **빌드 번호**라 「언제」를
+     *   말하고, 이 값은 「무엇이 담겼는가」를 말한다. 되돌린 판은 번호가 새것인데 지문이 같다 —
+     *   같은 트리이기 때문이다. 그 둘을 한 낱말로 부르면 아무 물음에도 답할 수 없게 된다.
+     *
+     * `null`·`undefined` = **모름**(지문 이전에 만들어진 판 · 구서버). 「같다」로 접지 마라.
+     */
+    versionDigest?: string | null;
     /**
      * **지금 실제로 서빙 중인가**(백엔드 명세 A). [isActive] 가 «가라»는 지시라면 이쪽은 «떠 있다»는
      * 사실이다 — 서빙박스가 자기가 띄운 판을 보고한 것이다.
