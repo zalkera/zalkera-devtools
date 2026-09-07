@@ -13,8 +13,8 @@
  */
 
 import {displayPath} from "./displayPath.ts";
-import {ours, plainNotice} from "./notice.ts";
-import {compareVersions, shortVersion} from "./sourceVersion.ts";
+import {count, ours, plainNotice} from "./notice.ts";
+import {compareVersions, shortVersion, VERSION_DIGEST_SHORT} from "./sourceVersion.ts";
 
 export interface SidebarState {
     signedIn: boolean;
@@ -458,7 +458,7 @@ export function versionView(state: SidebarState): {
     tooltip: string;
     lines: PlanItem[];
 } {
-    const HINT = "어느 버전을 켤지 정합니다";
+    const hint = "어느 버전을 켤지 정합니다";
     const active = state.activeVersion ?? null;
     const mine = state.folderVersion ?? null;
 
@@ -466,56 +466,81 @@ export function versionView(state: SidebarState): {
     if (!active) {
         return {
             tooltip: state.site
-                ? `${HINT}\n켜진 판은 아직 확인 전입니다`
-                : `${HINT} — 소스를 먼저 받아야 씁니다`,
+                ? `${ours(hint)}\n켜진 판은 아직 확인 전입니다`
+                : `${ours(hint)} — 소스를 먼저 받아야 씁니다`,
             lines: [],
         };
     }
 
-    const build = `빌드 #${active.revisionNo}`;
+    // ⚠ **서버 값은 소독을 지난다.** 판 번호도 지문도 서버가 준 글자다 — 트리 라벨은 지금 생 문자열이지만
+    //   그 사실에 기대면 언젠가 `MarkdownString` 이 되는 날 조용히 뚫린다(`notice.ts` 의 규율).
+    //   `count` 는 숫자가 아닌 값을 **거부**한다 — 서버가 null 을 보내도 「빌드 #0」이 안 뜬다.
+    const build = `빌드 #${count(active.revisionNo)}`;
     const theirs = shortVersion(active.digest);
-    const ours = shortVersion(mine);
+    // 우리가 우리 폴더를 접어 낸 값이다(hex 8자) — 서버가 정하지 않았다는 판단을 `ours` 로 남긴다.
+    const mineShort = shortVersion(mine);
     const verdict = compareVersions(mine, active.digest);
 
     // 켜진 판이 지문 이전에 만들어졌다 — **「같다」고 말할 근거가 없다.** 그 사실을 그대로 적는다.
-    if (!theirs) {
+    if (theirs === null) {
         return {
-            summary: build,
-            tooltip: `${HINT}\n켜진 판은 지문이 생기기 전에 올라간 것이라 내 폴더와 대조할 수 없습니다.\n한 번 더 올리시면 그때부터 대조됩니다.`,
+            summary: ours(build),
+            tooltip:
+                `${ours(hint)}\n켜진 판은 지문이 생기기 전에 올라간 것이라 지금 폴더와 대조할 수 없습니다.\n` +
+                `한 번 더 올리시면 그때부터 대조됩니다.`,
             lines: [
-                {kind: "info", label: `켜진 판 — ${build} · 지문 없음`, icon: "cloud"},
-                ...(ours ? [{kind: "info" as const, label: `이 폴더 — ${ours}`, icon: "folder"}] : []),
+                {kind: "info", label: `켜진 판 — ${ours(build)} · 지문 없음`, icon: "cloud"},
+                ...(mineShort === null
+                    ? []
+                    : [{kind: "info" as const, label: `이 폴더 — ${ours(mineShort)}`, icon: "folder"}]),
             ],
         };
     }
 
     if (verdict === "same") {
         return {
-            summary: `${build} · 같음`,
-            tooltip: `${HINT}\n지금 폴더와 켜진 판이 같은 소스입니다.`,
-            lines: [{kind: "info", label: `이 폴더 = 켜진 판 — ${build} · ${theirs}`, icon: "pass"}],
+            summary: `${ours(build)} · 같음`,
+            tooltip: `${ours(hint)}\n지금 폴더와 켜진 판이 같은 소스입니다.`,
+            lines: [
+                {
+                    kind: "info",
+                    label: `이 폴더 = 켜진 판 — ${ours(build)} · ${plainNotice(theirs, VERSION_DIGEST_SHORT)}`,
+                    icon: "pass",
+                },
+            ],
         };
     }
 
     if (verdict === "differs") {
         return {
-            summary: `${build} · 다름`,
+            summary: `${ours(build)} · 다름`,
             // ⚠ **어느 쪽이 새것인지 우리는 모른다.** 지문은 순서를 안 담는다 — 「낡았다」고 적으면
-            //   방금 고친 사람에게 거짓이 된다. 두 갈래를 다 적고 고르는 것은 사람이 한다.
+            //   방금 고친 사람에게 거짓이 되고, 그 사람이 자기 작업을 서버 것으로 덮는다.
+            //   두 갈래를 다 적고 고르는 것은 사람이 한다.
             tooltip:
-                `${HINT}\n지금 폴더와 켜진 판이 다른 소스입니다.\n` +
-                `내 것을 올리려면 「새 버전 배포」, 서버 것을 가져오려면 「서버 판으로 교체」.`,
+                `${ours(hint)}\n지금 폴더와 켜진 판이 다른 소스입니다.\n` +
+                `이 폴더 것을 올리려면 「새 버전 배포」, 서버 것을 가져오려면 「서버 판으로 교체」.`,
             lines: [
-                {kind: "info", label: `이 폴더 — ${ours ?? "읽는 중"}`, icon: "edit"},
-                {kind: "info", label: `켜진 판 — ${build} · ${theirs}`, icon: "cloud"},
+                {kind: "info", label: `이 폴더 — ${ours(mineShort ?? "읽는 중")}`, icon: "edit"},
+                {
+                    kind: "info",
+                    label: `켜진 판 — ${ours(build)} · ${plainNotice(theirs, VERSION_DIGEST_SHORT)}`,
+                    icon: "cloud",
+                },
             ],
         };
     }
 
-    // 켜진 판은 아는데 내 폴더를 모른다(열린 폴더 없음·아직 안 읽음). 아는 쪽만 적는다.
+    // 켜진 판은 아는데 이 폴더를 모른다(열린 폴더 없음·아직 안 읽음). 아는 쪽만 적는다.
     return {
-        summary: build,
-        tooltip: `${HINT}\n지금 폴더의 판은 아직 모릅니다.`,
-        lines: [{kind: "info", label: `켜진 판 — ${build} · ${theirs}`, icon: "cloud"}],
+        summary: ours(build),
+        tooltip: `${ours(hint)}\n지금 폴더의 판은 아직 모릅니다.`,
+        lines: [
+            {
+                kind: "info",
+                label: `켜진 판 — ${ours(build)} · ${plainNotice(theirs, VERSION_DIGEST_SHORT)}`,
+                icon: "cloud",
+            },
+        ],
     };
 }
