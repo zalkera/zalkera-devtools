@@ -360,16 +360,27 @@ function baselineFor(dir: string | null | undefined): Baseline | null {
  *
  * ⚠ 발행·버전 전환 뒤에 이걸 안 부르면 사이드바가 **바뀌기 전 판을 계속 사실로 그린다** —
  *   방금 올린 사람에게 「다름」이라 말하는 자리다.
+ *
+ * ⚠ **원장도 함께 버린다.** 발행·전환 뒤의 원장은 방금 만든 판이 빠진 낡은 목록이고, 그것으로 방향을
+ *   재면 「그 지문이 원장에 없다」가 되어 화면이 갓 올린 판을 모르는 내용이라 말한다. 비워 두면 다음
+ *   갱신이 다시 물을 때까지 방향을 **말하지 않는다** — 그쪽이 참이다.
  */
 function forgetActiveVersion(): void {
   activeVersionCache = null;
   activeVersionAskedFor = null;
+  ledgerCache = null;
 }
 
-/** 계정이 바뀌면 **앞사람의 사실**을 지운다. 다음 갱신이 다시 묻는다. */
+/**
+ * 계정이 바뀌면 **앞사람의 사실**을 지운다. 다음 갱신이 다시 묻는다.
+ *
+ * ⚠ **기준점도 앞사람의 사실이다.** 그 캐시는 폴더 경로로만 키를 잡아 **계정 경계를 스스로 못 본다** —
+ *   안 버리면 앞사람이 맞춘 값으로 이 사람의 「수정 중」을 판정한다.
+ */
 function forgetVersions(): void {
   forgetActiveVersion();
   folderVersionCache = null;
+  baselineCache = null;
 }
 
 /**

@@ -289,6 +289,25 @@ const WIRES = [
     ],
     [
         "packages/vscode/src/extension.ts",
+        "  activeVersionCache = null;\n  activeVersionAskedFor = null;",
+        "발행·전환 뒤 **켜진 판을 다시 안 물으면** 사이드바가 바뀌기 전 판을 계속 사실로 그린다 — " +
+            "방금 올린 사람에게 「다름」이라 말하는 자리다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "  activeVersionAskedFor = null;\n  ledgerCache = null;",
+        "🔴 **원장을 함께 안 버리면** 발행 직후의 원장은 방금 만든 판이 빠진 낡은 목록이고, 그것으로 " +
+            "방향을 재면 갓 올린 판을 「원장에 없는 내용」이라 말한다 — 값은 다 옳고 **버리는 줄만** 없으면 " +
+            "타입도 시험도 안 잡는다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "  folderVersionCache = null;\n  baselineCache = null;",
+        "계정이 바뀌었는데 **기준점을 안 버리면** 앞사람이 맞춘 값으로 이 사람의 「수정 중」을 판정한다 — " +
+            "기준점은 폴더 경로로만 키를 잡아 계정 경계를 스스로 못 본다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
         "  const first = !folderStaleShown;\n  folderStaleShown = true;\n  if (first) sidebar.update({ folderStale: true });",
         "🔴 **예약만 하고 다시 그리지 않으면 「확인 중」이 화면에 영영 안 뜬다** — 상태는 계산되는데 " +
             "그리기가 없어 죽은 코드가 된다. 그 1.5초 동안 화면은 고치기 **전**의 결론을 사실로 그린다. " +
