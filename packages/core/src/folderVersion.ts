@@ -22,7 +22,7 @@
  *   그 폴더를 발행하면 실제로 다른 판이 선다.
  */
 import {createHash} from "node:crypto";
-import {readFile} from "node:fs/promises";
+import {readFile, stat} from "node:fs/promises";
 import {join} from "node:path";
 import {buildProvenance, PROVENANCE_PATH} from "./provenance.ts";
 import {serverExcluded} from "./serverNormalization.ts";
@@ -32,6 +32,9 @@ import {hashWorkdir} from "./workdir.ts";
 
 /** 값 없는 서식으로 이름 예외를 받는 파일 — 이 이름들만 내용 문턱을 확인한다(포장기와 같은 대상). */
 const TEMPLATE_SUFFIXES = [".example", ".sample", ".template"];
+
+/** 이 크기를 넘는 서식은 읽지 않고 떨군다 — `templateBreach` 의 내부 상한(256KB)과 같은 자리다. */
+const TEMPLATE_SCAN_MAX_BYTES = 256 * 1024;
 
 const sha256Hex = (text: string): string => createHash("sha256").update(text, "utf8").digest("hex");
 
@@ -63,12 +66,20 @@ export async function folderVersionDigest(root: string, tenant: string | null): 
     return sourceVersionDigest(kept);
 }
 
-/** 이름으로 서식 예외를 받은 파일이 값을 담고 있는가. 그 이름이 아니면 읽지 않는다. */
+/**
+ * 이름으로 서식 예외를 받은 파일이 값을 담고 있는가. **그 이름이 아니면 읽지 않는다.**
+ *
+ * ⚠ 크기를 먼저 본다 — `templateBreach` 는 상한을 자기 안에서 보는데, 그때는 이미 파일이 통째로
+ *   램에 올라와 있다. 저장할 때마다 도는 자리라 큰 파일 하나가 그 비용을 매번 물린다.
+ *   상한을 넘으면 **읽지 않고 떨군다** — 포장기도 그 파일을 안 담으므로 결과가 같다.
+ */
 async function breaches(root: string, path: string): Promise<boolean> {
     const name = path.slice(path.lastIndexOf("/") + 1).toLowerCase();
     if (!TEMPLATE_SUFFIXES.some((s) => name.endsWith(s))) return false;
+    const full = join(root, path);
     try {
-        return templateBreach(name, await readFile(join(root, path))) !== null;
+        if ((await stat(full)).size > TEMPLATE_SCAN_MAX_BYTES) return true;
+        return templateBreach(name, await readFile(full)) !== null;
     } catch {
         // 못 읽으면 포장기도 못 담는다 — 목록에서 뺀다(모름을 값으로 만들지 않는다).
         return true;

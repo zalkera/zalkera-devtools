@@ -271,8 +271,13 @@ function canSwitchCached(): boolean | null {
  *   바꿀 수 있어서, 창을 다시 열었을 때 지난 세션의 값을 사실로 그리면 **틀린 확답**이 된다.
  */
 let activeVersionCache: { tenant: string; revisionNo: number; digest: string | null } | null = null;
-/** 조회를 한 번이라도 마쳤는가 — 「켜진 판이 없다」와 「아직 안 물어봤다」를 가른다. */
-let activeVersionAsked = false;
+/**
+ * **어느 사이트를 물어봤는가** — 「켜진 판이 없다」와 「아직 안 물어봤다」를 가른다.
+ *
+ * ⚠ **여기에도 사이트가 붙는다.** 값만 두면 A 를 물어본 사실이 B 에서도 「이미 물어봤다」로 읽혀,
+ *   전환 뒤 「버전」 묶음이 다음 명령까지 **빈 채로** 남는다(앞사람 사실이 새지는 않지만 화면이 빈다).
+ */
+let activeVersionAskedFor: string | null = null;
 /** 이 폴더의 판. 키를 폴더 경로로 두어 **다른 폴더의 값을 물려받지 않는다.** */
 let folderVersionCache: { dir: string; digest: string | null } | null = null;
 let folderVersionRunning = false;
@@ -305,7 +310,7 @@ function noteRevisions(
   revisions: readonly { revisionNo: number; isActive: boolean; versionDigest?: string | null }[],
 ): void {
   if (tenant === "") return;
-  activeVersionAsked = true;
+  activeVersionAskedFor = tenant;
   const active = revisions.find((r) => r.isActive);
   activeVersionCache = active
     ? { tenant, revisionNo: active.revisionNo, digest: active.versionDigest ?? null }
@@ -320,7 +325,7 @@ function noteRevisions(
  */
 function forgetActiveVersion(): void {
   activeVersionCache = null;
-  activeVersionAsked = false;
+  activeVersionAskedFor = null;
 }
 
 /** 계정이 바뀌면 **앞사람의 사실**을 지운다. 다음 갱신이 다시 묻는다. */
@@ -339,16 +344,18 @@ function forgetVersions(): void {
  *   **이미 정해져 있을 때만** 묻는다 — 그 상태에서는 `chooseTenant` 가 아무것도 안 묻는다.
  */
 async function ensureActiveVersion(tenant: string): Promise<boolean> {
-  if (activeVersionAsked || tenant === "") return false;
+  if (activeVersionAskedFor === tenant || tenant === "") return false;
   if ((await store.read()) === null) return false;
-  activeVersionAsked = true;
+  // ⚠ **선점은 `await` 앞이 아니라 여기다.** 저장 타이머와 명령 갱신이 위 `await` 사이에 겹치면
+  //   조회가 둘이 된다 — 상한 2 라 무해하지만 셀 이유가 없다.
+  activeVersionAskedFor = tenant;
   try {
     const { api } = await ensureApiFor();
     noteRevisions(tenant, await api.listRevisions());
     return true;
   } catch {
     // 못 물어봤다 — 다음 갱신에서 다시 묻도록 되돌린다(영구 모름으로 굳지 않게).
-    activeVersionAsked = false;
+    activeVersionAskedFor = null;
     return false;
   }
 }
@@ -578,6 +585,9 @@ export function activate(context: vscode.ExtensionContext): void {
     // F2 — 저장할 때와 열 때 본다. 타이핑마다 돌리지 않는다(계약 위반은 저장 시점에 확인해도 늦지 않다).
     vscode.workspace.onDidSaveTextDocument((doc) => {
       refreshDiagnostics(doc);
+      // ⚠ **우리 폴더 밖 저장에는 안 걸린다.** 설정 파일·다른 창의 문서까지 훑기를 예약할 이유가 없다.
+      const here = workspaceDir();
+      if (!here || doc.uri.scheme !== "file" || !doc.uri.fsPath.startsWith(here)) return;
       // 🔴 **고친 뒤에도 「같음」이 남으면 그 화면은 거짓이다**(memo191 §6.5). 저장은 사람이
       //    「이제 이 상태다」라고 말하는 순간이고, 판 지문이 다시 서야 하는 자리다.
       //    ⚠ 저장마다 폴더 전량을 해시하지 않는다 — 묶어서 한 번 돈다(`scheduleFolderVersion`).
