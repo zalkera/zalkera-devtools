@@ -228,10 +228,20 @@ export {
     type WorkspaceLink,
     type ImportBinding,
 } from "./siteBinding.ts";
-export { sidebarPlan } from "./sidebarPlan.ts";
+export { sidebarPlan, versionView } from "./sidebarPlan.ts";
 export { displayPath } from "./displayPath.ts";
 export { idleStatusPlan, type StatusPlan } from "./statusPlan.ts";
 export type { PlanGroup, PlanItem, SidebarState } from "./sidebarPlan.ts";
+export {
+    compareVersions,
+    digestOfManifest,
+    shortVersion,
+    sourceVersionDigest,
+    unwrapSingleRoot,
+    VERSION_DIGEST_SHORT,
+    VERSION_RULE_TAG,
+    type VersionEntry,
+} from "./sourceVersion.ts";
 export {
     SYNC_LEDGER_FORMAT,
     SYNC_LEDGER_PATH,

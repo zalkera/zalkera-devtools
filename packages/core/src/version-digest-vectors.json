@@ -1,0 +1,111 @@
+{
+  "rule": "sha256( \"zalkera-source-v1\\n\" + SUM(path + \"\\n\" + content_sha256 + \"\\n\") ), 경로는 UTF-8 바이트 오름차순",
+  "ruleTag": "zalkera-source-v1",
+  "memo": "191-source-version-identity",
+  "note": "기대값은 명세 문장만 보고 쓴 독립 구현(python)이 냈다. 구현체가 이 파일을 만들지 않는다.",
+  "cases": [
+    {
+      "name": "single",
+      "why": "파일 하나",
+      "entries": [
+        {
+          "path": "index.html",
+          "contentSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      ],
+      "digest": "18704c64fc90cff5ccefa309409ad868a7cad3c2434f1d44ce0b4931117a1572"
+    },
+    {
+      "name": "two-sorted",
+      "why": "두 파일 — 정렬된 입력",
+      "entries": [
+        {
+          "path": "a.txt",
+          "contentSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+          "path": "b.txt",
+          "contentSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      ],
+      "digest": "6c64c0f7ea99da8d3adf1514f0a1d59151e665b4f6af9aebf94daceb55c432c1"
+    },
+    {
+      "name": "two-reversed",
+      "why": "같은 두 파일 — 입력 순서를 뒤집어도 같은 지문(정렬 독립)",
+      "entries": [
+        {
+          "path": "b.txt",
+          "contentSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        {
+          "path": "a.txt",
+          "contentSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      ],
+      "digest": "6c64c0f7ea99da8d3adf1514f0a1d59151e665b4f6af9aebf94daceb55c432c1"
+    },
+    {
+      "name": "supplementary-order",
+      "why": "보조평면 정렬 — 'a\\uFFFF.txt' 와 'a😀.txt' 는 UTF-8 바이트 순과 UTF-16 코드유닛 순이 **서로 뒤집힌다**. Kotlin·JS 의 기본 문자열 정렬은 UTF-16 이라 그대로 쓰면 이 벡터가 깨진다.",
+      "entries": [
+        {
+          "path": "a￿.txt",
+          "contentSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+          "path": "a😀.txt",
+          "contentSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      ],
+      "digest": "4d839c52c8b0cb6cebf9eabbeeddfaa6f753bb6250163c70cdb5369c99bcf6cc"
+    },
+    {
+      "name": "uppercase-content-hash",
+      "why": "내용 해시 대문자 입력은 소문자로 접어 같은 지문",
+      "entries": [
+        {
+          "path": "index.html",
+          "contentSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        }
+      ],
+      "digest": "18704c64fc90cff5ccefa309409ad868a7cad3c2434f1d44ce0b4931117a1572"
+    },
+    {
+      "name": "wrapped-path",
+      "why": "래퍼 폴더를 안 벗기면 다른 지문 — effectiveRoot 가 지문 규칙의 일부인 근거",
+      "entries": [
+        {
+          "path": "mysite/index.html",
+          "contentSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      ],
+      "digest": "1d0db0802917f12be4d596f90a17fd4d7142e870ad90d6d102586394d15f5582"
+    },
+    {
+      "name": "nested-tree",
+      "why": "여러 깊이",
+      "entries": [
+        {
+          "path": "index.html",
+          "contentSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+          "path": "assets/app.css",
+          "contentSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        {
+          "path": "assets/img/x.png",
+          "contentSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        }
+      ],
+      "digest": "845c0d6911b76e138f02b633d993aefd1eab80eb8c223f56da6db2a62321e3e1"
+    },
+    {
+      "name": "empty",
+      "why": "빈 목록은 지문이 없다(모름)",
+      "entries": [],
+      "digest": null
+    }
+  ]
+}
