@@ -315,6 +315,18 @@ const WIRES = [
     ],
     [
         "packages/vscode/src/extension.ts",
+        "  if (folderVersionFresh === dir && folderVersionCache?.dir === dir) {\n    folderVersionFresh = null;\n    return false;\n  }",
+        "🔴 **이 단락이 없으면 심기가 아무것도 안 아낀다** — 갱신이 무조건 다시 훑어 같은 폴더를 두 번 센다. " +
+            "그 사실은 조용하다(값이 옳아서 시험도 타입도 안 잡는다·3회전 실측)",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "  folderVersionFresh = null;\n  if (folderVersionTimer !== null) clearTimeout(folderVersionTimer);",
+        "🔴 저장 때 **「방금 접었다」를 안 내리면** 고친 뒤 한 번을 건너뛰고, 그 한 번이 " +
+            "「고쳤는데 일치라고 말하는」 화면이 된다 — 이 트랜치가 없애려는 그 거짓이다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
         "  folderStaleShown = folderVersionTimer !== null || folderVersionRunning;\n  if (!folderChanged && !activeChanged && !clearing) return;",
         "「확인 중」의 소유권을 **살아 있는 타이머에게 넘기지 않으면** 저장 직후 1.5초 안에 다른 명령이 끼었을 때 " +
             "그 낱말이 화면에 남은 채 소유권만 사라져, 뒤이은 타이머 발화가 값 비교로 조기 반환한다 — " +

@@ -314,7 +314,20 @@ function activeVersionFor(tenant: string): { revisionNo: number; digest: string 
 function seedFolderVersion(dir: string, tenant: string, digest: string | null): void {
   folderVersionCache = { dir, digest };
   baselineCache = { dir, tenant, baseline: baselineOf(readSourceMarkAt(dir), extensionVersion, tenant) };
+  // 🔴 **심기만 해서는 아무것도 안 아낀다.** 바로 뒤에 오는 갱신이 `recomputeFolderVersion` 을 **무조건**
+  //    부르므로 심은 값은 첫 그리기에만 쓰이고 훑기는 그대로 두 번이다(3회전 실측). 「방금 우리가 접었다」는
+  //    사실을 한 번만 쓰게 하는 표가 이것이다 — 저장 이벤트가 오면 곧바로 내린다.
+  folderVersionFresh = dir;
 }
+
+/**
+ * **방금 우리가 접은 값이라 다시 안 세도 되는 폴더.** 한 번 쓰이면 내려간다 — 그 다음부터는 종전대로
+ * 매 갱신이 다시 센다.
+ *
+ * ⚠ **저장이 오면 즉시 내린다.** 안 내리면 고친 뒤에도 「방금 접었다」가 남아 한 번을 건너뛰고,
+ *   그 한 번이 「고쳤는데 일치라고 말하는」 화면이 된다 — 이 트랜치가 없애려는 그 거짓이다.
+ */
+let folderVersionFresh: string | null = null;
 
 /**
  * 지금 폴더의 판. **캐시가 다른 폴더 것이면 모름이다** — 폴더를 옮겼는데 앞 폴더의 값을 그리면
@@ -402,6 +415,7 @@ function forgetVersions(): void {
   forgetActiveVersion();
   folderVersionCache = null;
   baselineCache = null;
+  folderVersionFresh = null;
 }
 
 /**
@@ -453,13 +467,18 @@ async function recomputeFolderVersion(dir: string | null, tenant: string | null)
     folderVersionPending = true;
     return false;
   }
+  // 방금 우리가 접은 값이면 한 번은 건너뛴다(위 [seedFolderVersion]). 표는 여기서 내려간다.
+  if (folderVersionFresh === dir && folderVersionCache?.dir === dir) {
+    folderVersionFresh = null;
+    return false;
+  }
   folderVersionRunning = true;
   try {
     let changed = false;
     do {
       folderVersionPending = false;
       const digest = await folderVersionDigest(dir, tenant).catch(() => null);
-      // 기준점도 같은 자리에서 읽는다 — 디스크 읽기라 그리기 경로에서 부르면 안 된다(memo191 ⑶).
+      // 기준점도 **같은 순간에** 읽는다 — 따로 읽으면 「고쳤다」 판정이 두 시점을 섞어 재게 된다(memo191 ⑶).
       const baseline = baselineOf(readSourceMarkAt(dir), extensionVersion, tenant);
       changed =
         changed ||
@@ -4339,6 +4358,8 @@ const FOLDER_VERSION_DEBOUNCE_MS = 1_500;
  *   화면이 「같음」을 그대로 말한다 — 그쪽이 더 나쁘다(거짓 확답).
  */
 function scheduleFolderVersion(): void {
+  // 고쳤으니 「방금 접었다」는 더 이상 참이 아니다 — 안 내리면 한 번을 건너뛰고 그 한 번이 거짓이 된다.
+  folderVersionFresh = null;
   if (folderVersionTimer !== null) clearTimeout(folderVersionTimer);
   // 🔴 **예약만 하고 다시 그리지 않으면 「확인 중」이 영영 화면에 안 뜬다.** 그 1.5초 동안 화면은
   //    고치기 **전**의 결론(「일치」 같은)을 사실로 그리고 있다 — 저장은 사람이 「이제 이 상태다」라고

@@ -80,7 +80,10 @@ export interface SidebarState {
     activeVersion?: {revisionNo: number; digest: string | null} | null;
     /**
      * **무상한 조회로 받은 원장 전량**(memo191). 방향 판정의 유일한 재료다 — 상한 페이지를 여기 실으면
-     * 잘린 앞부분이 안 보여 「처음 등장한 번호」가 거짓이 된다. `complete: true` 리터럴이 그것을 타입으로 막는다.
+     * 잘린 앞부분이 안 보여 「처음 등장한 번호」가 거짓이 된다.
+     *
+     * ⚠ **타입이 그것을 막지는 못한다**(`versionLedger.ts` 의 같은 경고). 서 있는 것은 조회가 이름으로
+     *   갈라져 있다는 것(`listRevisions()` vs `listRecentRevisions(limit)`)과 `check-wiring` 뿐이다.
      */
     ledger?: LedgerSnapshot | null;
     /**

@@ -18,7 +18,7 @@ import {createHash} from "node:crypto";
 import {mkdir, readFile, rm, writeFile, readdir} from "node:fs/promises";
 import {join} from "node:path";
 import {tempDir} from "./testing/tempDir.ts";
-import {folderVersionDigest} from "./folderVersion.ts";
+import {folderVersionDigest, folderVersionSummary} from "./folderVersion.ts";
 import {serverExcluded} from "./serverNormalization.ts";
 import {sourceVersionDigest, unwrapSingleRoot} from "./sourceVersion.ts";
 import {packProject} from "./zip.ts";
@@ -33,7 +33,7 @@ async function put(root: string, rel: string, text: string): Promise<void> {
 }
 
 /** 서버가 저장할 목록의 지문 — 실제 zip 을 풀어 서버 순서(언랩 → 배제)대로 접는다. */
-async function serverSideDigest(zip: Buffer): Promise<string | null> {
+async function serverSideKept(zip: Buffer): Promise<{path: string; sha256: string}[]> {
     // ⚠ **`mkdtemp` 를 직접 안 부른다** — `tempDir()` 가 회수 목록에 올려 두 겹으로 지운다
     //   (`after` + `process.on("exit")`). 손으로 지우면 예외 경로에서 남는다.
     const out = await tempDir("zalkera-srv-");
@@ -53,13 +53,17 @@ async function serverSideDigest(zip: Buffer): Promise<string | null> {
         await walk(out, "");
         // 서버 순서: 래퍼를 **배제 전 목록**으로 판정한 뒤 배제한다.
         const unwrapped = unwrapSingleRoot(found.map((f) => f.path));
-        const kept = found
+        return found
             .map((f, i) => ({path: unwrapped[i]!, sha256: f.sha256}))
             .filter((f) => !serverExcluded(f.path));
-        return sourceVersionDigest(kept);
     } finally {
         await rm(out, {recursive: true, force: true});
     }
+}
+
+/** 서버가 저장할 목록의 **지문**. */
+async function serverSideDigest(zip: Buffer): Promise<string | null> {
+    return sourceVersionDigest(await serverSideKept(zip));
 }
 
 async function withFolder(
@@ -229,5 +233,26 @@ test("값이 든 `.env.sample` 은 포장기도 예측도 뺀다", async () => {
             "포장기가 값든 서식을 담았다 — 전제가 사라졌다",
         );
         assert.equal(await folderVersionDigest(dir, TENANT), await serverSideDigest(packed.buffer));
+    });
+});
+
+/**
+ * 🔴 **파일 수는 「서버가 세는 것과 같은 모집단」이어야 한다.**
+ *
+ * `PackResult.fileCount` 는 **우리 배제만** 지난 zip 항목 수이고, 서버가 세는 수는 **서버 배제까지**
+ * 지난 값이다. 두 값을 포장 갭 화면에 나란히 놓으면 시작 소스 팩(`.github/workflows/` 둘을 서버만 뺀다)
+ * 에서 「로컬 42 / 서버 40」이 떠 **정상 차이를 결함처럼** 보이게 한다(심의 지적).
+ */
+test("접은 항목 수가 서버 모집단과 같다 — zip 항목 수가 아니다", async () => {
+    await withFolder({...SITE, ".github/workflows/ci.yml": "on: push"}, async (dir) => {
+        const packed = await packProject({projectDir: dir, provenanceTenant: TENANT});
+        assert.ok(
+            (await import("./unzip.ts")).listZipEntries(packed.buffer).includes(".github/workflows/ci.yml"),
+            "우리 포장기가 워크플로를 안 담았다 — 이 시험의 전제가 사라졌다",
+        );
+        const summary = await folderVersionSummary(dir, TENANT);
+        assert.equal((await serverSideKept(packed.buffer)).length, summary.fileCount, "서버가 세는 수와 다르다");
+        // 🔴 zip 항목 수와는 **달라야** 한다 — 같으면 이 축이 아무것도 안 지킨다.
+        assert.notEqual(summary.fileCount, packed.fileCount, "zip 항목 수와 같다 — 모집단이 안 갈렸다");
     });
 });

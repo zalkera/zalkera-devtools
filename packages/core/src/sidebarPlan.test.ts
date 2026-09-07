@@ -978,3 +978,31 @@ test("이상한 판 번호가 섞여도 방향 게이트가 산다", () => {
         ["서버 — aaaaaaaa / 빌드 #3", "로컬 — bbbbbbbb / 빌드 #2 내용"],
     );
 });
+
+/**
+ * 🔴 **원장이 방향을 말할 수 있으면 「확인 필요」로 덮지 않는다.**
+ *
+ * 기준점이 「안 고쳤다」를 말하더라도, 그 내용이 원장에 있으면 **방향이 참말**이다. 이 갈래가 원장 조회
+ * 앞으로 올라가면 정상 상황에서 「① 콘솔 zip ② 지문 이전 규칙 ③ 도구 포장 규칙이 갈렸다」는 툴팁이 떠
+ * **도구 결함을 의심시킨다**(심의가 짚은 형상). `!mineInLedger` 가드를 지우면 여기서 죽는다.
+ */
+test("원장에 있는 내용이면 확인 필요보다 방향이 앞선다", () => {
+    const head = headOf({
+        activeVersion: {revisionNo: 4, digest: BBB},
+        folderVersion: AAA,
+        ledger: ledgerOf([3, AAA], [4, BBB]),
+        // 기준점은 「맞춘 뒤 안 바뀌었고 서버도 그때 그 판」이라 말한다 — 그래도 원장이 이긴다.
+        baseline: {revisionNo: 4, folderVersion: AAA, serverVersion: BBB},
+    });
+    assert.equal(head, "서버가 더 최신", "원장이 말할 수 있는데 「확인 필요」가 덮었다");
+    // 양성 짝 — 원장에 없으면 그때는 「확인 필요」가 맞다.
+    assert.equal(
+        headOf({
+            activeVersion: {revisionNo: 4, digest: BBB},
+            folderVersion: CCC,
+            ledger: ledgerOf([3, AAA], [4, BBB]),
+            baseline: {revisionNo: 4, folderVersion: CCC, serverVersion: BBB},
+        }),
+        "확인 필요",
+    );
+});

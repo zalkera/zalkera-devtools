@@ -14,7 +14,7 @@ import { ZalkeraApi } from "./api.ts";
 import { DevtoolsError } from "./errors.ts";
 import { publish } from "./publish.ts";
 import { tempDir } from "./testing/tempDir.ts";
-import { writeFile } from "node:fs/promises";
+import { chmod, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { captureTenant, say } from "./tenantScope.ts";
 
@@ -242,4 +242,107 @@ test("409 계열에서는 취소를 존중한다 — 판이 안 만들어졌다�
   strictEqual(confirms.length, 1, "취소했는데 다시 보냈다");
   strictEqual(asked, 0, "그만두겠다고 한 사람에게 「그대로 올릴까요」를 물었다");
   strictEqual(error?.code, "CANCELLED", `증명된 거절인데 취소로 안 접었다: ${error?.code}`);
+});
+
+/**
+ * **포장 갭 대조에 실리는 두 값**(memo191 ⑵). 발행 자체가 아니라 **무엇을 실어 보내는가**를 잰다.
+ *
+ * 🔴 계산이 옳아도 배선이 틀리면 화면이 거짓을 말한다 — `folderVersionSummary` 시험은 이 자리를
+ *    못 지킨다(변이 실측: `localVersionFileCount` 를 zip 항목 수로 되돌려도 그쪽은 전건 초록이었다).
+ */
+async function publishAgainst(
+  dir: string,
+  confirmBody: Record<string, unknown>,
+): Promise<Awaited<ReturnType<typeof publish>>> {
+  const fetchImpl = (async (input: URL | string) => {
+    const url = String(input);
+    if (url.endsWith("/presign")) {
+      return new Response(
+        JSON.stringify({ data: { uploadUrl: "https://s3.example.test/put", storageKey: "k", expiresAt: "" } }),
+        { status: 200 },
+      );
+    }
+    if (url.startsWith("https://s3.example.test/")) return new Response("", { status: 200 });
+    return new Response(JSON.stringify({ data: confirmBody }), { status: 200 });
+  }) as typeof fetch;
+  const api = new ZalkeraApi({
+    apiBase: "https://api.example.test",
+    accessToken: async () => "t",
+    tenantCode: () => "bix",
+    fetchImpl,
+  });
+  return publish({ api, projectDir: dir, tenant: captureTenant("bix"), fetchImpl });
+}
+
+const CONFIRMED = {
+  revisionNo: 7,
+  siteType: "STATIC",
+  status: "READY",
+  capabilityNote: "",
+  versionDigest: "f".repeat(64),
+  fileCount: 3,
+};
+
+test("포장 갭 대조에 서버와 같은 모집단의 수를 싣는다", async () => {
+  const dir = await tempDir("zalkera-gap-");
+  await writeFile(join(dir, "package.json"), '{"name":"t","version":"1.0.0"}');
+  await writeFile(join(dir, "page.tsx"), "export default () => null;\n");
+  // 우리 포장기는 담고 서버는 빼는 파일 — 두 모집단이 실제로 갈리는 자리다.
+  await mkdir(join(dir, ".github", "workflows"), { recursive: true });
+  await writeFile(join(dir, ".github", "workflows", "ci.yml"), "on: push\n");
+
+  const result = await publishAgainst(dir, CONFIRMED);
+  strictEqual(result.serverVersion, "f".repeat(64), "서버가 준 지문을 안 실었다");
+  strictEqual(result.serverFileCount, 3);
+  ok(result.localVersion !== null && result.localVersion !== undefined, "예측을 안 실었다");
+  // 🔴 zip 항목 수를 실으면 「로컬 4 / 서버 3」처럼 **정상 차이가 결함으로** 보인다.
+  notStrictEqual(
+    result.localVersionFileCount,
+    result.fileCount,
+    "zip 항목 수를 실었다 — 서버와 다른 모집단이다",
+  );
+  strictEqual(result.localVersionFileCount, result.fileCount - 1, "서버만 빼는 파일 하나가 안 빠졌다");
+});
+
+/**
+ * 🔴 **폴더를 못 읽어도 발행은 성공이다.** 이 훑기는 `confirm` 이 **성공한 뒤**에 돌고, 판은 이미 서 있다.
+ * 여기서 던지면 부르는 쪽이 표식 갱신·폴더 기억·갭 보고를 **전부 건너뛰고**, 다음 발행이 낡은 기반을
+ * 선언해 자기가 방금 만든 판에 409 를 맞는다(3축이 독립으로 짚은 자리).
+ */
+test("발행 뒤 폴더를 못 읽어도 성공으로 끝난다", async () => {
+  const dir = await tempDir("zalkera-gone-");
+  await writeFile(join(dir, "package.json"), '{"name":"t","version":"1.0.0"}');
+  await writeFile(join(dir, "page.tsx"), "export default () => null;\n");
+
+  // ⚠ **폴더를 통째로 지우면 안 된다** — `readdir` 의 ENOENT 는 훑기가 삼켜 조용히 빈 목록이 되고,
+  //    그러면 이 시험이 `.catch` 를 지워도 통과한다(변이 실측). 던지는 실제 경로는 **읽을 수 없는 하위
+  //    폴더**다(EACCES 는 안 삼킨다). 포장이 끝난 뒤·confirm 응답과 함께 그 상태를 만든다.
+  await mkdir(join(dir, "locked"), { recursive: true });
+  await writeFile(join(dir, "locked", "a.tsx"), "export default () => null;\n");
+  const fetchImpl = (async (input: URL | string) => {
+    const url = String(input);
+    if (url.endsWith("/presign")) {
+      return new Response(
+        JSON.stringify({ data: { uploadUrl: "https://s3.example.test/put", storageKey: "k", expiresAt: "" } }),
+        { status: 200 },
+      );
+    }
+    if (url.startsWith("https://s3.example.test/")) return new Response("", { status: 200 });
+    await chmod(join(dir, "locked"), 0o000);
+    return new Response(JSON.stringify({ data: CONFIRMED }), { status: 200 });
+  }) as typeof fetch;
+  const api = new ZalkeraApi({
+    apiBase: "https://api.example.test",
+    accessToken: async () => "t",
+    tenantCode: () => "bix",
+    fetchImpl,
+  });
+
+  try {
+    const result = await publish({ api, projectDir: dir, tenant: captureTenant("bix"), fetchImpl });
+    strictEqual(result.revisionNo, 7, "발행이 실패로 끝났다 — 판은 서 있는데 화면이 거짓을 말한다");
+    strictEqual(result.localVersion, null, "못 읽은 것을 「모름」으로 안 내렸다");
+  } finally {
+    await chmod(join(dir, "locked"), 0o755).catch(() => {});
+  }
 });
