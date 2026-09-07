@@ -158,3 +158,43 @@ test("빈 폴더는 모름이다", async () => {
         assert.equal(await folderVersionDigest(dir, TENANT), null);
     });
 });
+
+/**
+ * 🔴 **순서가 규칙의 일부다 — 언랩이 먼저고 배제가 나중이다.**
+ *
+ * 서버는 zip 을 통째로 풀어 놓고 `effectiveRoot` 로 래퍼를 판정한 **뒤에** 배제를 돌린다. 그래서
+ * 래퍼 판정의 입력은 **배제 전 목록**이다. 뒤집으면 「폴더 하나 + 서버만 빼는 파일 하나」인 트리에서
+ * 서버는 안 벗기고 우리는 벗겨 같은 소스가 갈린다.
+ *
+ * `terraform.tfstate` 가 그 자리다 — **우리는 담고 서버는 뺀다**(집합이 양방향으로 다르다).
+ * 그래서 zip 의 최상위는 둘(`site/`·`tfstate`)이고 서버는 안 벗긴다. 순서를 뒤집으면 우리만 벗긴다.
+ *
+ * ⚠ 이 케이스는 **연결 안 된 폴더**(출처 표시 주입 없음)여야 성립한다. 표시를 넣으면 `.zalkera/` 가
+ *   최상위에 하나 더 생겨 어느 순서로도 언랩이 안 돈다.
+ */
+test("래퍼 판정은 배제 전 목록으로 한다 — 순서를 뒤집으면 갈린다", async () => {
+    const files = {"site/index.html": "<h1>hi</h1>", "terraform.tfstate": "{}"};
+    await withFolder(files, async (dir) => {
+        const packed = await packProject({projectDir: dir});
+        const names = (await import("./unzip.ts")).listZipEntries(packed.buffer);
+        assert.ok(names.includes("terraform.tfstate"), "포장기가 tfstate 를 뺐다 — 전제가 사라졌다");
+        assert.ok(!names.some((n) => n.startsWith(".zalkera/")), "표시가 실렸다 — 전제가 사라졌다");
+
+        const server = await serverSideDigest(packed.buffer);
+        assert.equal(await folderVersionDigest(dir, null), server);
+
+        // 순서를 뒤집으면 **다른 값**이 나와야 한다 — 그래야 이 케이스가 그 축을 짚는다.
+        const raw = [
+            {path: "site/index.html", sha256: await hashOf(dir, "site/index.html")},
+            {path: "terraform.tfstate", sha256: await hashOf(dir, "terraform.tfstate")},
+        ];
+        const pre = raw.filter((e) => !serverExcluded(e.path));
+        const unwrapped = unwrapSingleRoot(pre.map((e) => e.path));
+        const wrongOrder = sourceVersionDigest(pre.map((e, i) => ({path: unwrapped[i]!, sha256: e.sha256})));
+        assert.notEqual(wrongOrder, server, "두 순서가 같은 답을 냈다 — 이 케이스는 순서 축을 못 짚는다");
+    });
+});
+
+async function hashOf(root: string, rel: string): Promise<string> {
+    return createHash("sha256").update(await readFile(join(root, rel))).digest("hex");
+}

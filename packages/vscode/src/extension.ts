@@ -29,6 +29,7 @@ import {
   ours,
   plainNotice,
   count,
+  shortVersion,
   countJosa,
   resolveHelpUrl,
   type NpmPreference,
@@ -1418,7 +1419,12 @@ async function openSiteFolder(dir: string): Promise<void> {
  */
 async function exportZipCommand(): Promise<void> {
   const dir = requireWorkspace();
-  const suggested = `${basename(dir)}-source.zip`;
+  // ⚠ **판을 이름에 담는다**(memo191 — 오너 물음 셋 중 「이 zip 의 판」). zip 은 손을 떠나면
+  //    출처를 잃는다 — 받은 사람이 파일 하나를 들고 「이게 어느 판이냐」를 물을 자리가 없었다.
+  //    이름에 있으면 그 물음이 파일 목록에서 끝난다. 여는 것보다 앞서 답한다.
+  //    ⚠ 앞 8자는 **표시**다. 판정은 64자로 한다(`sourceVersion.ts`).
+  const stamp = shortVersion(await folderVersionDigest(dir, currentFolderBinding()).catch(() => null));
+  const suggested = `${basename(dir)}-source${stamp === null ? "" : `-${stamp}`}.zip`;
   const saveAt = await vscode.window.showSaveDialog({
     title: "넘기실 zip 을 저장할 곳",
     defaultUri: vscode.Uri.file(join(dirname(dir), suggested)),
@@ -1436,7 +1442,9 @@ async function exportZipCommand(): Promise<void> {
   await writeOwnFile(saveAt.fsPath, result.buffer);
 
   log(`파일 ${count(result.fileCount)}개 · ${Math.round(result.buffer.length / 1024)}KB 로 포장했습니다.`);
-  log(`sha256: ${result.sha256}`);
+  // ⚠ 둘은 다른 것을 말한다 — `sha256` 은 **이 zip 바이트가 온전한가**(전송 무결성), 판은
+  //    **어느 소스인가**(신원). 압축을 다시 하면 sha 는 바뀌고 판은 안 바뀐다.
+  log(`판: ${stamp ?? "모름"} · zip sha256: ${result.sha256}`);
   void vscode.window.showInformationMessage(
     // ⚠ **「전부 뺐다」고 말하지 않는다.** `isSecretFile` 이 스스로 보증을 좁혀 뒀다 — 우리가
     //    발급한 `.env*` 는 반드시, 널리 쓰이는 표준 자격증명 이름은 최선, 그 밖은 보증하지
@@ -3333,15 +3341,21 @@ async function showHistory(): Promise<void> {
 
   output.show();
   log("── 버전 이력 ──");
+  // ⚠ **번호와 판을 함께 적는다**(memo191). 번호는 올릴 때마다 1씩 느는 **빌드 번호**라 「언제」만
+  //    말한다. 무엇이 담겼는지는 지문이 말하고, 그 둘이 어긋나는 자리가 실제로 있다 —
+  //    **되돌린 판은 번호가 새것인데 지문이 같다**(같은 트리다). 지문이 없으면 이 목록이 그것을
+  //    보여 줄 유일한 자리인데도 못 보여 준다.
   for (const r of revisions) {
     const when = revisionWhen(r.createdAt);
+    const digest = shortVersion(r.versionDigest);
     log(
-      `${r.isActive ? "▶" : " "} 버전 ${r.revisionNo} · ${r.status} · ${when}${
+      `${r.isActive ? "▶" : " "} 빌드 #${count(r.revisionNo)} · 판 ${digest ?? "모름"} · ${r.status} · ${when}${
         r.label ? ` · ${plainNotice(r.label, 80)}` : ""
       }`,
     );
   }
   log(`(총 ${revisions.length}개 · 바꾸려면 「버전 전환」을 쓰세요)`);
+  log("  빌드 번호는 «언제», 판은 «무엇이 담겼는가» 입니다 — 되돌린 판은 번호가 새것이고 판이 같습니다.");
 }
 
 /** F2 — 문서 하나를 보고 진단을 갱신한다. 우리 프로젝트 밖 파일은 보지 않는다. */
