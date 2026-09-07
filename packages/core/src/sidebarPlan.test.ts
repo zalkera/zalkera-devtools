@@ -475,24 +475,6 @@ test("다르면 그 자리의 값만 다르다", () => {
 });
 
 /**
- * 🔴 **모름은 셋째 아이콘이어야 한다.** 판정을 아이콘에 맡긴 순간, 「모름」이 「같음」 아이콘을 쓰면
- * 그것이 곧 **모름→같음 접힘**이다. 종전에는 묶음 머리의 「같음」 문자열이 그 자리를 막았는데
- * 이 판이 머리를 걷으면서 그 그물도 함께 사라졌다(심의 실측).
- */
-test("모름은 같음·다름 어느 아이콘도 쓰지 않는다 — 셋이 갈린다", () => {
-    const unknown = versionGroup({activeVersion: {revisionNo: 3, digest: null}, folderVersion: AAA});
-    const same = versionGroup({activeVersion: {revisionNo: 4, digest: AAA}, folderVersion: AAA});
-    const diff = versionGroup({activeVersion: {revisionNo: 4, digest: AAA}, folderVersion: BBB});
-    assert.notEqual(localIcon(unknown), localIcon(same), "모름이 「같음」 아이콘을 썼다");
-    assert.notEqual(localIcon(unknown), localIcon(diff), "모름이 「다름」 아이콘을 썼다");
-    // 양성 짝 — 세 값이 실제로 무엇인지 못박는다(셋 다 undefined 여도 위 두 줄은 통과한다).
-    assert.deepEqual(
-        [localIcon(same), localIcon(diff), localIcon(unknown)],
-        ["pass", "edit", "folder"],
-    );
-});
-
-/**
  * 🔴 **툴팁이 「다음에 할 일」의 유일한 자리다.** 줄에서 판정 낱말을 걷었으므로 지침이 여기 독점된다 —
  * 그런데 그것을 양성으로 재는 시험이 없어, 두 동사를 지워도 초록이었다(심의 실측).
  */
@@ -547,29 +529,6 @@ test("적대 판 번호는 「빌드 #?」로 접힌다 — count 가 비숫자�
     const server = infoLabels(g).find((l) => l.startsWith("서버"))!;
     assert.ok(!server.includes("command:"), `번호 자리로 링크가 샜다: ${server}`);
     assert.match(server, /빌드 #\?/);
-});
-
-/**
- * 🔴 **아이콘이 뜻을 나르면 말로도 실어야 한다.** ThemeIcon 은 스크린리더가 안 읽으므로, 그 사용자에게는
- * 판정이 아예 존재하지 않게 된다. 「줄에 판정 낱말을 안 쓴다」는 **시각 문면**의 결정이고 음성은 그 밖이다.
- */
-test("로컬 줄이 판정을 말로도 싣는다 — 세 상태가 음성에서도 갈린다", () => {
-    const spokenOf = (patch: Parameters<typeof versionGroup>[0]) => {
-        const line = versionGroup(patch).items.find(
-            (i) => i.kind === "info" && i.label.startsWith("로컬"),
-        );
-        return line?.kind === "info" ? line.spoken : undefined;
-    };
-
-    assert.match(spokenOf({activeVersion: {revisionNo: 4, digest: AAA}, folderVersion: AAA})!, /서버와 같음/);
-    assert.match(spokenOf({activeVersion: {revisionNo: 4, digest: AAA}, folderVersion: BBB})!, /서버와 다름/);
-    assert.match(
-        spokenOf({activeVersion: {revisionNo: 3, digest: null}, folderVersion: AAA})!,
-        /대조할 수 없음/,
-    );
-    // 양성 짝 — 시각 라벨은 여전히 판정 낱말을 안 쓴다(음성을 넣느라 화면이 바뀌면 안 된다).
-    const g = versionGroup({activeVersion: {revisionNo: 4, digest: AAA}, folderVersion: AAA});
-    assert.ok(!/같음/.test(infoLabels(g).join("\n")));
 });
 
 /**
@@ -649,23 +608,6 @@ test("확장 판을 모르면 그 줄이 없다", () => {
     assert.ok(!infoLabels(help).some((l) => l.startsWith("확장 ")));
 });
 
-/**
- * ⚠ **묶음 머리에는 값을 안 둔다**(§12.1 ⑸). 아래 두 줄이 같은 것을 말하므로 머리에 또 적으면
- * 한 화면이 사실을 두 번 반복한다 — `description` 을 도로 다는 변이를 이 시험이 막는다.
- */
-test("값이 있어도 묶음 머리는 비어 있다", () => {
-    for (const patch of [
-        {activeVersion: {revisionNo: 4, digest: AAA}, folderVersion: AAA},
-        {activeVersion: {revisionNo: 4, digest: AAA}, folderVersion: BBB},
-        {activeVersion: {revisionNo: 3, digest: null}, folderVersion: AAA},
-    ]) {
-        assert.equal(versionGroup(patch).description, undefined, "머리가 값을 다시 들었다");
-    }
-    // 양성 짝 — 다른 묶음은 여전히 머리에 값을 둔다(이 시험이 그 관례까지 지우지 않게).
-    const site = sidebarPlan(WITH_SOURCE).find((g) => g.id === "site")!;
-    assert.equal(site.description, "credium");
-});
-
 /** 새 필드를 안 넘기는 부르는 쪽(라벨 검사기가 그렇다)이 터지지 않아야 한다. */
 test("버전 필드를 안 넘겨도 선다", () => {
     const bare = {
@@ -675,4 +617,296 @@ test("버전 필드를 안 넘겨도 선다", () => {
     const g = sidebarPlan(bare).find((x) => x.id === "version")!;
     assert.deepEqual(infoLabels(g), []);
     assert.equal(g.description, undefined);
+});
+
+/** 원장 스냅샷 픽스처 — `complete` 는 **무상한 조회**의 표식이라 리터럴로만 만든다. */
+const ledgerOf = (...rows: [number, string | null][]) => ({
+    tenant: "credium",
+    revisions: rows.map(([revisionNo, versionDigest]) => ({revisionNo, versionDigest})),
+    complete: true as const,
+    askedAt: "2026-09-07T03:00:00Z",
+});
+const CCC = "cc".repeat(32);
+const headOf = (patch: Parameters<typeof versionGroup>[0]) => versionGroup(patch).description;
+
+/**
+ * 🔴 **여덟 판정이 여덟 아이콘으로 갈린다.** 판정을 아이콘에 맡긴 순간, 두 상태가 같은 아이콘을 쓰면
+ * 그것이 곧 접힘이다 — 「모름」이 「같음」 아이콘을 쓰면 화면이 모르는 것을 같다고 말한다.
+ * 부등만 재면 셋 다 `undefined` 여도 통과하므로 **값 자체를 못박는다**.
+ */
+test("판정마다 아이콘이 갈린다 — 접히면 모름이 같음으로 읽힌다", () => {
+    const icons = {
+        same: localIcon(versionGroup({activeVersion: {revisionNo: 4, digest: AAA}, folderVersion: AAA})),
+        differs: localIcon(versionGroup({activeVersion: {revisionNo: 4, digest: AAA}, folderVersion: BBB})),
+        noServerDigest: localIcon(versionGroup({activeVersion: {revisionNo: 3, digest: null}, folderVersion: AAA})),
+        stale: localIcon(
+            versionGroup({activeVersion: {revisionNo: 4, digest: AAA}, folderVersion: BBB, folderStale: true}),
+        ),
+        serverNewer: localIcon(
+            versionGroup({
+                activeVersion: {revisionNo: 4, digest: BBB},
+                folderVersion: AAA,
+                ledger: ledgerOf([3, AAA], [4, BBB]),
+            }),
+        ),
+        localNewer: localIcon(
+            versionGroup({
+                activeVersion: {revisionNo: 3, digest: AAA},
+                folderVersion: BBB,
+                ledger: ledgerOf([3, AAA], [4, BBB]),
+            }),
+        ),
+        editing: localIcon(
+            versionGroup({
+                activeVersion: {revisionNo: 4, digest: AAA},
+                folderVersion: CCC,
+                ledger: ledgerOf([4, AAA]),
+                baseline: {revisionNo: 4, folderVersion: AAA, serverVersion: AAA},
+            }),
+        ),
+        checkNeeded: localIcon(
+            versionGroup({
+                activeVersion: {revisionNo: 4, digest: AAA},
+                folderVersion: CCC,
+                ledger: ledgerOf([4, AAA]),
+                baseline: {revisionNo: 4, folderVersion: CCC, serverVersion: AAA},
+            }),
+        ),
+    };
+    assert.deepEqual(icons, {
+        same: "pass",
+        differs: "diff",
+        noServerDigest: "folder",
+        stale: "sync",
+        serverNewer: "cloud-download",
+        localNewer: "cloud-upload",
+        editing: "edit",
+        checkNeeded: "warning",
+    });
+    assert.equal(new Set(Object.values(icons)).size, 8, "두 판정이 같은 아이콘을 쓴다 — 접혔다");
+});
+
+/**
+ * 🔴 **머리가 결론을 적는다**(오너 확정). 접어 두어도 결론은 보여야 한다.
+ * 종전 판은 머리를 비워 두었고 그 계약을 시험이 고정했다 — 이 시험이 그것을 대체한다.
+ */
+test("묶음 머리가 결론을 적는다", () => {
+    assert.equal(headOf({activeVersion: {revisionNo: 4, digest: AAA}, folderVersion: AAA}), "일치");
+    assert.equal(headOf({activeVersion: {revisionNo: 4, digest: AAA}, folderVersion: BBB}), "다름");
+    assert.equal(headOf({activeVersion: {revisionNo: 3, digest: null}, folderVersion: AAA}), "대조 불가");
+    // 양성 짝 — 다른 묶음의 머리 관례는 그대로다(이 변경이 그것까지 덮지 않게).
+    assert.equal(sidebarPlan(WITH_SOURCE).find((g) => g.id === "site")!.description, "credium");
+});
+
+/** 🔴 **모르면 결론을 안 적는다.** 폴더를 못 읽었는데 낱말을 적으면 그것이 지어낸 판정이다. */
+test("로컬을 모르면 머리가 비어 있다", () => {
+    assert.equal(headOf({activeVersion: {revisionNo: 4, digest: AAA}, folderVersion: null}), undefined);
+    assert.equal(headOf({activeVersion: null, folderVersion: AAA}), undefined);
+    // 양성 짝 — 값이 다 있으면 머리를 채운다(위 두 줄이 「머리가 늘 빈다」를 재는 것이 아니다).
+    assert.equal(headOf({activeVersion: {revisionNo: 4, digest: AAA}, folderVersion: AAA}), "일치");
+});
+
+/**
+ * 🔴 **되돌림 — 번호로 재면 답이 뒤집히는 자리다.**
+ * 원장 `#3 A · #4 B · #5 A(켜짐)` 에서 로컬이 B 면, 번호로는 5 > 4 라 「서버가 더 최신」이지만
+ * 내용으로는 A 가 #3 · B 가 #4 이므로 **로컬이 더 나중**이다. 접미 A 가 그 근거를 줄에 박는다.
+ */
+test("되돌림에서 머리와 두 접미가 함께 선다", () => {
+    const g = versionGroup({
+        activeVersion: {revisionNo: 5, digest: AAA},
+        folderVersion: BBB,
+        ledger: ledgerOf([3, AAA], [4, BBB], [5, AAA]),
+    });
+    assert.equal(g.description, "로컬이 더 최신");
+    assert.deepEqual(infoLabels(g), [
+        "서버 — aaaaaaaa / 빌드 #5 · #3 내용",
+        "로컬 — bbbbbbbb / 빌드 #4 내용",
+    ]);
+});
+
+/** 반대 방향. 부호를 뒤집는 변이가 여기서 죽는다. */
+test("서버가 더 나중 내용이면 그렇게 적는다", () => {
+    const g = versionGroup({
+        activeVersion: {revisionNo: 5, digest: CCC},
+        folderVersion: AAA,
+        ledger: ledgerOf([3, AAA], [5, CCC]),
+    });
+    assert.equal(g.description, "서버가 더 최신");
+    assert.deepEqual(infoLabels(g), ["서버 — cccccccc / 빌드 #5", "로컬 — aaaaaaaa / 빌드 #3 내용"]);
+});
+
+/**
+ * 🔴 **지문 없는 옛 판이 순서를 뒤집는다.** `#1 NULL(실제 A) · #2 B · #3 A(켜짐)` 에서 로컬이 B 면
+ * 보이는 대로는 「서버가 더 최신」이지만 진실은 그 반대다. 그래서 **말하지 않는다.**
+ */
+test("작은 번호에 지문 없는 판이 있으면 방향을 말하지 않는다", () => {
+    const gated = versionGroup({
+        activeVersion: {revisionNo: 3, digest: AAA},
+        folderVersion: BBB,
+        ledger: ledgerOf([1, null], [2, BBB], [3, AAA]),
+    });
+    assert.equal(gated.description, "다름", "뒤집힐 수 있는 자리에서 방향을 말했다");
+    assert.match(gated.tooltip ?? "", /지문이 없는 옛 판/);
+
+    // 양성 짝 ① — 그 행에 지문만 있으면 방향이 선다(게이트가 늘 닫혀 있는 것이 아니다).
+    //   A 는 #3 · B 는 #2 이므로 답은 「서버가 더 최신」이다. 위 게이트 케이스가 막는 것은 바로 이
+    //   답이 **NULL 이 실은 A 였다면 뒤집힌다**는 사실이다 — 같은 원장 모양에서 답이 갈린다.
+    assert.equal(
+        headOf({
+            activeVersion: {revisionNo: 3, digest: AAA},
+            folderVersion: BBB,
+            ledger: ledgerOf([1, CCC], [2, BBB], [3, AAA]),
+        }),
+        "서버가 더 최신",
+    );
+    // 양성 짝 ② — **작은 쪽 위**의 NULL 은 순서를 못 바꾸므로 막지 않는다(과잉 게이트 방지).
+    assert.equal(
+        headOf({
+            activeVersion: {revisionNo: 4, digest: AAA},
+            folderVersion: BBB,
+            ledger: ledgerOf([2, BBB], [3, null], [4, AAA]),
+        }),
+        "서버가 더 최신",
+    );
+});
+
+/** 원장이 없으면 방향의 재료가 없다 — 접미도 안 붙는다. */
+test("원장이 없으면 방향도 접미도 없다", () => {
+    const g = versionGroup({activeVersion: {revisionNo: 5, digest: AAA}, folderVersion: BBB});
+    assert.equal(g.description, "다름");
+    assert.deepEqual(infoLabels(g), ["서버 — aaaaaaaa / 빌드 #5", "로컬 — bbbbbbbb"]);
+});
+
+/** 같은 내용이 셋 이상이면 줄에는 **가장 이른 번호** 하나. 콘솔 `sameSourceOf` 와 같은 선택이다. */
+test("같은 내용이 여럿이면 가장 이른 번호를 든다", () => {
+    const g = versionGroup({
+        activeVersion: {revisionNo: 7, digest: AAA},
+        folderVersion: BBB,
+        ledger: ledgerOf([3, AAA], [4, BBB], [5, AAA], [7, AAA]),
+    });
+    assert.deepEqual(infoLabels(g), [
+        "서버 — aaaaaaaa / 빌드 #7 · #3 내용",
+        "로컬 — bbbbbbbb / 빌드 #4 내용",
+    ]);
+});
+
+/**
+ * 🔴 **「지문인가」를 묻는 술어는 하나여야 한다.** 느슨하면 `"abc"` 두 행이 서로 같다고 접혀,
+ * 한 화면이 「지문 없음(모른다)」과 「빌드 #N 내용(안다)」을 동시에 말한다.
+ */
+test("지문 모양이 아닌 값은 원장 판정에 안 들어간다", () => {
+    const g = versionGroup({
+        activeVersion: {revisionNo: 4, digest: "abc"},
+        folderVersion: "abc",
+        ledger: ledgerOf([3, "abc"], [4, "abc"]),
+    });
+    assert.equal(g.description, "대조 불가");
+    assert.ok(!infoLabels(g).some((l) => l.includes("내용")), `접미가 붙었다: ${infoLabels(g).join(" | ")}`);
+    // 양성 짝 — 진짜 지문이면 같은 자리에서 관계가 선다.
+    assert.equal(
+        headOf({
+            activeVersion: {revisionNo: 4, digest: AAA},
+            folderVersion: AAA,
+            ledger: ledgerOf([3, AAA], [4, AAA]),
+        }),
+        "일치",
+    );
+});
+
+/** 기준점이 「고쳤다」를 말해 줄 때만 「수정 중」이라 적는다. */
+test("기준점이 있으면 수정 중과 확인 필요를 가른다", () => {
+    const base = {activeVersion: {revisionNo: 4, digest: AAA}, folderVersion: CCC, ledger: ledgerOf([4, AAA])};
+    assert.equal(
+        headOf({...base, baseline: {revisionNo: 4, folderVersion: AAA, serverVersion: AAA}}),
+        "수정 중",
+    );
+    assert.equal(
+        headOf({...base, baseline: {revisionNo: 4, folderVersion: CCC, serverVersion: AAA}}),
+        "확인 필요",
+    );
+    // 🔴 기준점이 없으면 **방향도 원인도 지어내지 않는다.**
+    assert.equal(headOf(base), "다름");
+});
+
+/** 재계산 중에는 낡은 판정을 사실로 그리지 않는다. */
+test("폴더를 다시 세는 중이면 확인 중이라 적는다", () => {
+    assert.equal(
+        headOf({activeVersion: {revisionNo: 4, digest: AAA}, folderVersion: AAA, folderStale: true}),
+        "확인 중",
+    );
+    // 양성 짝 — 다 세고 나면 결론이 선다.
+    assert.equal(
+        headOf({activeVersion: {revisionNo: 4, digest: AAA}, folderVersion: AAA, folderStale: false}),
+        "일치",
+    );
+});
+
+/**
+ * 🔴 **금지어.** 지문은 순서를 안 담고, 되돌린 판에서는 번호 순서가 내용 순서와 반대다 —
+ * 「낡음」류는 바로 그 자리에서 거짓이 된다. 머리·줄·음성·툴팁 **전부**를 훑는다.
+ */
+test("어떤 상태에서도 「낡음」류를 말하지 않는다", () => {
+    const states: Parameters<typeof versionGroup>[0][] = [
+        {activeVersion: {revisionNo: 4, digest: AAA}, folderVersion: AAA},
+        {activeVersion: {revisionNo: 4, digest: AAA}, folderVersion: BBB},
+        {activeVersion: {revisionNo: 3, digest: null}, folderVersion: AAA},
+        {activeVersion: {revisionNo: 4, digest: AAA}, folderVersion: AAA, folderStale: true},
+        {activeVersion: {revisionNo: 5, digest: AAA}, folderVersion: BBB, ledger: ledgerOf([3, AAA], [4, BBB], [5, AAA])},
+        {activeVersion: {revisionNo: 5, digest: CCC}, folderVersion: AAA, ledger: ledgerOf([3, AAA], [5, CCC])},
+        {
+            activeVersion: {revisionNo: 4, digest: AAA}, folderVersion: CCC, ledger: ledgerOf([4, AAA]),
+            baseline: {revisionNo: 4, folderVersion: AAA, serverVersion: AAA},
+        },
+        {
+            activeVersion: {revisionNo: 4, digest: AAA}, folderVersion: CCC, ledger: ledgerOf([4, AAA]),
+            baseline: {revisionNo: 4, folderVersion: CCC, serverVersion: AAA},
+        },
+    ];
+    let sawDirection = false;
+    for (const patch of states) {
+        const g = versionGroup(patch);
+        const all = [g.description ?? "", g.tooltip ?? "", ...g.items.map((i) => i.label),
+            ...g.items.map((i) => (i.kind === "info" ? (i.spoken ?? "") : ""))].join("\n");
+        for (const banned of ["낡", "뒤처", "오래된", "최신이 아", "앞섰"]) {
+            assert.ok(!all.includes(banned), `금지어 「${banned}」가 실렸다: ${all}`);
+        }
+        if (all.includes("더 최신")) sawDirection = true;
+    }
+    // 양성 짝 — 「더 최신」은 실제로 나온다(위 반복이 빈 집합을 훑고 있는 것이 아니다).
+    assert.ok(sawDirection, "방향 문구가 한 번도 안 나왔다 — 이 시험의 관할이 비었다");
+    assert.equal(states.length, 8, "여덟 판정을 다 훑어야 한다");
+});
+
+/**
+ * 🔴 **음성이 머리와 같은 낱말을 싣는다.** ThemeIcon 은 스크린리더가 안 읽으므로 그 사용자에게는
+ * 아이콘이 나르는 판정이 존재하지 않는다. 표를 갈라 놓으면 여기서 죽는다.
+ */
+test("로컬 줄의 음성이 머리와 같은 낱말을 싣는다", () => {
+    const spokenOf = (patch: Parameters<typeof versionGroup>[0]) => {
+        const line = versionGroup(patch).items.find((i) => i.kind === "info" && i.label.startsWith("로컬"));
+        return line?.kind === "info" ? (line.spoken ?? "") : "";
+    };
+    for (const patch of [
+        {activeVersion: {revisionNo: 4, digest: AAA}, folderVersion: AAA},
+        {activeVersion: {revisionNo: 4, digest: AAA}, folderVersion: BBB},
+        {activeVersion: {revisionNo: 3, digest: null}, folderVersion: AAA},
+        {activeVersion: {revisionNo: 5, digest: AAA}, folderVersion: BBB, ledger: ledgerOf([3, AAA], [4, BBB], [5, AAA])},
+    ] as Parameters<typeof versionGroup>[0][]) {
+        const head = versionGroup(patch).description!;
+        assert.ok(spokenOf(patch).includes(head), `음성이 머리(${head})와 갈렸다: ${spokenOf(patch)}`);
+    }
+    // 양성 짝 — 시각 라벨은 여전히 판정 낱말을 안 쓴다(음성을 넣느라 화면이 바뀌면 안 된다).
+    const g = versionGroup({activeVersion: {revisionNo: 4, digest: AAA}, folderVersion: AAA});
+    assert.ok(!/일치/.test(infoLabels(g).join("\n")));
+});
+
+/** 🔴 접미의 번호도 서버가 준 값이다 — `count` 가 비숫자를 거부해야 링크가 못 실린다. */
+test("적대 판 번호는 접미 자리로도 못 샌다", () => {
+    const g = versionGroup({
+        activeVersion: {revisionNo: 5, digest: AAA},
+        folderVersion: BBB,
+        ledger: ledgerOf([3, AAA], ["4](b:c)" as unknown as number, BBB], [5, AAA]),
+    });
+    const all = infoLabels(g).join("\n");
+    assert.ok(!all.includes("](b:c)"), `접미 자리로 링크가 샜다: ${all}`);
 });

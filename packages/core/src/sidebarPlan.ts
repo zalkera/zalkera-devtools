@@ -15,6 +15,7 @@
 import {displayPath} from "./displayPath.ts";
 import {count, ours, plainNotice} from "./notice.ts";
 import {compareVersions, shortVersion, VERSION_DIGEST_SHORT} from "./sourceVersion.ts";
+import {ledgerFacts, type LedgerSnapshot} from "./versionLedger.ts";
 
 export interface SidebarState {
     signedIn: boolean;
@@ -77,6 +78,21 @@ export interface SidebarState {
      *   뜻하는지 아무도 말할 수 없었다.
      */
     activeVersion?: {revisionNo: number; digest: string | null} | null;
+    /**
+     * **무상한 조회로 받은 원장 전량**(memo191). 방향 판정의 유일한 재료다 — 상한 페이지를 여기 실으면
+     * 잘린 앞부분이 안 보여 「처음 등장한 번호」가 거짓이 된다. `complete: true` 리터럴이 그것을 타입으로 막는다.
+     */
+    ledger?: LedgerSnapshot | null;
+    /**
+     * **마지막으로 서버와 맞췄던 순간의 사실**(memo191 ⑶). 「내가 고쳤다」와 「안 고쳤는데 안 맞는다」를
+     * 가르는 유일한 근거다 — 지문만으로는 「안 맞는다」까지밖에 모른다. 없으면 방향을 **지어내지 않는다**.
+     */
+    baseline?: {revisionNo: number; folderVersion: string; serverVersion: string | null} | null;
+    /**
+     * 폴더 값을 다시 세는 중인가(저장 직후 디바운스·계산 진행 중). 참이면 **낡은 판정을 사실로 그리지 않는다**
+     * — 결론 낱말이 머리에 붙은 뒤로는 낡은 「일치」가 더 단정적으로 읽힌다.
+     */
+    folderStale?: boolean;
     /**
      * **이 확장 자신의 판**(예: `0.25.0`). 확장이 자기 `package.json` 에서 읽어 넘긴다 —
      * 판정이 스스로 읽으면 시험이 배포 형상에 매인다.
@@ -414,10 +430,11 @@ export function sidebarPlan(state: SidebarState): PlanGroup[] {
             id: "version",
             label: "버전",
             icon: "history",
-            // ⚠ **머리에는 값을 안 둔다**(오너 확정). 바로 아래 두 줄이 같은 것을 말하므로 머리에
-            //    또 적으면 한 화면이 사실을 두 번 반복한다. 값은 자식 줄이 소유한다.
+            // ⚠ **머리에는 값이 아니라 결론을 둔다**(오너 확정). 두 줄이 값을 보이고 머리가 관계를
+            //    한 낱말로 적는다 — 접어 두어도 결론은 보인다. 값을 또 적으면 그때가 반복이다.
             // 「되돌리기」가 아니라 「버전」이다 — 여기서 하는 일은 **어느 버전을 켤지 고르는 것**이고,
             // 뒤로 가는 것은 그 한 경우일 뿐이다(오너 확정).
+            description: version.description,
             tooltip: version.tooltip,
             items: [
                 ...version.lines,
@@ -471,24 +488,27 @@ export function sidebarPlan(state: SidebarState): PlanGroup[] {
  *   두 값이 같은지를 **본다** — 판정 낱말보다 정렬이 강하다. 그래서 줄에서 판정 낱말을 걷었고,
  *   빌드 번호는 지문을 밀지 않게 **뒤에** 붙인다(서버 줄에만 — 로컬은 그 번호를 가질 수 없다).
  *
- * ■ 값이 셋이다 — **모름을 「다름」으로도 「같음」으로도 접지 않는다**
- *   아이콘 셋(`pass`·`edit`·`folder`)이 가르고, 값 칸의 「지문 없음」이 함께 말한다.
- *   그리고 `spoken` 이 같은 판정을 **소리로도** 싣는다 — 아이콘은 스크린리더가 안 읽는다.
+ * ■ **묶음 머리가 결론을 적는다**(오너 확정)
+ *   두 줄은 값을 보이고, 머리는 그 값들의 관계를 한 낱말로 적는다. 여덟 상태를 [VERSION_VERDICT] 하나가
+ *   소유한다 — 머리 문면·로컬 줄 아이콘·음성이 갈릴 자리를 없앤다.
  *
- * ■ **어느 쪽이 새것인지는 말하지 않는다**
- *   지문은 순서를 안 담는다. 「낡았다」고 적으면 방금 고친 사람에게 거짓이 되고, 그 사람이 자기
- *   작업을 서버 것으로 덮는다. 방향 판정은 별도 트랜치다(memo191 §12.2).
+ * ■ **방향은 「번호」가 아니라 「내용」으로 잰다**
+ *   되돌리기를 하면 새 번호에 옛 지문이 붙으므로 번호로 재면 답이 뒤집힌다([ledgerFacts] 참조).
+ *   그래서 두 지문이 원장에 **처음 나타난 번호**를 비교하고, 그 앞에 모르는 행이 있으면 **말하지 않는다**.
  *
- * ■ 묶음 머리에는 값을 안 둔다
- *   바로 아래 두 줄이 같은 것을 말하므로 머리에 또 적으면 한 화면이 사실을 두 번 반복한다.
+ * ■ **「최신」이 아니라 「더 최신」이다**
+ *   서버 줄은 **켜진 판**이지 원장의 맨 끝이 아니다 — 올려 두고 아직 안 켠 판이 있을 수 있다.
+ *   「로컬이 최신」이라고 적으면 그 판이 있는 순간 거짓이 된다. 「더」가 비교 대상이 두 줄임을 지킨다.
  */
 export function versionView(state: SidebarState): {
     tooltip: string;
+    description?: string;
     lines: PlanItem[];
 } {
     const hint = "어느 버전을 켤지 정합니다";
     const active = state.activeVersion ?? null;
     const mine = state.folderVersion ?? null;
+    const facts = ledgerFacts(state.ledger ?? null);
 
     // 로그인 전이거나 아직 아무것도 못 읽었다 — **지어내지 않는다.** 묶음은 그대로 서고 명령도 그대로다.
     if (!active) {
@@ -505,117 +525,180 @@ export function versionView(state: SidebarState): {
     const build = `빌드 #${count(active.revisionNo)}`;
     const theirs = shortVersion(active.digest);
     const mineShort = shortVersion(mine);
-    const verdict = compareVersions(mine, active.digest);
 
     /**
-     * **지문을 먼저 둔다**(오너 확정 문면). 라벨이 둘 다 두 글자라 값이 **같은 열에 세로로 정렬**되고,
-     * 사람은 「일치」라는 낱말을 읽기 전에 두 값이 같은지를 **본다**. 판정 낱말보다 정렬이 강하다.
+     * **접미 A — 켜진 판의 내용이 더 이른 판에서 왔는가.**
      *
+     * 🔴 이 표시가 **머리를 증명한다.** 없으면 되돌림 상황에서 화면이 자기모순으로 읽힌다:
      * ```
-     * 서버 — 969a61e0 / 빌드 #4
-     * 로컬 — 969a61e0
-     *        ↑ 같은 열
+     * 버전 · 로컬이 더 최신
+     *   서버 — 3f8a1c9d / 빌드 #5      ← 5 > 4 인데 왜 로컬이 더 최신?
+     *   로컬 — 7c2e5b10 / 빌드 #4 내용
      * ```
+     * 「· #3 내용」이 붙으면 그 자리에서 풀린다. 머리가 가장 안 믿길 때가 이 표시가 필요한 때다.
      *
-     * ⚠ **빌드 번호는 서버 줄에만, 그것도 뒤에 붙는다.** 그 번호는 서버가 올릴 때 부여하는 순번이라
-     *   로컬은 가질 수 없고(그 자리를 채우면 없는 것을 지어내는 셈이다), 앞에 두면 지문이 밀려
-     *   두 줄의 정렬이 깨진다.
+     * ⚠ **「되돌림」이라 쓰지 않는다.** 같은 소스를 한 번 더 올려도 지문이 같아지므로 되돌린 것이
+     *   아닐 수 있다. 「#3 내용」은 원장이 말하는 사실 그대로다.
+     */
+    const serverSameAs = (() => {
+        const first = facts.firstNo(active.digest);
+        return first !== null && first < active.revisionNo ? first : null;
+    })();
+
+    /** **접미 B — 이 폴더 내용이 원장의 몇 번 판인가.** 켜진 판과 같으면 두 줄의 지문이 눈으로 같아 잡음이다. */
+    const localSameAs = mine !== null && mine !== active.digest ? facts.firstNo(mine) : null;
+
+    /**
+     * 화면 문면·아이콘·음성이 **한 표에서** 나온다.
      *
-     * ⚠ 판정은 **아이콘**이 나른다 — 낱말로 또 적으면 눈이 이미 본 것을 글자로 반복한다.
-     *   세 상태를 셋으로 가른다: `pass`(같음) · `edit`(다름) · `folder`(대조 불가).
-     *   다음에 할 일은 툴팁이 말한다(그쪽은 낱말이 필요한 자리다).
+     * ⚠ 종전에는 호출부가 아이콘과 음성을 따로 넘겨 「✓ 인데 음성은 다름」이 타입으로 막히지 않았다.
+     *   머리 문구가 생기면서 갈릴 자리가 하나 더 늘었으므로 셋을 같은 행에 묶는다.
      *
-     * 🔴 **소독기 호출은 싱크(아래 템플릿) 안에 둔다.** 종전 판은 호출부에서 `plainNotice` 를 부르고
-     * 헬퍼가 `${ours(value)}` 로 받았는데, 그러면 검사기(`check-notice`)가 **눈이 먼다** — 그것은
-     * 템플릿 보간만 보고, `ours(맨 식별자)` 는 표기의 본래 용도라 무조건 통과시키며, 호출부의
-     * `serverLine(theirs)` 는 템플릿이 아니라 아예 안 본다.
+     * ⚠ **금지어**: 낡음·뒤처짐·오래됨·「최신이 아님」·앞섬. 지문은 순서를 안 담고, 되돌린 판에서는
+     *   번호 순서가 내용 순서와 반대다 — 그 낱말들은 바로 그 자리에서 거짓이 된다.
+     */
+    const VERSION_VERDICT = {
+        same: {head: "일치", icon: "pass"},
+        serverNewer: {head: "서버가 더 최신", icon: "cloud-download"},
+        localNewer: {head: "로컬이 더 최신", icon: "cloud-upload"},
+        editing: {head: "수정 중", icon: "edit"},
+        checkNeeded: {head: "확인 필요", icon: "warning"},
+        noServerDigest: {head: "대조 불가", icon: "folder"},
+        differs: {head: "다름", icon: "diff"},
+        stale: {head: "확인 중", icon: "sync"},
+    } as const;
+    type Verdict = keyof typeof VERSION_VERDICT;
+
+    /**
+     * ⚠ **소독기 호출은 싱크(템플릿) 안에 둔다.** 검사기(`check-notice`)는 템플릿 보간만 보고
+     * `ours(맨 식별자)` 는 무조건 통과시킨다 — 호출부에서 소독하고 문자열을 넘기면 눈이 먼다
+     * (실측: 그 모양에서 종료코드 0, 지금 모양에서 1).
      *
-     * **실측**(2026-09-07 · 격리 워크트리): 수정 전 판에서 소독을 빼면 검사기 종료코드 **0**,
-     * 지금 판에서 같은 변이는 **1**. 재현:
-     * ```
-     * git worktree add --detach /tmp/wt 1bfae86 && ln -s "$PWD/node_modules" /tmp/wt/node_modules
-     * cd /tmp/wt && sed -i 's/serverLine(theirsShown)/serverLine(theirs)/g' packages/core/src/sidebarPlan.ts
-     * node scripts/check-notice.mjs; echo $?    # 0 — 눈이 멀어 있었다
-     * ```
-     *
-     * ⚠ **`ours` 를 서버 값에 붙이지 않는다.** 그 표기의 뜻은 「서버가 정하지 않은 값이라고 사람이
-     *   판단했다」이고 **소독됐다는 사실과 다른 명제다** — 지문에 붙이면 거짓 서명이다.
-     *   `build` 는 `count` 출력(우리가 만든 문자열)이라 표기가 맞다.
-     *
-     * ⚠ 문면(「지문 없음」)도 헬퍼가 소유한다. 호출부가 문자열을 만들어 넘기면 그 자리가 다시
-     *   소독 밖이 된다.
+     * ⚠ **`ours` 를 서버 값에 붙이지 않는다.** 그 표기는 「서버가 정하지 않은 값」이라는 뜻이고
+     *   소독됐다는 사실과 다른 명제다. `build`·머리 문면은 우리가 만든 문자열이라 표기가 맞다.
      */
     const serverLine = (digest: string | null): PlanItem => ({
         kind: "info",
-        label: `서버 — ${digest === null ? "지문 없음" : plainNotice(digest, VERSION_DIGEST_SHORT)} / ${ours(build)}`,
+        label:
+            `서버 — ${digest === null ? "지문 없음" : plainNotice(digest, VERSION_DIGEST_SHORT)}` +
+            ` / ${ours(build)}` +
+            (serverSameAs === null ? "" : ` · #${count(serverSameAs)} 내용`),
         icon: "cloud",
     });
-    /**
-     * 로컬 줄. **판정은 키로 받고 아이콘·문면은 이 표가 소유한다.**
-     *
-     * ⚠ 종전 판은 문면을 **문자열 인자**로 받았는데, 그러면 `${ours(spoken)}` 이 맨 식별자라
-     *   검사기가 호출부를 못 본다 — 이 커밋이 방금 걷어낸 `${ours(value)}` 와 **같은 모양**이다
-     *   (보안·기능 두 축이 독립으로 짚었다). 오늘의 호출부가 전부 리터럴이라 구멍은 없었지만,
-     *   이 자리는 스크린리더 사용자에게 판정을 나르는 **유일한 매체**라 서버 문자열이 들어오면
-     *   「서버와 같음」을 위조할 수 있고 검사기는 침묵한다.
-     *
-     * ⚠ 표가 아이콘과 음성을 **함께** 들어 둘이 갈릴 수 없다 — 종전에는 호출부가 따로 넘겨
-     *   「✓ 인데 음성은 다름」이 타입으로 막히지 않았다.
-     */
-    const LOCAL_VERDICT = {
-        same: {icon: "pass", said: "서버와 같음"},
-        differs: {icon: "edit", said: "서버와 다름"},
-        unknown: {icon: "folder", said: "서버와 대조할 수 없음"},
-    } as const;
 
-    const localLine = (digest: string, verdict: keyof typeof LOCAL_VERDICT): PlanItem => {
-        const said = LOCAL_VERDICT[verdict].said;
+    /**
+     * 로컬 줄. 아이콘·음성이 [VERSION_VERDICT] 에서 나와 머리와 갈릴 수 없다.
+     *
+     * ⚠ **접미를 변수로 만들어 이어 붙이지 않는다.** 검사기는 보간이 소독기 호출인지를 **정적으로** 보는데,
+     *   `${tail}` 처럼 미리 만든 문자열을 끼우면 그 자리가 소독 밖인지 알 수 없다(실측: 그 모양에서 지목당했다).
+     *   그래서 접미 유무마다 **템플릿을 통째로 둘** 쓴다 — 중복이 그 정적 판독의 값이다.
+     */
+    const localLine = (digest: string, verdict: Verdict): PlanItem => {
+        // `ours` 는 **맨 식별자**여야 검사기가 표기로 읽는다 — 첨자 접근을 그대로 넣으면 허용 목록 밖이다.
+        const head = VERSION_VERDICT[verdict].head;
+        const n = localSameAs;
         return {
             kind: "info",
-            // ⚠ **소독기 호출을 지역 변수로 빼지 않는다.** 검사기는 보간이 소독기 호출인지를 보는데,
-            //    변수를 거치면 「이 값이 소독을 지났나」를 정적으로 못 본다(실측: `shown` 으로 빼자
-            //    두 자리를 지목당했다). 같은 호출을 두 번 쓰는 값이 그 정적 판독이다.
-            label: `로컬 — ${plainNotice(digest, VERSION_DIGEST_SHORT)}`,
-            icon: LOCAL_VERDICT[verdict].icon,
-            // 아이콘을 못 보는 눈에게 판정을 나르는 유일한 자리다(위 [spoken] KDoc).
-            spoken: `로컬 — ${plainNotice(digest, VERSION_DIGEST_SHORT)} · ${ours(said)}`,
+            label:
+                n === null
+                    ? `로컬 — ${plainNotice(digest, VERSION_DIGEST_SHORT)}`
+                    : `로컬 — ${plainNotice(digest, VERSION_DIGEST_SHORT)} / 빌드 #${count(n)} 내용`,
+            icon: VERSION_VERDICT[verdict].icon,
+            // 아이콘을 못 보는 눈에게 판정을 나르는 유일한 자리다 — 머리와 같은 낱말을 싣는다.
+            spoken:
+                n === null
+                    ? `로컬 — ${plainNotice(digest, VERSION_DIGEST_SHORT)} · ${ours(head)}`
+                    : `로컬 — ${plainNotice(digest, VERSION_DIGEST_SHORT)} / 빌드 #${count(n)} 내용 · ${ours(head)}`,
         };
     };
 
-    // 서버 판이 지문 이전에 만들어졌다 — **대조할 근거가 없다.** 그 사실을 그대로 적는다.
+    /**
+     * 켜진 판은 다른 창·콘솔·AI 가 바꿀 수 있고 이 캐시는 그 변화를 못 본다. 결론 낱말이 머리에 붙은
+     * 뒤로는 낡은 「일치」가 더 단정적으로 읽히므로 **언제 본 값인지**를 툴팁이 함께 말한다.
+     */
+    const done = (verdict: Verdict, tooltip: string, lines: PlanItem[]) => {
+        const ledger = state.ledger ?? null;
+        return {
+            description: VERSION_VERDICT[verdict].head,
+            tooltip:
+                ledger === null
+                    ? `${ours(hint)}\n${ours(tooltip)}`
+                    : `${ours(hint)}\n${ours(tooltip)}\n확인 시각 ${plainNotice(ledger.askedAt, 32)}`,
+            lines,
+        };
+    };
+
+    // ① 폴더 값을 다시 세는 중이다 — **낡은 판정을 사실로 그리지 않는다.**
+    if (state.folderStale === true && mineShort !== null) {
+        return done("stale", "이 폴더를 다시 세고 있습니다.", [serverLine(theirs), localLine(mineShort, "stale")]);
+    }
+
+    // ② 서버 판이 지문 이전에 만들어졌다 — **대조할 근거가 없다.**
     if (theirs === null) {
-        return {
-            tooltip:
-                `${ours(hint)}\n서버 판은 지문이 생기기 전에 올라간 것이라 로컬과 대조할 수 없습니다.\n` +
-                `한 번 더 올리시면 그때부터 대조됩니다.`,
-            lines: [
-                serverLine(null),
-                ...(mineShort === null ? [] : [localLine(mineShort, "unknown")]),
-            ],
-        };
+        return done(
+            "noServerDigest",
+            "서버 판은 지문이 생기기 전에 올라간 것이라 로컬과 대조할 수 없습니다.\n" +
+                "한 번 더 올리시면 그때부터 대조됩니다.",
+            [serverLine(null), ...(mineShort === null ? [] : [localLine(mineShort, "noServerDigest")])],
+        );
     }
 
-    if (verdict === "same") {
-        return {
-            tooltip: `${ours(hint)}\n로컬과 서버가 같은 소스입니다.`,
-            lines: [serverLine(theirs), localLine(mineShort ?? theirs, "same")],
-        };
+    // ③ 서버 판은 아는데 이 폴더를 모른다(열린 폴더 없음·아직 안 읽음). 아는 쪽만 적고 **결론은 안 적는다**.
+    if (mineShort === null || mine === null) {
+        return {tooltip: `${ours(hint)}\n로컬의 판은 아직 모릅니다.`, lines: [serverLine(theirs)]};
     }
 
-    if (verdict === "differs") {
-        return {
-            // ⚠ **어느 쪽이 새것인지 우리는 모른다.** 지문은 순서를 안 담는다 — 「낡았다」고 적으면
-            //   방금 고친 사람에게 거짓이 되고, 그 사람이 자기 작업을 서버 것으로 덮는다.
-            tooltip:
-                `${ours(hint)}\n로컬과 서버가 다른 소스입니다.\n` +
-                `로컬을 올리려면 「새 버전 배포」, 서버 것을 가져오려면 「서버 판으로 교체」.`,
-            lines: [serverLine(theirs), localLine(mineShort ?? "읽는 중", "differs")],
-        };
+    if (compareVersions(mine, active.digest) === "same") {
+        return done("same", "로컬과 서버가 같은 소스입니다.", [serverLine(theirs), localLine(mineShort, "same")]);
     }
 
-    // 서버 판은 아는데 이 폴더를 모른다(열린 폴더 없음·아직 안 읽음). 아는 쪽만 적는다.
-    return {
-        tooltip: `${ours(hint)}\n로컬의 판은 아직 모릅니다.`,
-        lines: [serverLine(theirs)],
-    };
+    // ④ 폴더는 맞춘 뒤로 안 바뀌었는데 서버와 다르다 — 원인이 셋이라 **결함이라 단정하지 않는다**.
+    const baseline = state.baseline ?? null;
+    if (baseline !== null && mine === baseline.folderVersion && active.digest === baseline.serverVersion) {
+        return done(
+            "checkNeeded",
+            `빌드 #${count(baseline.revisionNo)} 를 맞춘 뒤 이 폴더는 바뀌지 않았는데 지문이 서버와 다릅니다.\n` +
+                "① 그 판이 콘솔 zip 으로 올라가 도구가 빼는 파일(dist 등)을 담고 있거나\n" +
+                "② 지문이 생기기 전 규칙으로 저장됐거나\n" +
+                "③ 도구의 포장 규칙이 서버와 갈렸을 수 있습니다. 한 번 더 올리시면 맞춰집니다.",
+            [serverLine(theirs), localLine(mineShort, "checkNeeded")],
+        );
+    }
+
+    // ⑤ 이 폴더 내용이 원장에 있다 — 방향을 말할 수 있는 유일한 자리다.
+    const mineFirst = facts.firstNo(mine);
+    const theirsFirst = facts.firstNo(active.digest);
+    if (mineFirst !== null && theirsFirst !== null) {
+        if (facts.unknownBelow(Math.min(mineFirst, theirsFirst))) {
+            return done(
+                "differs",
+                `지문이 없는 옛 판이 있어 어느 쪽이 더 나중 내용인지 단정할 수 없습니다(${count(facts.unknownCount)}건).\n` +
+                    "로컬을 올리려면 「새 버전 배포」, 서버 것을 가져오려면 「서버 판으로 교체」.",
+                [serverLine(theirs), localLine(mineShort, "differs")],
+            );
+        }
+        const verdict: Verdict = mineFirst > theirsFirst ? "localNewer" : "serverNewer";
+        return done(
+            verdict,
+            verdict === "localNewer"
+                ? "이 폴더 내용이 서버에 켜진 판보다 원장에서 나중에 나온 것입니다."
+                : "서버에 켜진 판이 이 폴더 내용보다 원장에서 나중에 나온 것입니다.",
+            [serverLine(theirs), localLine(mineShort, verdict)],
+        );
+    }
+
+    // ⑥ 원장 어디에도 없다 — 기준점이 「고쳤다」를 말해 줄 때만 그렇게 적는다.
+    if (baseline !== null && mine !== baseline.folderVersion) {
+        return done(
+            "editing",
+            `빌드 #${count(baseline.revisionNo)} 를 맞춘 뒤 이 폴더가 바뀌었습니다.`,
+            [serverLine(theirs), localLine(mineShort, "editing")],
+        );
+    }
+    return done(
+        "differs",
+        "로컬과 서버가 다른 소스입니다. 어느 쪽이 더 나중인지는 알 수 없습니다.\n" +
+            "로컬을 올리려면 「새 버전 배포」, 서버 것을 가져오려면 「서버 판으로 교체」.",
+        [serverLine(theirs), localLine(mineShort, "differs")],
+    );
 }

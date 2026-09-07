@@ -54,6 +54,27 @@ export const VERSION_DIGEST_SHORT = 8;
 /** 최상위 단일 폴더 언랩의 최대 반복. 백엔드 `ArchiveNormalization.MAX_UNWRAP_DEPTH` 와 같아야 한다. */
 const MAX_UNWRAP_DEPTH = 8;
 
+/** 지문 규칙이 내는 값의 모양 — 소문자 hex 64자. 백엔드 `SourceVersionDigest.HEX_LENGTH` 와 같은 계약이다. */
+export const VERSION_DIGEST_PATTERN = /^[0-9a-f]{64}$/;
+
+/**
+ * **이 값이 판 지문인가.** 「안다/모른다」를 묻는 술어는 **하나뿐이어야 한다.**
+ *
+ * 🔴 종전에는 둘이었고 구간이 갈렸다 — [shortVersion] 은 「8자 이상인가」, [compareVersions] 는 「빈 문자열이
+ *    아닌가」를 물었다. 그래서 `"abc"` 같은 값이 실리면 한 화면이 동시에 **「지문 없음(=모른다)」과
+ *    「빌드 #N 내용(=안다)」**을 말할 수 있었다. 콘솔은 이 병을 먼저 겪고 술어를 하나로 좁혔다
+ *    (`site-revision-history/lib/format.ts`) — 두 레포가 같은 술어를 써야 같은 답이 나온다.
+ *
+ * ⚠ **「충분히 긴가」가 아니라 「지문인가」를 묻는다.** 길이만 보면 10자짜리 값이 `abcdefgh` 로
+ *   **자신 있게** 그려진다 — 유효한 지문이 아닌 것에 그럴듯한 신원을 붙이는 자리다.
+ *
+ * ⚠ 형을 먼저 본다. 서버가 준 값이라 문자열이 아닐 수 있고, `slice`·`test` 를 바로 부르면
+ *   사이드바가 통째로 죽는다(실측된 자리다).
+ */
+export function isVersionDigest(value: unknown): value is string {
+    return typeof value === "string" && VERSION_DIGEST_PATTERN.test(value);
+}
+
 /** 지문 입력 한 항목 — 상대경로(`/` 구분)와 그 파일 내용의 sha256(hex). */
 export interface VersionEntry {
     path: string;
@@ -111,7 +132,7 @@ export function sourceVersionDigest(entries: readonly VersionEntry[]): string | 
  *   형제 `count` 가 비숫자를 거부하는 것과 같은 이유다 — 이 값을 정하는 것은 서버다.
  */
 export function shortVersion(digest: unknown): string | null {
-    if (typeof digest !== "string" || digest.length < VERSION_DIGEST_SHORT) return null;
+    if (!isVersionDigest(digest)) return null;
     return digest.slice(0, VERSION_DIGEST_SHORT);
 }
 
@@ -122,7 +143,7 @@ export function shortVersion(digest: unknown): string | null {
  *   둘 다 틀리므로 값이 셋이다.
  */
 export function compareVersions(mine: unknown, theirs: unknown): "same" | "differs" | "unknown" {
-    // 문자열이 아니면 **모름**이다 — 서버가 준 값이라 형이 보장되지 않는다([shortVersion] 의 그 자리).
-    if (typeof mine !== "string" || typeof theirs !== "string" || mine === "" || theirs === "") return "unknown";
+    // 지문이 아니면 **모름**이다 — 서버가 준 값이라 형도 모양도 보장되지 않는다([isVersionDigest]).
+    if (!isVersionDigest(mine) || !isVersionDigest(theirs)) return "unknown";
     return mine === theirs ? "same" : "differs";
 }
