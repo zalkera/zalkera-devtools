@@ -624,7 +624,7 @@ const ledgerOf = (...rows: [number, string | null][]) => ({
     tenant: "credium",
     revisions: rows.map(([revisionNo, versionDigest]) => ({revisionNo, versionDigest})),
     complete: true as const,
-    askedAt: "2026-09-07T03:00:00Z",
+    askedAtLabel: "09:14",
 });
 const CCC = "cc".repeat(32);
 const headOf = (patch: Parameters<typeof versionGroup>[0]) => versionGroup(patch).description;

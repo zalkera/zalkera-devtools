@@ -15,7 +15,7 @@ const snap = (...rows: [number, string | null][]): LedgerSnapshot => ({
     tenant: "credium",
     revisions: rows.map(([revisionNo, versionDigest]) => ({revisionNo, versionDigest})),
     complete: true,
-    askedAt: "2026-09-07T03:00:00Z",
+    askedAtLabel: "09:14",
 });
 
 test("처음 등장한 번호를 든다 — 마지막이 아니라", () => {

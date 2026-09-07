@@ -345,7 +345,9 @@ function noteRevisions(
     tenant,
     revisions: revisions.map((r) => ({ revisionNo: r.revisionNo, versionDigest: r.versionDigest ?? null })),
     complete: true,
-    askedAt: new Date().toISOString(),
+    // ⚠ **여기서 지역 시각으로 만든다.** 판정 안에서 만들면 시험이 기계의 표준시에 따라 갈리고,
+    //    ISO 원문을 그대로 실으면 한국 사용자에게 UTC 를 보인다(형제 `home: homedir()` 과 같은 이유).
+    askedAtLabel: new Date().toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" }),
   };
 }
 

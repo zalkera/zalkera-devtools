@@ -44,13 +44,21 @@ export interface LedgerRow {
 /**
  * **무상한 조회로 받은** 원장 전량. `complete: true` 는 「이 목록은 잘리지 않았다」는 **선언**이다 —
  * 타입이 검증하지는 않는다(위 KDoc).
- * [askedAt] 은 이 목록을 받은 시각 — 켜진 판은 다른 창·콘솔·AI 가 바꿀 수 있어 화면이 낡을 수 있다.
  */
 export interface LedgerSnapshot {
     tenant: string;
     revisions: readonly LedgerRow[];
     complete: true;
-    askedAt: string;
+    /**
+     * **이 목록을 받은 시각 — 화면에 그대로 실을 문자열이다.** 켜진 판은 다른 창·콘솔·AI 가 바꿀 수 있고
+     * 이 캐시는 그 변화를 못 본다. 결론 낱말이 머리에 붙은 뒤로는 낡은 「일치」가 더 단정적으로 읽히므로
+     * **언제 본 값인지**를 툴팁이 함께 말한다.
+     *
+     * ⚠ **판정이 시각을 스스로 만들지 않는다.** ISO 원문을 그대로 실으면 한국 사용자에게 UTC 를 보이고,
+     *   여기서 지역화하면 시험이 **기계의 표준시에 따라 갈린다**. 형제 `home: homedir()` 과 같은 이유로
+     *   부르는 쪽(확장)이 만들어 넘긴다.
+     */
+    askedAtLabel: string;
 }
 
 export interface LedgerFacts {

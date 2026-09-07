@@ -623,7 +623,7 @@ export function versionView(state: SidebarState): {
             tooltip:
                 ledger === null
                     ? `${ours(hint)}\n${ours(tooltip)}`
-                    : `${ours(hint)}\n${ours(tooltip)}\n확인 시각 ${plainNotice(ledger.askedAt, 32)}`,
+                    : `${ours(hint)}\n${ours(tooltip)}\n확인 시각 ${plainNotice(ledger.askedAtLabel, 32)}`,
             lines,
         };
     };
@@ -689,8 +689,9 @@ export function versionView(state: SidebarState): {
         return done(
             verdict,
             verdict === "localNewer"
-                ? "이 폴더 내용이 서버에 켜진 판보다 원장에서 나중에 나온 것입니다."
-                : "서버에 켜진 판이 이 폴더 내용보다 원장에서 나중에 나온 것입니다.",
+                // ⚠ 「원장」은 우리 낱말이다 — 화면·매뉴얼은 「버전 목록」으로 말한다(배송 문면 일관).
+                ? "이 폴더 내용이 서버에 켜진 판보다 버전 목록에 나중에 나타난 것입니다."
+                : "서버에 켜진 판이 이 폴더 내용보다 버전 목록에 나중에 나타난 것입니다.",
             [serverLine(theirs), localLine(mineShort, verdict)],
         );
     }
