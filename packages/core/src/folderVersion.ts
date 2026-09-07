@@ -27,11 +27,8 @@ import {join} from "node:path";
 import {buildProvenance, PROVENANCE_PATH} from "./provenance.ts";
 import {serverExcluded} from "./serverNormalization.ts";
 import {sourceVersionDigest, unwrapSingleRoot} from "./sourceVersion.ts";
-import {templateBreach} from "./zip.ts";
+import {isValueLessTemplate, templateBreach} from "./zip.ts";
 import {hashWorkdir} from "./workdir.ts";
-
-/** 값 없는 서식으로 이름 예외를 받는 파일 — 이 이름들만 내용 문턱을 확인한다(포장기와 같은 대상). */
-const TEMPLATE_SUFFIXES = [".example", ".sample", ".template"];
 
 /** 이 크기를 넘는 서식은 읽지 않고 떨군다 — `templateBreach` 의 내부 상한(256KB)과 같은 자리다. */
 const TEMPLATE_SCAN_MAX_BYTES = 256 * 1024;
@@ -75,7 +72,10 @@ export async function folderVersionDigest(root: string, tenant: string | null): 
  */
 async function breaches(root: string, path: string): Promise<boolean> {
     const name = path.slice(path.lastIndexOf("/") + 1).toLowerCase();
-    if (!TEMPLATE_SUFFIXES.some((s) => name.endsWith(s))) return false;
+    // ⚠ **포장기와 같은 술어를 쓴다 — 사본을 두지 않는다.** 접미(`.example`·`.sample`·`.template`)만
+    //   보면 `fixtures/seed.sample` 처럼 `.env` 와 무관한 파일까지 걸려, 포장기는 담는데 예측은
+    //   빼게 된다(발행 뒤 거짓 「다름」). 서식 예외는 `.env` 로 시작하는 이름에만 준다.
+    if (!isValueLessTemplate(name)) return false;
     const full = join(root, path);
     try {
         if ((await stat(full)).size > TEMPLATE_SCAN_MAX_BYTES) return true;

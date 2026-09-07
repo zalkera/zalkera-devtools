@@ -198,3 +198,34 @@ test("래퍼 판정은 배제 전 목록으로 한다 — 순서를 뒤집으면
 async function hashOf(root: string, rel: string): Promise<string> {
     return createHash("sha256").update(await readFile(join(root, rel))).digest("hex");
 }
+
+/**
+ * 🟠 **서식 예외는 `.env` 로 시작하는 이름에만 준다** — 포장기(`isValueLessTemplate`)와 같은 술어다.
+ *
+ * 접미(`.example`·`.sample`·`.template`)만 보면 `.env` 와 무관한 큰 픽스처까지 걸려, **포장기는 담는데
+ * 예측은 빼게 된다** — 발행 뒤 거짓 「다름」이다. 크기 문턱이 그 자리를 넓혔었다(재심의 실측).
+ */
+test("`.env` 아닌 큰 `*.sample` 은 포장기가 담고 예측도 담는다", async () => {
+    const big = "x".repeat(400_000); // 서식 스캔 상한(256KB)보다 크다
+    await withFolder({...SITE, "fixtures/seed.sample": big}, async (dir) => {
+        const packed = await packProject({projectDir: dir, provenanceTenant: TENANT});
+        assert.ok(
+            (await import("./unzip.ts")).listZipEntries(packed.buffer).includes("fixtures/seed.sample"),
+            "포장기가 뺐다 — 이 시험의 전제가 사라졌다",
+        );
+        assert.equal(await folderVersionDigest(dir, TENANT), await serverSideDigest(packed.buffer));
+    });
+});
+
+/** 양성 짝 — 값이 든 `.env` 서식은 **여전히** 양쪽에서 빠진다(위 수정이 그물을 넓히지 않았다). */
+test("값이 든 `.env.sample` 은 포장기도 예측도 뺀다", async () => {
+    const files = {...SITE, ".env.sample": "TOSS_SECRET_KEY=live_sk_abcdefghijklmnop\n"};
+    await withFolder(files, async (dir) => {
+        const packed = await packProject({projectDir: dir, provenanceTenant: TENANT});
+        assert.ok(
+            !(await import("./unzip.ts")).listZipEntries(packed.buffer).includes(".env.sample"),
+            "포장기가 값든 서식을 담았다 — 전제가 사라졌다",
+        );
+        assert.equal(await folderVersionDigest(dir, TENANT), await serverSideDigest(packed.buffer));
+    });
+});
