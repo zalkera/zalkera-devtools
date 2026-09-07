@@ -40,6 +40,21 @@ const sha256Hex = (text: string): string => createHash("sha256").update(text, "u
  * (그때는 포장기도 안 찍는다). 모르면 `null` 을 돌려준다(빈 폴더·읽기 실패).
  */
 export async function folderVersionDigest(root: string, tenant: string | null): Promise<string | null> {
+    return (await folderVersionSummary(root, tenant)).digest;
+}
+
+/**
+ * [folderVersionDigest] 와 같은 계산이되 **접은 항목 수**를 함께 돌려준다.
+ *
+ * 🔴 포장 갭을 알릴 때 이 수를 써야 한다. `PackResult.fileCount` 는 **우리 배제만** 지난 zip 항목 수이고,
+ *    서버가 돌려주는 수는 **서버 배제 + 언랩까지** 지난 값이라 **모집단이 다르다**. 두 값을 나란히 놓으면
+ *    시작 소스 팩(`.github/workflows/` 둘을 서버만 뺀다)에서 「로컬 42 / 서버 40」이 떠, 정상 차이를
+ *    결함처럼 보이게 한다(심의 지적).
+ */
+export async function folderVersionSummary(
+    root: string,
+    tenant: string | null,
+): Promise<{digest: string | null; fileCount: number}> {
     const manifest = await hashWorkdir(root);
     const entries: {path: string; sha256: string}[] = [];
     for (const [path, {sha256}] of Object.entries(manifest)) {
@@ -49,7 +64,7 @@ export async function folderVersionDigest(root: string, tenant: string | null): 
     }
     // ⚠ **소스가 하나도 없으면 판도 없다**(모름). 아래 출처 표시는 우리가 넣는 기록물이라, 그것만
     //    남은 목록을 판이라 부르면 **빈 폴더가 지문을 갖는다** — 견줄 것이 없는데 「다름」이라 말하게 된다.
-    if (entries.length === 0) return null;
+    if (entries.length === 0) return {digest: null, fileCount: 0};
     // 포장기가 **새로 만들어 넣는** 항목. 서버 판에는 있고 폴더에는 없다.
     if (tenant !== null) {
         entries.push({path: PROVENANCE_PATH, sha256: sha256Hex(buildProvenance(tenant))});
@@ -60,7 +75,7 @@ export async function folderVersionDigest(root: string, tenant: string | null): 
     const kept = entries
         .map((e, i) => ({path: unwrapped[i]!, sha256: e.sha256}))
         .filter((e) => !serverExcluded(e.path));
-    return sourceVersionDigest(kept);
+    return {digest: sourceVersionDigest(kept), fileCount: kept.length};
 }
 
 /**

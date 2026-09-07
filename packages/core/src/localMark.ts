@@ -348,10 +348,16 @@ export interface Baseline {
  *
  * ⚠ 없으면 **중립으로 떨어진다**. 기준점이 없다고 방향이나 원인을 지어내지 않는다 —
  *   재설치·다른 장치·콘솔 zip 으로 시작한 폴더가 전부 이 자리다.
+ *
+ * 🔴 **[tenant] 가 다르면 `null` 이다.** 이 표식은 폴더에 있고 zip·git 으로 유통되므로 **남이 만들어
+ *   넣을 수 있다.** 소속을 안 보면 창의 사이트에 없는 판 번호가 「빌드 #999999 를 맞춘 뒤 이 폴더가
+ *   바뀌었습니다」로 **사실처럼** 그려진다 — 정직한 답은 「다름(어느 쪽이 나중인지 모름)」이다.
+ *   형제 [declaredBaseRevisionNo] 가 같은 이유로 같은 술어를 든다.
  */
-export function baselineOf(mark: SourceMark | null, tool: string): Baseline | null {
+export function baselineOf(mark: SourceMark | null, tool: string, tenant: string): Baseline | null {
     // `linked` 는 판 칸이 없다 — 소속만 아는 폴더는 기준점을 가질 수 없다.
     if (mark === null || (mark.format === 2 && mark.origin === "linked")) return null;
+    if (mark.tenant !== tenant) return null;
     const folderVersion = mark.folderVersion;
     if (folderVersion === undefined || mark.tool !== tool) return null;
     return {

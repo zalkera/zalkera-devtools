@@ -57,7 +57,9 @@ test("모르는 행이 아래에 있을 때만 방향을 막는다", () => {
 test("원장이 없으면 아무것도 모른다고 답한다", () => {
     const f = ledgerFacts(null);
     assert.equal(f.firstNo(A), null);
-    assert.equal(f.unknownBelow(1), true, "모르면 막아야 한다 — 열어 두면 없는 방향을 말한다");
+    // ⚠ 이 기본값은 **방어**다 — 오늘의 `versionView` 는 `firstNo` 둘이 다 null 이라 이 갈래에 안 닿는다.
+    //   그래서 이 단언은 「화면이 지금 그렇다」가 아니라 「이 함수를 새로 쓰는 쪽이 안전한 쪽으로 떨어진다」를 잰다.
+    assert.equal(f.unknownBelow(1), true, "모르면 막는 쪽이 기본값이어야 한다");
 });
 
 /**
@@ -79,9 +81,27 @@ test("도구 판이 다르면 기준점을 안 쓴다", () => {
         folderVersion: A, serverVersion: A, tool: "0.27.0",
     });
     const mark = parseSourceMark(text);
-    assert.equal(baselineOf(mark, "0.28.0"), null, "낡은 판이 접은 값을 오늘 값과 견줬다");
+    assert.equal(baselineOf(mark, "0.28.0", "credium"), null, "낡은 판이 접은 값을 오늘 값과 견줬다");
     // 양성 짝 — 같은 판이면 값이 나온다.
-    assert.deepEqual(baselineOf(mark, "0.27.0"), {revisionNo: 4, folderVersion: A, serverVersion: A});
+    assert.deepEqual(
+        baselineOf(mark, "0.27.0", "credium"),
+        {revisionNo: 4, folderVersion: A, serverVersion: A},
+    );
+}); 
+
+/**
+ * 🔴 **표식은 폴더에 있고 zip·git 으로 유통된다 — 남이 만들어 넣을 수 있다.** 소속을 안 보면 창의
+ * 사이트에 없는 판 번호가 「빌드 #999999 를 맞춘 뒤 바뀌었습니다」로 **사실처럼** 그려진다(심의 실측).
+ */
+test("소속이 다른 표식은 기준점이 되지 않는다", () => {
+    const mark = parseSourceMark(JSON.stringify({
+        format: 1, tenant: "acme", revisionNo: 999999, sha256: "x", fetchedAt: "t",
+        folderVersion: A, tool: "0.27.0",
+    }));
+    assert.equal(mark?.tenant, "acme", "픽스처가 깨졌다 — 표식 자체는 읽혀야 한다");
+    assert.equal(baselineOf(mark, "0.27.0", "victim"), null, "남의 사이트 판 번호를 이 폴더의 사실로 삼았다");
+    // 양성 짝 — 소속이 맞으면 값이 나온다.
+    assert.ok(baselineOf(mark, "0.27.0", "acme") !== null);
 });
 
 /**
@@ -94,11 +114,11 @@ test("기준점 칸이 깨져도 소속은 살아 있다", () => {
         folderVersion: "손으로 고친 값", tool: "0.27.0",
     }));
     assert.equal(mark?.tenant, "credium", "소속까지 잃었다");
-    assert.equal(baselineOf(mark, "0.27.0"), null, "깨진 값을 기준점으로 썼다");
+    assert.equal(baselineOf(mark, "0.27.0", "credium"), null, "깨진 값을 기준점으로 썼다");
 });
 
 /** `linked` 는 판 칸이 없다 — 소속만 아는 폴더는 기준점을 가질 수 없다. */
 test("연결 표식은 기준점이 되지 않는다", () => {
     const mark = parseSourceMark(JSON.stringify({format: 2, origin: "linked", tenant: "credium", linkedAt: "t"}));
-    assert.equal(baselineOf(mark, "0.27.0"), null);
+    assert.equal(baselineOf(mark, "0.27.0", "credium"), null);
 });

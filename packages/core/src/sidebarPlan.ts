@@ -653,8 +653,16 @@ export function versionView(state: SidebarState): {
     }
 
     // ④ 폴더는 맞춘 뒤로 안 바뀌었는데 서버와 다르다 — 원인이 셋이라 **결함이라 단정하지 않는다**.
+    // ⚠ **원장이 방향을 말할 수 있으면 그쪽이 참말이다.** 이 갈래를 ⑤ 앞에 두면, 원장에 있는 내용을
+    //    두고도 「확인 필요」라 적어 **정상 상황에서 도구 결함을 의심시킨다**(심의 지적).
     const baseline = state.baseline ?? null;
-    if (baseline !== null && mine === baseline.folderVersion && active.digest === baseline.serverVersion) {
+    const mineInLedger = facts.firstNo(mine) !== null;
+    if (
+        baseline !== null &&
+        !mineInLedger &&
+        mine === baseline.folderVersion &&
+        active.digest === baseline.serverVersion
+    ) {
         return done(
             "checkNeeded",
             `빌드 #${count(baseline.revisionNo)} 를 맞춘 뒤 이 폴더는 바뀌지 않았는데 지문이 서버와 다릅니다.\n` +

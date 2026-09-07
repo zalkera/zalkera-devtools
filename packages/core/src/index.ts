@@ -245,7 +245,7 @@ export {
     VERSION_RULE_TAG,
     type VersionEntry,
 } from "./sourceVersion.ts";
-export { folderVersionDigest } from "./folderVersion.ts";
+export { folderVersionDigest, folderVersionSummary } from "./folderVersion.ts";
 export { serverExcluded, SERVER_NORMALIZATION_SETS } from "./serverNormalization.ts";
 export {
     SYNC_LEDGER_FORMAT,

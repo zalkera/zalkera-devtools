@@ -1,7 +1,7 @@
 import type { ArchiveConfirmed, ZalkeraApi } from "./api.ts";
 import { isUploadBaseMoved } from "./api.ts";
 import { DevtoolsError } from "./errors.ts";
-import { folderVersionDigest } from "./folderVersion.ts";
+import { folderVersionSummary } from "./folderVersion.ts";
 import { apiBaseUrl } from "./serverUrl.ts";
 import { packProject } from "./zip.ts";
 
@@ -78,6 +78,8 @@ export interface PublishResult {
     siteType: string;
     /** 내가 접은 예측 판 지문(memo191 ⑵). 폴더를 못 읽었으면 `null`. */
     localVersion?: string | null;
+    /** [localVersion] 을 접은 항목 수 — **서버가 세는 것과 같은 모집단**이다(zip 항목 수와 다르다). */
+    localVersionFileCount?: number;
     /** 서버가 이 판에 대해 저장한 판 지문. 구서버면 `undefined`(모름). */
     serverVersion?: string | null;
     /** 서버가 센 파일 수. 지문이 갈렸을 때 어느 쪽이 더 뺐는지의 단서. */
@@ -270,7 +272,15 @@ export async function publish(options: PublishOptions): Promise<PublishResult> {
     // 갈려, 발행 직후 「수정 중」이 뜨는 거짓이 난다.
     // ⚠ 묶은 뒤에 폴더를 다시 훑으므로, 업로드 중에 파일을 고치면 이 값이 올라간 것과 다를 수 있다.
     //   그때는 갭 경고가 **거짓 경보**로 뜬다 — 조용히 틀리는 것보다 낫다고 보고 그 방향으로 둔다.
-    const localVersion = await folderVersionDigest(options.projectDir, options.tenant);
+    //
+    // 🔴 **반드시 삼킨다.** 이 호출은 `confirm` 이 **성공한 뒤**에 돈다 — 판은 이미 서 있다. 훑기가
+    //    던지면(업로드 도중 파일 하나가 지워지면 `hashFile` 이 ENOENT 를 그대로 올린다) `publish` 가
+    //    reject 되고, 부르는 쪽이 **표식 갱신·폴더 기억·게시 고지를 전부 건너뛴다.** 그러면 다음 발행이
+    //    옛 번호를 선언해 **자기가 방금 만든 판**에 409 를 맞는다 — 이 파일이 「제조된 거짓말」이라 부르며
+    //    막으려는 그 형상이다. 못 읽으면 `null` 이고, 그 값은 `judgePackingGap` 이 `local-unknown` 으로 받는다.
+    const local = await folderVersionSummary(options.projectDir, options.tenant).catch(
+        () => ({digest: null, fileCount: 0}),
+    );
 
     return {
         // ⚠ **취소가 늦었으면 그 사실을 싣는다 — 삼키지 않는다.** `confirm` 이 성공했으므로 판은
@@ -285,7 +295,9 @@ export async function publish(options: PublishOptions): Promise<PublishResult> {
         status: confirmed.status,
         siteType: confirmed.siteType,
         capabilityNote: confirmed.capabilityNote,
-        localVersion,
+        localVersion: local.digest,
+        // ⚠ zip 항목 수(`fileCount`)가 아니라 **서버와 같은 모집단**의 수다 — 그쪽과 나란히 놓을 값이다.
+        localVersionFileCount: local.fileCount,
         serverVersion: confirmed.versionDigest,
         serverFileCount: confirmed.fileCount,
     };

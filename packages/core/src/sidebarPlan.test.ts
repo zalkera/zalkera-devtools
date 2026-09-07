@@ -867,14 +867,22 @@ test("어떤 상태에서도 「낡음」류를 말하지 않는다", () => {
         const g = versionGroup(patch);
         const all = [g.description ?? "", g.tooltip ?? "", ...g.items.map((i) => i.label),
             ...g.items.map((i) => (i.kind === "info" ? (i.spoken ?? "") : ""))].join("\n");
-        for (const banned of ["낡", "뒤처", "오래된", "최신이 아", "앞섰"]) {
+        // ⚠ **어간으로 잡는다.** 종전 목록(`오래된`·`앞섰`)은 「오래됨」·「앞섬」·「앞선」을 다 흘렸다 —
+        //    툴팁을 「서버에 켜진 판이 오래됨.」으로 바꿔도 961건이 전건 초록이었다(심의 실측).
+        for (const banned of ["낡", "뒤처", "오래", "최신이 아", "앞서", "앞선", "앞섬", "앞섰"]) {
             assert.ok(!all.includes(banned), `금지어 「${banned}」가 실렸다: ${all}`);
         }
         if (all.includes("더 최신")) sawDirection = true;
     }
     // 양성 짝 — 「더 최신」은 실제로 나온다(위 반복이 빈 집합을 훑고 있는 것이 아니다).
     assert.ok(sawDirection, "방향 문구가 한 번도 안 나왔다 — 이 시험의 관할이 비었다");
-    assert.equal(states.length, 8, "여덟 판정을 다 훑어야 한다");
+    // ⚠ **배열 길이가 아니라 「서로 다른 판정 여덟」을 센다.** 길이만 재면 한 줄을 복제하고 다른 줄을
+    //    지워도 초록이라, 관할이 준 것을 못 본다(심의 실측).
+    assert.equal(
+        new Set(states.map((p) => versionGroup(p).description)).size,
+        8,
+        "여덟 판정이 서로 달라야 한다 — 관할이 줄었다",
+    );
 });
 
 /**
@@ -909,4 +917,55 @@ test("적대 판 번호는 접미 자리로도 못 샌다", () => {
     });
     const all = infoLabels(g).join("\n");
     assert.ok(!all.includes("](b:c)"), `접미 자리로 링크가 샜다: ${all}`);
+});
+
+/**
+ * 🔴 **머리는 닫힌 집합이다.** `check-notice` 는 템플릿 보간만 보므로 `description: <표현식>` 은
+ * **관할 밖**이다(심의 실측: `description: state.tenant` 로 바꿔도 검사기 통과). 그 자리에 서버 값이
+ * 실리는 것을 막는 것은 이 시험뿐이다.
+ */
+test("묶음 머리는 여덟 낱말 중 하나이거나 없다", () => {
+    const allowed = new Set([
+        "일치", "서버가 더 최신", "로컬이 더 최신", "수정 중",
+        "확인 필요", "대조 불가", "다름", "확인 중",
+    ]);
+    const patches: Parameters<typeof versionGroup>[0][] = [
+        {activeVersion: {revisionNo: 4, digest: AAA}, folderVersion: AAA},
+        {activeVersion: {revisionNo: 4, digest: AAA}, folderVersion: BBB},
+        {activeVersion: {revisionNo: 3, digest: null}, folderVersion: AAA},
+        {activeVersion: {revisionNo: 4, digest: AAA}, folderVersion: null},
+        {activeVersion: null, folderVersion: AAA},
+        // 서버가 사이트 이름·지문 자리에 무엇을 보내도 머리는 이 집합 밖으로 못 나간다.
+        {activeVersion: {revisionNo: 4, digest: "credium" as unknown as string}, folderVersion: BBB},
+    ];
+    for (const patch of patches) {
+        const head = versionGroup(patch).description;
+        assert.ok(head === undefined || allowed.has(head), `머리가 닫힌 집합 밖이다: ${head}`);
+    }
+    // 양성 짝 — 실제로 채워지는 경우가 있다(전부 undefined 라서 통과하는 것이 아니다).
+    assert.equal(versionGroup(patches[0]!).description, "일치");
+});
+
+/**
+ * 🔴 **원장 행의 판 번호가 이상하면 그 행을 세지 않는다 — 그리고 그 결과를 단언한다.**
+ * 종전 시험은 「링크가 안 샌다」만 봤고, 그때 `Math.min` 이 `NaN` 이 되어 **NULL 게이트가 통째로 꺼지는**
+ * 것을 아무것도 안 봤다(심의 실측: `plausibleRevisionNo` 필터를 지워도 전건 초록).
+ */
+test("이상한 판 번호가 섞여도 방향 게이트가 산다", () => {
+    const g = versionGroup({
+        activeVersion: {revisionNo: 3, digest: AAA},
+        folderVersion: BBB,
+        ledger: ledgerOf([1, null], ["2](b:c)" as unknown as number, BBB], [3, AAA]),
+    });
+    assert.equal(g.description, "다름", "게이트가 꺼졌다 — 뒤집힐 수 있는 자리에서 방향을 말했다");
+    assert.ok(!infoLabels(g).join("\n").includes("](b:c)"), "번호 자리로 링크가 샜다");
+    // 양성 짝 — 정상 번호면 접미가 실제로 뜬다(부정 단언 혼자 서 있지 않게).
+    assert.deepEqual(
+        infoLabels(versionGroup({
+            activeVersion: {revisionNo: 3, digest: AAA},
+            folderVersion: BBB,
+            ledger: ledgerOf([1, CCC], [2, BBB], [3, AAA]),
+        })),
+        ["서버 — aaaaaaaa / 빌드 #3", "로컬 — bbbbbbbb / 빌드 #2 내용"],
+    );
 });

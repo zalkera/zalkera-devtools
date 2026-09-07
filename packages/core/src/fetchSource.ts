@@ -189,6 +189,11 @@ export async function fetchSiteSource(options: FetchSourceOptions): Promise<Fetc
 
 /** 「서버 판으로 교체」의 결과. [FetchSourceResult] 에 **갈아 끼우기**의 사실을 더한다. */
 export interface RefreshSourceResult extends FetchSourceResult {
+    /**
+     * 갈아 끼운 직후 이 폴더를 접은 판 지문(memo191 ⑶). 부르는 쪽이 캐시에 심어 **곧바로 이어지는
+     * 사이드바 갱신이 같은 폴더를 다시 훑지 않게** 한다(성능 축 실측: 받기·교체가 ×2 였다).
+     */
+    folderVersion?: string | null;
     /** 새 소스 «위에» 되살린 경로. */
     preserved: string[];
     /** 자리에 그대로 둔 이름(치우지도 지우지도 않았다). */
@@ -295,6 +300,8 @@ export async function refreshSiteSource(options: RefreshSourceOptions): Promise<
         revisionNo,
         fileCount,
         sha256,
+        versionDigest: got.versionDigest,
+        folderVersion,
         preserved,
         kept,
         mark: done.ok ? { written: true } : { written: false, reason: done.reason },

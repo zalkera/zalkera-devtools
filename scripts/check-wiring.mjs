@@ -276,7 +276,7 @@ const WIRES = [
     //    옮기고 주석을 두고 가면 통과한다. 그래서 이 조각은 **코드끼리 맞붙은 자리**를 문다.
     [
         "packages/vscode/src/extension.ts",
-        "\n  rememberFolder(String(tenant), dir);\n  reportPackingGap(tenant, result);\n\n  if (result.cancelledLate) {",
+        "\n  rememberFolder(String(tenant), dir);\n  seedFolderVersion(dir, String(tenant), result.localVersion ?? null);\n  reportPackingGap(tenant, result);\n\n  if (result.cancelledLate) {",
         "늦은 취소 갈래가 **표식·폴더기억 위로 올라가면** 화면이 아니라 **디스크에 거짓**이 남는다 — " +
             "표식이 옛 판을 든 채라 다음 발행이 낡은 기반을 선언하고 자기가 방금 만든 판에 409 를 맞는다. " +
             "블록의 존재만 세면 이 순서가 안 잡힌다",
@@ -315,9 +315,10 @@ const WIRES = [
     ],
     [
         "packages/vscode/src/extension.ts",
-        "  const clearing = folderStaleShown;\n  folderStaleShown = false;\n  if (!folderChanged && !activeChanged && !clearing) return;",
-        "「확인 중」을 **걷는 그리기**가 값 비교 뒤에 있으면, 저장했는데 내용이 그대로일 때 그 낱말이 " +
-            "화면에 남는다 — 사이드바가 영구히 「확인 중」인 채로 굳는다",
+        "  folderStaleShown = folderVersionTimer !== null || folderVersionRunning;\n  if (!folderChanged && !activeChanged && !clearing) return;",
+        "「확인 중」의 소유권을 **살아 있는 타이머에게 넘기지 않으면** 저장 직후 1.5초 안에 다른 명령이 끼었을 때 " +
+            "그 낱말이 화면에 남은 채 소유권만 사라져, 뒤이은 타이머 발화가 값 비교로 조기 반환한다 — " +
+            "사이드바가 다음 명령까지 「확인 중」인 채로 굳는다(심의 실측)",
     ],
     [
         "packages/vscode/src/extension.ts",

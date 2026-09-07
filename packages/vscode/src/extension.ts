@@ -305,6 +305,18 @@ function activeVersionFor(tenant: string): { revisionNo: number; digest: string 
 }
 
 /**
+ * **이미 접어 둔 값을 캐시에 심는다** — 발행·받기·교체가 방금 낸 값이다.
+ *
+ * ⚠ 안 심으면 곧바로 이어지는 사이드바 갱신이 **같은 폴더를 한 번 더 훑는다**(성능 축 실측:
+ *   받기·교체 88→176 ms · 5만 파일이면 4.0→8.1 s). 편집은 저장 이벤트가 다시 세게 하므로
+ *   이 값이 낡을 창은 그 이벤트까지다 — 종전 캐시와 같은 조건이다.
+ */
+function seedFolderVersion(dir: string, tenant: string, digest: string | null): void {
+  folderVersionCache = { dir, digest };
+  baselineCache = { dir, tenant, baseline: baselineOf(readSourceMarkAt(dir), extensionVersion, tenant) };
+}
+
+/**
  * 지금 폴더의 판. **캐시가 다른 폴더 것이면 모름이다** — 폴더를 옮겼는데 앞 폴더의 값을 그리면
  * 화면이 남의 폴더를 이 폴더라고 말한다.
  */
@@ -346,13 +358,20 @@ function ledgerFor(tenant: string): LedgerSnapshot | null {
 /**
  * 이 폴더의 **기준점** — 마지막으로 서버와 맞췄던 순간의 사실(memo191 ⑶).
  *
- * ⚠ 디스크를 읽는 자리라 그리기 경로에서 부르면 안 된다. 폴더 판을 다시 셀 때 함께 읽어 캐시한다.
+ * ⚠ **성능 때문에 캐시하는 것이 아니다.** 그 읽기는 8.1 µs 이고, 같은 파일을 `currentFolderBinding` 이
+ *   **매 그리기마다 이미** 읽는다(심의 실측). 캐시하는 이유는 판정의 두 재료(폴더 지문·기준점)를
+ *   **같은 순간에** 뜨기 위해서다 — 따로 읽으면 「고쳤다」 판정이 두 시점을 섞어 재게 된다.
  */
-let baselineCache: { dir: string; baseline: Baseline | null } | null = null;
+let baselineCache: { dir: string; tenant: string; baseline: Baseline | null } | null = null;
 
-function baselineFor(dir: string | null | undefined): Baseline | null {
+/**
+ * ⚠ **폴더와 사이트를 함께 문다** — 형제 [activeVersionFor]·[folderVersionFor] 와 같은 모양이다.
+ *   경로만 키로 두면 계정·사이트가 바뀌어도 앞사람이 맞춘 값이 이 사람의 판정에 쓰인다.
+ */
+function baselineFor(dir: string | null | undefined, tenant: string): Baseline | null {
   const c = baselineCache;
-  return c === null || dir == null || c.dir !== dir ? null : c.baseline;
+  if (c === null || dir == null || tenant === "" || c.dir !== dir || c.tenant !== tenant) return null;
+  return c.baseline;
 }
 
 /**
@@ -439,7 +458,7 @@ async function recomputeFolderVersion(dir: string | null, tenant: string | null)
       folderVersionPending = false;
       const digest = await folderVersionDigest(dir, tenant).catch(() => null);
       // 기준점도 같은 자리에서 읽는다 — 디스크 읽기라 그리기 경로에서 부르면 안 된다(memo191 ⑶).
-      const baseline = baselineOf(readSourceMarkAt(dir), extensionVersion);
+      const baseline = baselineOf(readSourceMarkAt(dir), extensionVersion, tenant);
       changed =
         changed ||
         folderVersionCache?.dir !== dir ||
@@ -447,7 +466,7 @@ async function recomputeFolderVersion(dir: string | null, tenant: string | null)
         baselineCache?.dir !== dir ||
         baselineCache?.baseline?.folderVersion !== baseline?.folderVersion;
       folderVersionCache = { dir, digest };
-      baselineCache = { dir, baseline };
+      baselineCache = { dir, tenant, baseline };
     } while (folderVersionPending);
     return changed;
   } finally {
@@ -1362,6 +1381,8 @@ async function writeSourceMark(
 ): Promise<void> {
   // **기준점**(memo191 ⑶) — 받은 직후 이 폴더를 접은 값. 사이드바와 같은 함수로 접는다.
   const folderVersion = await folderVersionDigest(root, String(tenant)).catch(() => null);
+  // 방금 접은 값을 심는다 — 안 심으면 이어지는 갱신이 같은 폴더를 한 번 더 훑는다(성능 축 실측 ×2).
+  seedFolderVersion(root, String(tenant), folderVersion);
   const done = await writeSourceMarkTo(root, {
     tenant: String(tenant),
     revisionNo: result.revisionNo,
@@ -2241,6 +2262,8 @@ async function updateFromServerCommand(): Promise<void> {
   if (result === BUSY) return;
 
   log(`파일 ${count(result.fileCount)}개로 갈아 끼웠습니다: ${dir}`);
+  // core 가 표식을 쓰며 이미 접은 값을 심는다 — 안 심으면 이어지는 갱신이 다시 훑는다(성능 축 실측 ×2).
+  seedFolderVersion(dir, String(tenant), result.folderVersion ?? null);
   if (result.kept.length > 0) log(`그대로 둔 ${count(result.kept.length)}개: ${result.kept.join(", ")}`);
   // ⚠ **표식을 못 쓴 것을 로그에만 남기지 않는다.** 아래 알림이 그 사실을 사람에게 말한다 —
   //    다음 발행에서 뜰 동의 창의 «이유»가 여기 있기 때문이다.
@@ -3025,6 +3048,7 @@ async function publishCommand(): Promise<void> {
     log(`소속 표식을 남기지 못했습니다(${marked.reason}) — 발행 자체는 끝났습니다.`);
   }
   rememberFolder(String(tenant), dir);
+  seedFolderVersion(dir, String(tenant), result.localVersion ?? null);
   reportPackingGap(tenant, result);
 
   if (result.cancelledLate) {
@@ -4285,7 +4309,7 @@ async function refreshSidebar(): Promise<void> {
     // 지금 창의 사이트가 켜 놓은 판만 본다 — 앞 사이트 값이 남으면 화면이 남의 판을 말한다.
     activeVersion: activeVersionFor(tenantCode()),
     ledger: ledgerFor(tenantCode()),
-    baseline: baselineFor(dir),
+    baseline: baselineFor(dir, tenantCode()),
     // 다시 세는 중이면 낡은 판정을 사실로 그리지 않는다 — 머리에 결론 낱말이 붙은 뒤로는
     // 낡은 「일치」가 더 단정적으로 읽힌다.
     folderStale: folderVersionTimer !== null || folderVersionRunning,
@@ -4345,13 +4369,16 @@ async function refreshVersionsInBackground(dir: string | null): Promise<void> {
   // ⚠ **「확인 중」을 걷는 그리기는 값이 안 바뀌어도 해야 한다.** 값이 같다고 건너뛰면 그 낱말이
   //    화면에 남는다(저장했는데 내용이 그대로인 경우가 정확히 그 자리다).
   const clearing = folderStaleShown;
-  folderStaleShown = false;
+  // 🔴 **아직 타이머가 살아 있으면 소유권을 그쪽에 넘긴다.** 저장 직후 1.5초 안에 다른 명령이 끼면
+  //    이 갱신이 「확인 중」을 화면에 남긴 채 소유권만 거두고, 뒤이어 타이머가 발화할 때는 값이 안 바뀌어
+  //    `return` 한다 — 그러면 그 낱말이 **다음 명령까지 화면에 굳는다**(심의 실측).
+  folderStaleShown = folderVersionTimer !== null || folderVersionRunning;
   if (!folderChanged && !activeChanged && !clearing) return;
   sidebar.update({
     folderVersion: folderVersionFor(dir),
     activeVersion: activeVersionFor(tenantCode()),
     ledger: ledgerFor(tenantCode()),
-    baseline: baselineFor(dir),
+    baseline: baselineFor(dir, tenantCode()),
     folderStale: folderVersionTimer !== null || folderVersionRunning,
   });
 }
@@ -4403,7 +4430,7 @@ function reportPackingGap(tenant: CapturedTenant, result: PublishResult): void {
         `⚠ 포장 갭 — 빌드 #${result.revisionNo}\n` +
           `    로컬 예측  ${result.localVersion}\n` +
           `    서버 저장  ${result.serverVersion}\n` +
-          `    파일 수    로컬 ${result.fileCount} / 서버 ${result.serverFileCount ?? "모름"}\n` +
+          `    파일 수    로컬 ${result.localVersionFileCount ?? "모름"} / 서버 ${result.serverFileCount ?? "모름"}\n` +
           `    확장 ${extensionVersion}\n` +
           `    이 값이 갈리는 것은 도구의 결함입니다. 위 두 줄을 그대로 알려 주세요.`,
       );
