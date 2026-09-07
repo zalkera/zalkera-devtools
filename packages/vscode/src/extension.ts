@@ -3362,7 +3362,7 @@ async function showHistory(): Promise<void> {
     const when = revisionWhen(r.createdAt);
     const digest = shortVersion(r.versionDigest);
     log(
-      `${r.isActive ? "▶" : " "} 빌드 #${count(r.revisionNo)} · 판 ${digest ?? "모름"} · ${r.status} · ${when}${
+      `${r.isActive ? "▶" : " "} 빌드 #${count(r.revisionNo)} · 판 ${digest ?? "지문 없음"} · ${r.status} · ${when}${
         r.label ? ` · ${plainNotice(r.label, 80)}` : ""
       }`,
     );
