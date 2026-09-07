@@ -60,7 +60,8 @@ export interface SidebarState {
      */
     home?: string | null;
     /**
-     * **이 폴더의 판 지문**(memo191). 없거나 `null` 이면 **모름**(열린 폴더가 없거나 아직 안 읽었다).
+     * **로컬 판 지문**(memo191 — 사이드바 「로컬」 줄). 없거나 `null` 이면 **모름**(열린 폴더가 없거나
+     * 아직 안 읽었다).
      *
      * ⚠ 뜻은 「지금 이 폴더를 올리면 서버에 남을 판」이다 — 우리 포장 규칙을 지난 목록으로 접기
      *   때문이다(`sourceVersion.ts`). 「서버가 저장한 바이트 그대로」가 아니다.
@@ -105,7 +106,19 @@ export type PlanItem =
            */
           dynamic?: true;
       }
-    | {kind: "info"; label: string; icon: string};
+    | {
+          kind: "info";
+          label: string;
+          icon: string;
+          /**
+           * **화면에 안 보이고 소리로만 나가는 말**(`accessibilityInformation.label`).
+           *
+           * 🔴 아이콘이 판정을 나르는 자리(버전 묶음)에서 이것이 없으면 **스크린리더 사용자에게는
+           * 판정이 존재하지 않는다** — ThemeIcon 은 읽히지 않으므로 hex 두 줄을 귀로 대조해야 한다.
+           * 「줄에 판정 낱말을 안 쓴다」는 **시각 문면**의 결정이고, 음성 문면은 그 밖이다.
+           */
+          spoken?: string;
+      };
 
 export interface PlanGroup {
     /** **라벨과 무관한 상수 id.** 문면을 다듬을 때마다 사람이 접어 둔 것이 초기화되면 안 된다. */
@@ -492,38 +505,52 @@ export function versionView(state: SidebarState): {
      *   두 줄의 정렬이 깨진다.
      *
      * ⚠ 판정은 **아이콘**이 나른다 — 낱말로 또 적으면 눈이 이미 본 것을 글자로 반복한다.
+     *   세 상태를 셋으로 가른다: `pass`(같음) · `edit`(다름) · `folder`(대조 불가).
      *   다음에 할 일은 툴팁이 말한다(그쪽은 낱말이 필요한 자리다).
+     *
+     * 🔴 **소독기 호출은 싱크(아래 템플릿) 안에 둔다.** 종전 판은 호출부에서 `plainNotice` 를 부르고
+     * 헬퍼가 `${ours(value)}` 로 받았는데, 그러면 검사기(`check-notice`)가 **눈이 먼다** — 그것은
+     * 템플릿 보간만 보고, `ours(맨 식별자)` 는 표기의 본래 용도라 무조건 통과시키며, 호출부의
+     * `serverLine(theirs)` 는 템플릿이 아니라 아예 안 본다. 그 상태에서 소독을 빼도 전 게이트가
+     * 초록이었다(심의 실측).
+     *
+     * ⚠ **`ours` 를 서버 값에 붙이지 않는다.** 그 표기의 뜻은 「서버가 정하지 않은 값이라고 사람이
+     *   판단했다」이고 **소독됐다는 사실과 다른 명제다** — 지문에 붙이면 거짓 서명이다.
+     *   `build` 는 `count` 출력(우리가 만든 문자열)이라 표기가 맞다.
+     *
+     * ⚠ 문면(「지문 없음」)도 헬퍼가 소유한다. 호출부가 문자열을 만들어 넘기면 그 자리가 다시
+     *   소독 밖이 된다.
      */
-    const serverLine = (value: string): PlanItem => ({
+    const serverLine = (digest: string | null): PlanItem => ({
         kind: "info",
-        label: `서버 — ${ours(value)} / ${ours(build)}`,
+        label: `서버 — ${digest === null ? "지문 없음" : plainNotice(digest, VERSION_DIGEST_SHORT)} / ${ours(build)}`,
         icon: "cloud",
     });
-    const localLine = (value: string, icon: string): PlanItem => ({
+    const localLine = (digest: string, icon: string, spoken: string): PlanItem => ({
         kind: "info",
-        label: `로컬 — ${ours(value)}`,
+        label: `로컬 — ${plainNotice(digest, VERSION_DIGEST_SHORT)}`,
         icon,
+        // 아이콘을 못 보는 눈에게 판정을 나르는 유일한 자리다(위 [spoken] KDoc).
+        spoken: `로컬 — ${plainNotice(digest, VERSION_DIGEST_SHORT)} · ${ours(spoken)}`,
     });
 
     // 서버 판이 지문 이전에 만들어졌다 — **대조할 근거가 없다.** 그 사실을 그대로 적는다.
     if (theirs === null) {
         return {
             tooltip:
-                `${ours(hint)}\n서버 판은 지문이 생기기 전에 올라간 것이라 지금 폴더와 대조할 수 없습니다.\n` +
+                `${ours(hint)}\n서버 판은 지문이 생기기 전에 올라간 것이라 로컬과 대조할 수 없습니다.\n` +
                 `한 번 더 올리시면 그때부터 대조됩니다.`,
             lines: [
-                serverLine("지문 없음"),
-                ...(mineShort === null ? [] : [localLine(mineShort, "folder")]),
+                serverLine(null),
+                ...(mineShort === null ? [] : [localLine(mineShort, "folder", "서버와 대조할 수 없음")]),
             ],
         };
     }
 
-    const theirsShown = plainNotice(theirs, VERSION_DIGEST_SHORT);
-
     if (verdict === "same") {
         return {
-            tooltip: `${ours(hint)}\n지금 폴더와 서버 판이 같은 소스입니다.`,
-            lines: [serverLine(theirsShown), localLine(theirsShown, "pass")],
+            tooltip: `${ours(hint)}\n로컬과 서버가 같은 소스입니다.`,
+            lines: [serverLine(theirs), localLine(mineShort ?? theirs, "pass", "서버와 같음")],
         };
     }
 
@@ -532,15 +559,15 @@ export function versionView(state: SidebarState): {
             // ⚠ **어느 쪽이 새것인지 우리는 모른다.** 지문은 순서를 안 담는다 — 「낡았다」고 적으면
             //   방금 고친 사람에게 거짓이 되고, 그 사람이 자기 작업을 서버 것으로 덮는다.
             tooltip:
-                `${ours(hint)}\n지금 폴더와 서버 판이 다른 소스입니다.\n` +
-                `이 폴더 것을 올리려면 「새 버전 배포」, 서버 것을 가져오려면 「서버 판으로 교체」.`,
-            lines: [serverLine(theirsShown), localLine(ours(mineShort ?? "읽는 중"), "edit")],
+                `${ours(hint)}\n로컬과 서버가 다른 소스입니다.\n` +
+                `로컬을 올리려면 「새 버전 배포」, 서버 것을 가져오려면 「서버 판으로 교체」.`,
+            lines: [serverLine(theirs), localLine(mineShort ?? "읽는 중", "edit", "서버와 다름")],
         };
     }
 
     // 서버 판은 아는데 이 폴더를 모른다(열린 폴더 없음·아직 안 읽음). 아는 쪽만 적는다.
     return {
-        tooltip: `${ours(hint)}\n지금 폴더의 판은 아직 모릅니다.`,
-        lines: [serverLine(theirsShown)],
+        tooltip: `${ours(hint)}\n로컬의 판은 아직 모릅니다.`,
+        lines: [serverLine(theirs)],
     };
 }

@@ -57,7 +57,7 @@ export class ZalkeraSidebar implements vscode.TreeDataProvider<Node> {
             // `?? ""` 폴백을 두지 않는다 — 명령 없는 항목이 조용히 안 눌리게 되는 자리다.
             // 타입(판별 유니온)이 그것을 막는다.
             const items = g.items.map((i) =>
-                i.kind === "info" ? info(i.label, i.icon) : action(i.label, i.command, i.icon, i.tooltip),
+                i.kind === "info" ? info(i.label, i.icon, i.spoken) : action(i.label, i.command, i.icon, i.tooltip),
             );
             // 로그인 전 묶음은 라벨이 없다 — 두 줄에 그룹을 씌우면 형식만 남는다.
             return g.label === "" ? items : [group(g.id, g.label, g.icon, g.tooltip, items, g.description)];
@@ -76,9 +76,13 @@ function action(label: string, command: string, icon: string, tooltip?: string):
     return item;
 }
 
-function info(label: string, icon: string): Node {
+function info(label: string, icon: string, spoken?: string): Node {
     const item: Node = new vscode.TreeItem(label, vscode.TreeItemCollapsibleState.None);
     item.iconPath = new vscode.ThemeIcon(icon);
+    // 🔴 **아이콘이 뜻을 나르면 그 뜻을 말로도 실어야 한다.** ThemeIcon 은 스크린리더가 읽지
+    //    않으므로, 버전 묶음처럼 판정을 아이콘에 맡긴 자리에서는 그 사용자에게 판정이 아예
+    //    존재하지 않게 된다(심의 실측).
+    if (spoken) item.accessibilityInformation = {label: spoken};
     return item;
 }
 

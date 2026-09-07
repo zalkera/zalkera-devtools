@@ -475,6 +475,101 @@ test("다르면 그 자리의 값만 다르다", () => {
 });
 
 /**
+ * 🔴 **모름은 셋째 아이콘이어야 한다.** 판정을 아이콘에 맡긴 순간, 「모름」이 「같음」 아이콘을 쓰면
+ * 그것이 곧 **모름→같음 접힘**이다. 종전에는 묶음 머리의 「같음」 문자열이 그 자리를 막았는데
+ * 이 판이 머리를 걷으면서 그 그물도 함께 사라졌다(심의 실측).
+ */
+test("모름은 같음·다름 어느 아이콘도 쓰지 않는다 — 셋이 갈린다", () => {
+    const unknown = versionGroup({activeVersion: {revisionNo: 3, digest: null}, folderVersion: AAA});
+    const same = versionGroup({activeVersion: {revisionNo: 4, digest: AAA}, folderVersion: AAA});
+    const diff = versionGroup({activeVersion: {revisionNo: 4, digest: AAA}, folderVersion: BBB});
+    assert.notEqual(localIcon(unknown), localIcon(same), "모름이 「같음」 아이콘을 썼다");
+    assert.notEqual(localIcon(unknown), localIcon(diff), "모름이 「다름」 아이콘을 썼다");
+    // 양성 짝 — 세 값이 실제로 무엇인지 못박는다(셋 다 undefined 여도 위 두 줄은 통과한다).
+    assert.deepEqual(
+        [localIcon(same), localIcon(diff), localIcon(unknown)],
+        ["pass", "edit", "folder"],
+    );
+});
+
+/**
+ * 🔴 **툴팁이 「다음에 할 일」의 유일한 자리다.** 줄에서 판정 낱말을 걷었으므로 지침이 여기 독점된다 —
+ * 그런데 그것을 양성으로 재는 시험이 없어, 두 동사를 지워도 초록이었다(심의 실측).
+ */
+test("다를 때 툴팁이 두 갈래를 **둘 다** 말한다 — 고르는 것은 사람이다", () => {
+    const g = versionGroup({activeVersion: {revisionNo: 4, digest: AAA}, folderVersion: BBB});
+    assert.match(g.tooltip ?? "", /새 버전 배포/, "내 것을 올리는 길이 사라졌다");
+    assert.match(g.tooltip ?? "", /서버 판으로 교체/, "서버 것을 받는 길이 사라졌다");
+});
+
+test("같을 때·모를 때 툴팁이 그 사실을 말한다", () => {
+    assert.match(
+        versionGroup({activeVersion: {revisionNo: 4, digest: AAA}, folderVersion: AAA}).tooltip ?? "",
+        /같은 소스입니다/,
+    );
+    assert.match(
+        versionGroup({activeVersion: {revisionNo: 3, digest: null}, folderVersion: AAA}).tooltip ?? "",
+        /한 번 더 올리시면/,
+        "다음에 할 일이 없으면 그 화면은 막다른 길이다",
+    );
+});
+
+/**
+ * 🔴 **적대 지문·적대 번호가 라벨에 새지 않는다.** 이 값들은 서버가 정한다 — 알림 소독의 위협 모델
+ * 그대로다(`notice.ts`). 소독을 싱크에서 걷으면 이 시험이 붉어져야 한다.
+ */
+test("적대 입력이 라벨에 실리지 않는다", () => {
+    const link = "](command:zalkera.reset)" + "a".repeat(40);
+    const bidi = "\u202E" + "b".repeat(63);
+    // ⚠ **두 줄 다 적대값을 먹인다.** 서버 쪽만 재면 로컬 줄의 소독을 빼도 초록이다(변이 실측).
+    //    로컬 값은 우리가 접지만, 소독은 「누가 만들었나」가 아니라 **어디로 나가나**로 건다.
+    for (const digest of [link, bidi]) {
+        for (const [server, local] of [[digest, BBB], [AAA, digest]] as const) {
+            const g = versionGroup({activeVersion: {revisionNo: 4, digest: server}, folderVersion: local});
+            const text = infoLabels(g).join("\n");
+            assert.ok(!text.includes("](command:"), `링크 문법이 실렸다: ${text}`);
+            assert.ok(!text.includes("\u202E"), `방향 재정의 문자가 실렸다: ${text}`);
+        }
+    }
+    // 양성 짝 — 정상 지문은 그대로 8자가 실린다(위가 「전부 지운다」로 통과하지 않게).
+    const ok = versionGroup({activeVersion: {revisionNo: 4, digest: AAA}, folderVersion: AAA});
+    assert.ok(infoLabels(ok)[0]!.includes("aaaaaaaa"), "정상 지문까지 사라졌다");
+});
+
+test("적대 판 번호는 「빌드 #?」로 접힌다 — count 가 비숫자를 거부한다", () => {
+    const g = versionGroup({
+        activeVersion: {revisionNo: "1 [열기](command:x)" as unknown as number, digest: AAA},
+        folderVersion: AAA,
+    });
+    const server = infoLabels(g).find((l) => l.startsWith("서버"))!;
+    assert.ok(!server.includes("command:"), `번호 자리로 링크가 샜다: ${server}`);
+    assert.match(server, /빌드 #\?/);
+});
+
+/**
+ * 🔴 **아이콘이 뜻을 나르면 말로도 실어야 한다.** ThemeIcon 은 스크린리더가 안 읽으므로, 그 사용자에게는
+ * 판정이 아예 존재하지 않게 된다. 「줄에 판정 낱말을 안 쓴다」는 **시각 문면**의 결정이고 음성은 그 밖이다.
+ */
+test("로컬 줄이 판정을 말로도 싣는다 — 세 상태가 음성에서도 갈린다", () => {
+    const spokenOf = (patch: Parameters<typeof versionGroup>[0]) => {
+        const line = versionGroup(patch).items.find(
+            (i) => i.kind === "info" && i.label.startsWith("로컬"),
+        );
+        return line?.kind === "info" ? line.spoken : undefined;
+    };
+
+    assert.match(spokenOf({activeVersion: {revisionNo: 4, digest: AAA}, folderVersion: AAA})!, /서버와 같음/);
+    assert.match(spokenOf({activeVersion: {revisionNo: 4, digest: AAA}, folderVersion: BBB})!, /서버와 다름/);
+    assert.match(
+        spokenOf({activeVersion: {revisionNo: 3, digest: null}, folderVersion: AAA})!,
+        /대조할 수 없음/,
+    );
+    // 양성 짝 — 시각 라벨은 여전히 판정 낱말을 안 쓴다(음성을 넣느라 화면이 바뀌면 안 된다).
+    const g = versionGroup({activeVersion: {revisionNo: 4, digest: AAA}, folderVersion: AAA});
+    assert.ok(!/같음/.test(infoLabels(g).join("\n")));
+});
+
+/**
  * ⚠ **판정 낱말을 쓰지 않는다.** 판정은 아이콘이 나르고 다음 할 일은 툴팁이 말한다 —
  * 낱말로 또 적으면 눈이 이미 본 것을 글자로 반복한다.
  */
@@ -485,7 +580,11 @@ test("줄에 「일치」·「불일치」를 적지 않는다 — 아이콘과 
     ]) {
         const g = versionGroup(patch);
         const text = infoLabels(g).join("\n");
-        assert.ok(!/일치/.test(text), `줄에 판정 낱말이 들어갔다: ${text}`);
+        // ⚠ 종전 어휘(「같음·다름」)까지 막는다 — `/일치/` 만 보면 그것을 도로 붙여도 초록이다.
+        assert.ok(
+            !/일치|같음|다름|같다|다르다/.test(text),
+            `줄에 판정 낱말이 들어갔다: ${text}`,
+        );
     }
     // 양성 짝 — 아이콘은 실제로 갈린다(그게 판정을 나르는 자리다).
     const same = versionGroup({activeVersion: {revisionNo: 4, digest: AAA}, folderVersion: AAA});
@@ -545,6 +644,23 @@ test("확장 판은 「버전」이 아니라 「도움」에 선다 — 사이�
 test("확장 판을 모르면 그 줄이 없다", () => {
     const help = sidebarPlan(WITH_SOURCE).find((g) => g.id === "help")!;
     assert.ok(!infoLabels(help).some((l) => l.startsWith("확장 ")));
+});
+
+/**
+ * ⚠ **묶음 머리에는 값을 안 둔다**(§12.1 ⑸). 아래 두 줄이 같은 것을 말하므로 머리에 또 적으면
+ * 한 화면이 사실을 두 번 반복한다 — `description` 을 도로 다는 변이를 이 시험이 막는다.
+ */
+test("값이 있어도 묶음 머리는 비어 있다", () => {
+    for (const patch of [
+        {activeVersion: {revisionNo: 4, digest: AAA}, folderVersion: AAA},
+        {activeVersion: {revisionNo: 4, digest: AAA}, folderVersion: BBB},
+        {activeVersion: {revisionNo: 3, digest: null}, folderVersion: AAA},
+    ]) {
+        assert.equal(versionGroup(patch).description, undefined, "머리가 값을 다시 들었다");
+    }
+    // 양성 짝 — 다른 묶음은 여전히 머리에 값을 둔다(이 시험이 그 관례까지 지우지 않게).
+    const site = sidebarPlan(WITH_SOURCE).find((g) => g.id === "site")!;
+    assert.equal(site.description, "credium");
 });
 
 /** 새 필드를 안 넘기는 부르는 쪽(라벨 검사기가 그렇다)이 터지지 않아야 한다. */
