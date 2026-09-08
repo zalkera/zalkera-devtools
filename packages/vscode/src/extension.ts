@@ -316,8 +316,13 @@ function seedFolderVersion(dir: string, tenant: string, digest: string | null): 
   baselineCache = { dir, tenant, baseline: baselineOf(readSourceMarkAt(dir), extensionVersion, tenant) };
   // 🔴 **심기만 해서는 아무것도 안 아낀다.** 바로 뒤에 오는 갱신이 `recomputeFolderVersion` 을 **무조건**
   //    부르므로 심은 값은 첫 그리기에만 쓰이고 훑기는 그대로 두 번이다(3회전 실측). 「방금 우리가 접었다」는
-  //    사실을 한 번만 쓰게 하는 표가 이것이다 — 저장 이벤트가 오면 곧바로 내린다.
-  folderVersionFresh = dir;
+  //    사실을 한 번만 쓰게 하는 표가 이것이다.
+  //
+  // ⚠ **대기 중인 저장이 있으면 표를 아예 안 세운다.** 저장은 표를 내리지만(`scheduleFolderVersion`),
+  //    그 뒤 1.5초 안에 시드가 돌면 표가 **다시 서서** 그 타이머의 재계산이 건너뛰어진다 — 발행이 정확히
+  //    그 자리다(`confirm` 뒤에 접고 `writeBindingMarkTo` 를 await 한 다음 심는다). 그러면 캐시가 저장
+  //    **전** 값으로 덮이고 사이드바가 다음 갱신까지 「일치」를 사실로 그린다(4회전 지적).
+  if (folderVersionTimer === null) folderVersionFresh = dir;
 }
 
 /**
@@ -408,8 +413,11 @@ function forgetActiveVersion(): void {
 /**
  * 계정이 바뀌면 **앞사람의 사실**을 지운다. 다음 갱신이 다시 묻는다.
  *
- * ⚠ **기준점도 앞사람의 사실이다.** 그 캐시는 폴더 경로로만 키를 잡아 **계정 경계를 스스로 못 본다** —
- *   안 버리면 앞사람이 맞춘 값으로 이 사람의 「수정 중」을 판정한다.
+ * ⚠ **기준점 캐시도 함께 버린다 — 다시 읽게 하려는 것이다.** 그 값은 폴더의 `.zalkera/source.json` 에서
+ *   오므로 계정이 바뀌어도 **다시 읽으면 같은 값**이고, 캐시 키(`{dir, tenant}`)가 이미 사이트를 문다.
+ *   즉 「앞사람 값이 이 사람 판정에 쓰인다」는 위험은 **없다**(4회전 정정 — 종전 이 자리에 그렇게 적혀
+ *   있었는데 거짓이었다). 버리는 이유는 계정이 바뀐 뒤 **낡은 소속 판정으로 접힌 값**을 그대로 쓰지
+ *   않으려는 것이다.
  */
 function forgetVersions(): void {
   forgetActiveVersion();

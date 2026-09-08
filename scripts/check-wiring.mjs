@@ -303,8 +303,8 @@ const WIRES = [
     [
         "packages/vscode/src/extension.ts",
         "  folderVersionCache = null;\n  baselineCache = null;",
-        "계정이 바뀌었는데 **기준점을 안 버리면** 앞사람이 맞춘 값으로 이 사람의 「수정 중」을 판정한다 — " +
-            "기준점은 폴더 경로로만 키를 잡아 계정 경계를 스스로 못 본다",
+        "계정이 바뀌면 기준점 캐시도 **다시 읽게 한다** — 값 자체는 폴더 파일에서 오므로 같지만, " +
+            "낡은 소속 판정으로 접힌 값을 그대로 쓰지 않으려는 것이다(캐시 키는 이미 사이트를 문다)",
     ],
     [
         "packages/vscode/src/extension.ts",
@@ -312,6 +312,12 @@ const WIRES = [
         "🔴 **예약만 하고 다시 그리지 않으면 「확인 중」이 화면에 영영 안 뜬다** — 상태는 계산되는데 " +
             "그리기가 없어 죽은 코드가 된다. 그 1.5초 동안 화면은 고치기 **전**의 결론을 사실로 그린다. " +
             "타입도 시험도 못 잡는 자리다(값은 옳고 배선만 없다)",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "  if (folderVersionTimer === null) folderVersionFresh = dir;",
+        "🔴 **대기 중인 저장이 있는데 표를 세우면** 그 타이머의 재계산이 건너뛰어지고, 캐시가 저장 **전** " +
+            "값으로 덮인다 — 사이드바가 「일치」를 다음 갱신까지 사실로 그린다(4회전 지적). 발행 경로가 그 자리다",
     ],
     [
         "packages/vscode/src/extension.ts",
