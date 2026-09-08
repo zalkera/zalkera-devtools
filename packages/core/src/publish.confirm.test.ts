@@ -12,7 +12,8 @@ import { deepStrictEqual, match, notStrictEqual, ok, strictEqual } from "node:as
 import { test } from "node:test";
 import { ZalkeraApi } from "./api.ts";
 import { DevtoolsError } from "./errors.ts";
-import { publish } from "./publish.ts";
+import { judgePackingGap, publish } from "./publish.ts";
+import { VERSION_RULE_TAG } from "./sourceVersion.ts";
 import { tempDir } from "./testing/tempDir.ts";
 import { chmod, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -345,4 +346,24 @@ test("발행 뒤 폴더를 못 읽어도 성공으로 끝난다", async () => {
   } finally {
     await chmod(join(dir, "locked"), 0o755).catch(() => {});
   }
+});
+
+/**
+ * 🔴 **서버 규칙이 응답에서 판정까지 닿는가.** `ArchiveConfirmed.versionRule → PublishResult →
+ * judgePackingGap` 배선 전체가 무시험이었다 — 그 사슬 어디를 끊어도 전 시험이 초록이었다(심의 실측 D2).
+ *
+ * 끊기면 규칙 전환 창에서 **「포장 갭 · 도구의 결함」 거짓 경보**가 뜬다.
+ */
+test("서버가 다른 규칙으로 접었으면 갭으로 안 센다", async () => {
+  const dir = await tempDir("zalkera-rule-");
+  await writeFile(join(dir, "package.json"), '{"name":"t","version":"1.0.0"}');
+  await writeFile(join(dir, "page.tsx"), "export default () => null;\n");
+
+  const other = await publishAgainst(dir, { ...CONFIRMED, versionRule: "zalkera-source-v1" });
+  strictEqual(other.serverVersionRule, "zalkera-source-v1", "규칙을 안 실었다");
+  strictEqual(judgePackingGap(other.localVersion, other.serverVersion, other.serverVersionRule), "rule-unknown");
+
+  // 양성 짝 — 같은 규칙이면 종전 판정이 그대로 산다(규칙 칸이 갭 탐지를 통째로 끄지 않는다).
+  const same = await publishAgainst(dir, { ...CONFIRMED, versionRule: VERSION_RULE_TAG });
+  strictEqual(judgePackingGap(same.localVersion, same.serverVersion, same.serverVersionRule), "gap");
 });
