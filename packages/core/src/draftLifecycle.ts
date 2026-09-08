@@ -39,6 +39,7 @@ import {
     type ZalkeraApi,
 } from "./api.ts";
 import {DevtoolsError} from "./errors.ts";
+import {countJosa} from "./notice.ts";
 import {rebuildBaseline} from "./baseline.ts";
 import {plausibleRevisionNo} from "./localMark.ts";
 import {rm} from "node:fs/promises";
@@ -167,12 +168,12 @@ export async function rollbackRevision(options: RollbackOptions): Promise<Rollba
     if (options.revisionNo === active) {
         throw new DevtoolsError(
             "ROLLBACK_IS_DISCARD",
-            `${options.revisionNo}판은 지금 켜져 있는 버전입니다 — 되돌릴 것이 없습니다.`,
+            `버전 ${countJosa(options.revisionNo, "은/는")} 지금 켜져 있습니다 — 되돌릴 것이 없습니다.`,
             "편집 중인 것을 버리려는 것이라면 `zalkera discard` 를 쓰세요. 그쪽은 판을 옮기지 않고 편집만 버립니다.",
         );
     }
 
-    report(`${options.revisionNo}판으로 되돌리는 중입니다…`);
+    report(`버전 ${countJosa(options.revisionNo, "으로/로")} 되돌리는 중입니다…`);
     const result = await requireConsent(() =>
         options.api.activateRevision(options.revisionNo, options.discardPending === true),
     ).catch((error: unknown) => {

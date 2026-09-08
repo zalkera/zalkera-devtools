@@ -241,7 +241,7 @@ test("🔴 되돌리기 대상이 **지금 켜진 판**이면 받지 않는다 �
 
 test("🔴 되돌리기는 **서버가 실제로 켠 판**을 장부에 적는다 — 사람이 친 번호가 아니다", async () => {
     // 서버는 대상이 꼬리가 아니면 그 내용으로 **새 판**을 세워 켠다(`activateByPointer`).
-    // 친 번호를 적으면 바로 다음 push 가 「기준이 5판에서 10판으로 움직였다」로 죽는다.
+    // 친 번호를 적으면 바로 다음 push 가 「기준이 버전 5 에서 버전 10으로 움직였다」로 죽는다.
     const s = server({active: 9, landsOn: 10, tar: tarGz({"a.tsx": "5판 내용"})});
     const dir = await site({"a.tsx": "내가-고침"});
     const out = await rollbackRevision({api: s.api, folder: dir, fetchImpl: s.fetchImpl, revisionNo: 5});

@@ -37,7 +37,7 @@ import {readFile, stat} from "node:fs/promises";
 import {basename, join, resolve} from "node:path";
 import type {DraftEdit, DraftFiles, SiteRevision, ZalkeraApi} from "./api.ts";
 import {DevtoolsError} from "./errors.ts";
-import {plainNotice} from "./notice.ts";
+import {plainNotice, count, countJosa} from "./notice.ts";
 import {readLedger, writeLedger} from "./pull.ts";
 import {PATH_LIST_CAP, trimPaths} from "./pullPlan.ts";
 import {planPush, type DraftView, type PushEdit, type PushPlan} from "./pushPlan.ts";
@@ -197,14 +197,14 @@ export async function pushSiteSource(options: PushOptions): Promise<PushResult> 
         if (mineRow?.status === "BUILDING") {
             throw new DevtoolsError(
                 "PUSH_BASE_BUILDING",
-                `${ledger.base.revisionNo}판을 짓는 중이라 아직 올릴 수 없습니다.`,
+                `버전 ${countJosa(ledger.base.revisionNo, "을/를")} 짓는 중이라 아직 올릴 수 없습니다.`,
                 "빌드가 끝나면 그 버전이 켜집니다 — `zalkera status` 로 확인한 뒤 다시 올려 주세요. 이 폴더는 그대로 두셔도 됩니다.",
             );
         }
         if (mineRow?.status === "FAILED") {
             throw new DevtoolsError(
                 "PUSH_BASE_BUILD_FAILED",
-                `${ledger.base.revisionNo}판은 짓다가 실패해 켜지지 못했습니다 — 지금 켜져 있는 것은 ${active}판입니다.`,
+                `버전 ${countJosa(ledger.base.revisionNo, "은/는")} 짓다가 실패해 켜지지 못했습니다 — 지금 켜져 있는 것은 버전 ${count(active)} 입니다.`,
                 "`zalkera status` 로 실패 사유를 확인해 주세요. 고쳐서 다시 올리려면 `zalkera baseline` 으로 기준을 지금 켜진 버전으로 맞춘 뒤 작업해 주세요.",
             );
         }
@@ -661,13 +661,13 @@ function baseMoved(mine: number, now: number, dirty: number): DevtoolsError {
     //   없는 것까지). 실측: 만진 것 1개 · 나간 것 4개.
     const way =
         dirty === 0
-            ? `이 폴더를 ${now}판에 맞추려면 \`zalkera pull\` 을 실행하세요.`
+            ? `이 폴더를 버전 ${count(now)} 에 맞추려면 \`zalkera pull\` 을 실행하세요.`
             : `이 폴더에서 고친 것이 ${dirty}개 있어 \`zalkera pull\` 도 그대로는 막힙니다. ` +
               "`zalkera pull --discard-local` 을 실행하면 고친 파일을 옆 폴더에 옮겨 두고 새 판을 받습니다 — " +
               "그 뒤 옮겨 둔 파일을 보고 다시 고쳐 올리시면 됩니다.";
     return new DevtoolsError(
         "PUSH_BASE_MOVED",
-        `기준이 ${mine}판에서 ${now}판으로 움직여 아무것도 올리지 않았습니다.`,
-        `${way} 지금 올리면 ${mine}판을 보고 고친 내용이 ${now}판 위에 얹힙니다.`,
+        `기준이 버전 ${count(mine)} 에서 버전 ${countJosa(now, "으로/로")} 움직여 아무것도 올리지 않았습니다.`,
+        `${way} 지금 올리면 버전 ${countJosa(mine, "을/를")} 보고 고친 내용이 버전 ${count(now)} 위에 얹힙니다.`,
     );
 }

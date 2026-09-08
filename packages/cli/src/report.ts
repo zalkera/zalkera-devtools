@@ -7,6 +7,8 @@
  */
 import {
     PATH_LIST_CAP,
+    count,
+    countJosa,
     plainNotice,
     trimPaths,
     type PushResult,
@@ -56,25 +58,25 @@ export function describeStatus(status: SyncStatus, verbose = false): string {
     lines.push(
         status.baseRevisionNo === null
             ? "이 폴더가 선 판: 모름"
-            : `이 폴더가 선 판: ${status.baseRevisionNo}판`,
+            : `이 폴더가 선 판: 버전 ${count(status.baseRevisionNo)}`,
     );
-    if (status.activeRevisionNo !== null) lines.push(`지금 사이트에 켜진 판: ${status.activeRevisionNo}판`);
+    if (status.activeRevisionNo !== null) lines.push(`지금 사이트에 켜진 판: 버전 ${count(status.activeRevisionNo)}`);
 
     if (status.behind) {
         lines.push("");
-        lines.push(`기준이 ${status.baseRevisionNo}판에서 ${status.activeRevisionNo}판으로 움직였습니다.`);
+        lines.push(`기준이 버전 ${count(status.baseRevisionNo)} 에서 버전 ${countJosa(status.activeRevisionNo, "으로/로")} 움직였습니다.`);
         // ⚠ **고친 것이 있으면 `pull` 도 그대로는 막힌다.** 여기서 「pull 하세요」로 끝내면 사람은
         //   그 거절을 만나고, 그 거절은 「push 하세요」라고 답한다 — 두 문이 서로를 가리켜 갇힌다
         //   (실측). 이 자리는 고친 것을 이미 알고 있으므로 **실제 출구**를 댈 수 있다.
         const dirty = status.changed.length + status.removed.length;
         lines.push(
             dirty === 0
-                ? `이 폴더를 ${status.activeRevisionNo}판에 맞추려면 \`zalkera pull\` 을 실행하세요.`
+                ? `이 폴더를 버전 ${count(status.activeRevisionNo)} 에 맞추려면 \`zalkera pull\` 을 실행하세요.`
                 : `이 폴더에서 고친 것이 ${dirty}개 있어 \`zalkera pull\` 은 그대로는 막힙니다. ` +
                   "`zalkera pull --discard-local` 을 실행하면 고친 파일을 옆 폴더에 옮겨 두고 새 판을 받습니다.",
         );
         lines.push(
-            `지금 올리면 ${status.baseRevisionNo}판을 보고 고친 내용이 ${status.activeRevisionNo}판 위에 얹힙니다.`,
+            `지금 올리면 버전 ${countJosa(status.baseRevisionNo, "을/를")} 보고 고친 내용이 버전 ${count(status.activeRevisionNo)} 위에 얹힙니다.`,
         );
     }
 

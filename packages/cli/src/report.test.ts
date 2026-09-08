@@ -22,7 +22,7 @@ test("🔴 판이 움직였고 고친 것이 있으면 **실제 출구**를 댄�
     const out = describeStatus(
         syncStatus({ledger: ledger(), local: {"a.tsx": {sha256: "내가-고침"}}, draft: draft(), activeRevisionNo: 9}),
     );
-    match(out, /7판에서 9판으로 움직였습니다/);
+    match(out, /버전 7 에서 버전 9로 움직였습니다/);
     match(out, /--discard-local/, `갇히는 안내다:\n${out}`);
 });
 

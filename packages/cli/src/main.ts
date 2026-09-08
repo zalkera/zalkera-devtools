@@ -29,6 +29,8 @@ import {
     ledgerCorrection,
     writeLedger,
     syncStatus,
+    count,
+    countJosa,
     login,
     logout,
     type DraftFiles,
@@ -155,7 +157,7 @@ async function main(argv: readonly string[]): Promise<number> {
                 onProgress: (message: string) => process.stderr.write(`${message}\n`),
             });
             const parts = [
-                `${result.revisionNo}판을 받았습니다.`,
+                `버전 ${countJosa(result.revisionNo, "을/를")} 받았습니다.`,
                 `새로 쓴 것 ${result.written}개 · 지운 것 ${result.deleted}개 · 그대로 둔 것 ${result.unchanged}개`,
             ];
             if (result.untracked > 0) parts.push(`이 폴더에만 있는 파일 ${result.untracked}개는 건드리지 않았습니다.`);
@@ -212,7 +214,7 @@ async function main(argv: readonly string[]): Promise<number> {
                 onProgress: (message: string) => process.stderr.write(`${message}\n`),
             });
             const lines = [
-                `${result.revisionNo}판으로 올렸습니다.`,
+                `버전 ${countJosa(result.revisionNo, "으로/로")} 올렸습니다.`,
                 result.siteType === "STATIC"
                     ? "지금 바로 손님에게 보입니다."
                     : "사이트를 다시 짓는 중입니다 — 다 지어지면 자동으로 손님에게 보입니다.",
@@ -248,13 +250,13 @@ async function main(argv: readonly string[]): Promise<number> {
                 onProgress: (message: string) => process.stderr.write(`${message}\n`),
             });
             // ⚠ **번호를 모르는 갈래가 있다.** 판은 옮겨졌는데 그 번호를 못 읽은 경우다 — 그때
-            //    「null판으로 되돌렸습니다」를 찍으면 안 되고, **일어난 일은 말해야** 한다.
+            //    「버전 null 으로 되돌렸습니다」를 찍으면 안 되고, **일어난 일은 말해야** 한다.
             const lines = [
                 result.revisionNo === null
                     ? "되돌렸습니다 — 다만 지금 켜진 버전의 번호를 확인하지 못했습니다."
                     : result.pointerMoved
-                      ? `${result.revisionNo}판으로 되돌렸습니다.`
-                      : `이미 ${result.revisionNo}판이었습니다.`,
+                      ? `버전 ${countJosa(result.revisionNo, "으로/로")} 되돌렸습니다.`
+                      : `이미 버전 ${count(result.revisionNo)} 이었습니다.`,
             ];
             if (result.revisionNo === null) {
                 lines.push("`zalkera status` 로 확인해 주세요. **다시 되돌리지 마세요** — 같은 내용의 버전이 하나 더 생깁니다.");
@@ -263,7 +265,7 @@ async function main(argv: readonly string[]): Promise<number> {
             //    만들어 켠다 — 친 번호와 켜진 번호가 다르다. 안 말하면 `status` 와 어긋나 보인다.
             if (result.revisionNo !== null && result.revisionNo !== result.requested) {
                 lines.push(
-                    `(${result.requested}판의 내용으로 **새 ${result.revisionNo}판**을 세워 켰습니다 — 원장은 되감지 않습니다.)`,
+                    `(버전 ${count(result.requested)} 의 내용으로 **새 버전 ${count(result.revisionNo)}** 을 세워 켰습니다 — 원장은 되감지 않습니다.)`,
                 );
             }
             if (result.discardedPendingChanges > 0) {
@@ -272,9 +274,9 @@ async function main(argv: readonly string[]): Promise<number> {
             lines.push("", "이 폴더의 파일은 건드리지 않았습니다 — 맞추려면 `zalkera pull` 을 실행하세요.");
             if (result.differing.length > 0) {
                 lines.push(
-                    `⚠ 이 폴더의 ${result.differing.length}개 파일이 ${result.revisionNo}판과 다릅니다.`,
+                    `⚠ 이 폴더의 ${result.differing.length}개 파일이 버전 ${count(result.revisionNo)} 의 내용과 다릅니다.`,
                     ...pathLines(result.differing, verbose),
-                    `지금 \`zalkera push\` 를 하면 이 ${result.differing.length}개가 **전부** 올라가 ${result.revisionNo}판의 내용을 덮습니다.`,
+                    `지금 \`zalkera push\` 를 하면 이 ${result.differing.length}개가 **전부** 올라가 버전 ${count(result.revisionNo)} 의 내용을 덮습니다.`,
                 );
             }
             if (!result.ledgerRebuilt) {
@@ -435,7 +437,7 @@ async function main(argv: readonly string[]): Promise<number> {
                 onProgress: (message: string) => process.stderr.write(`${message}\n`),
             });
             const lines = [
-                `${result.revisionNo}판(파일 ${result.files}개)을 기준으로 ${result.replaced ? "다시 " : ""}세웠습니다.`,
+                `버전 ${count(result.revisionNo)} (파일 ${count(result.files)}개)을 기준으로 ${result.replaced ? "다시 " : ""}세웠습니다.`,
                 "폴더의 파일은 건드리지 않았습니다.",
             ];
             // 🔴 **전제가 깨졌으면 말한다.** 이 동사는 「이 폴더가 그 판에 있다」를 전제로 기준을
@@ -444,9 +446,9 @@ async function main(argv: readonly string[]): Promise<number> {
             if (result.differing.length > 0) {
                 lines.push(
                     "",
-                    `⚠ 이 폴더의 ${result.differing.length}개 파일이 ${result.revisionNo}판과 다릅니다.`,
+                    `⚠ 이 폴더의 ${result.differing.length}개 파일이 버전 ${count(result.revisionNo)} 의 내용과 다릅니다.`,
                     ...pathLines(result.differing, verbose),
-                    `지금 \`zalkera push\` 를 하면 이 ${result.differing.length}개가 **전부** 올라가 ${result.revisionNo}판의 내용을 덮습니다.`,
+                    `지금 \`zalkera push\` 를 하면 이 ${result.differing.length}개가 **전부** 올라가 버전 ${count(result.revisionNo)} 의 내용을 덮습니다.`,
                     "고친 것이 그중 일부뿐이라면 `zalkera pull` 로 받는 쪽이 맞습니다.",
                 );
             } else {

@@ -4460,7 +4460,7 @@ function reportPackingGap(tenant: CapturedTenant, result: PublishResult): void {
   switch (judgePackingGap(result.localVersion, result.serverVersion, result.serverVersionRule)) {
     case "gap": {
       log(
-        `⚠ 포장 갭 — 버전 ${result.revisionNo}\n` +
+        `⚠ 포장 갭 — 버전 ${count(result.revisionNo)}\n` +
           `    로컬 예측  ${result.localVersion}\n` +
           `    서버 저장  ${result.serverVersion}\n` +
           `    파일 수    로컬 ${result.localVersionFileCount ?? "모름"} / 서버 ${result.serverFileCount ?? "모름"}\n` +

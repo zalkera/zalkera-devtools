@@ -602,7 +602,7 @@ test("🔴 판이 움직였으면 «같습니다»라고 말하지 않고 멈춘
     await rejects(() => pushSiteSource({api: s.api, folder: dir}), (e: unknown) => {
         ok(e instanceof DevtoolsError);
         strictEqual(e.code, "PUSH_BASE_MOVED");
-        match(e.message, /7판에서 9판으로/);
+        match(e.message, /버전 7 에서 버전 9로/);
         match(e.humanMessage, /zalkera pull/, "다음 걸음을 안 알려 준다");
         return true;
     });
@@ -611,7 +611,7 @@ test("🔴 판이 움직였으면 «같습니다»라고 말하지 않고 멈춘
 
 test("🔴 **짓는 중**을 「움직였다」로 말하지 않는다 — 그 안내를 따르면 방금 발행한 것이 사라진다", async () => {
     // NEXT_SOURCE 는 빌드가 끝나야 켜진다. 그 창에서 장부는 새 판(8), 활성은 옛 판(7)이다.
-    // 뭉치면 방금 발행한 사람에게 「기준이 8판에서 7판으로 움직였다」는 **거꾸로 된** 문장이 나가고,
+    // 뭉치면 방금 발행한 사람에게 「기준이 버전 8 에서 버전 7로 움직였다」는 **거꾸로 된** 문장이 나가고,
     // 그 안내(`zalkera pull`)를 따르면 7판을 받아 방금 발행한 내용이 폴더에서 사라진다.
     const s = server({activeRevisionNo: 7, otherRevisions: [{revisionNo: 8, status: "BUILDING"}]});
     const dir = await site({"a.tsx": "가"}, {
@@ -621,7 +621,7 @@ test("🔴 **짓는 중**을 「움직였다」로 말하지 않는다 — 그 �
     await rejects(() => pushSiteSource({api: s.api, folder: dir}), (e: unknown) => {
         ok(e instanceof DevtoolsError);
         strictEqual(e.code, "PUSH_BASE_BUILDING", "짓는 중을 「움직였다」로 말한다");
-        ok(!/8판에서 7판으로/.test(e.message), `번호가 거꾸로 나간다: ${e.message}`);
+        ok(!/버전 8 에서 버전 7로/.test(e.message), `번호가 거꾸로 나간다: ${e.message}`);
         ok(!/zalkera pull/.test(e.humanMessage), `방금 발행한 것을 덮는 안내를 댄다: ${e.humanMessage}`);
         return true;
     });

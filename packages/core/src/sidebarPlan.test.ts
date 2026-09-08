@@ -10,6 +10,7 @@
 import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFile } from "node:fs/promises";
 import { sidebarPlan, type SidebarState } from "./sidebarPlan.ts";
 import { commandsWithNeeds, decideBlocked } from "./whyBlocked.ts";
 
@@ -902,10 +903,74 @@ test("로컬 줄의 음성이 머리와 같은 낱말을 싣는다", () => {
     ] as Parameters<typeof versionGroup>[0][]) {
         const head = versionGroup(patch).description!;
         assert.ok(spokenOf(patch).includes(head), `음성이 머리(${head})와 갈렸다: ${spokenOf(patch)}`);
+        // 🔴 **머리를 담았는지만 보면 접미가 갈려도 안 죽는다**(심의 변이 M2b: spoken 접미만 옛
+        //    문면으로 되돌려도 64/0 초록이었다). 음성은 **시각 라벨 그대로 + 머리**여야 한다 —
+        //    아이콘 못 보는 눈에게 다른 사실이 가면 그 자리가 곧 두 화면이다.
+        const seen = versionGroup(patch).items.find((i) => i.kind === "info" && i.label.startsWith("로컬"))!;
+        assert.equal(spokenOf(patch), `${seen.label} · ${head}`, "음성이 시각 라벨과 갈렸다");
     }
     // 양성 짝 — 시각 라벨은 여전히 판정 낱말을 안 쓴다(음성을 넣느라 화면이 바뀌면 안 된다).
     const g = versionGroup({activeVersion: {revisionNo: 4, digest: AAA}, folderVersion: AAA});
     assert.ok(!/일치/.test(infoLabels(g).join("\n")));
+});
+
+/**
+ * 기준점 툴팁은 **숫자에 조사가 붙는 자리**다. 「버전 4 을」은 2·4·5·9 에서 틀리므로 조사 없는
+ * 「에」로 적는다 — 그 선택을 시험이 못박는다(심의 변이 M8: 옛 조사로 되돌려도 초록이었다).
+ */
+test("기준점 툴팁은 숫자마다 갈리는 조사를 안 쓴다", () => {
+    const editing = versionGroup({
+        activeVersion: {revisionNo: 4, digest: AAA},
+        folderVersion: CCC,
+        ledger: ledgerOf([4, AAA]),
+        baseline: {revisionNo: 4, folderVersion: AAA, serverVersion: AAA},
+    });
+    assert.equal(editing.description, "수정 중");
+    assert.match(editing.tooltip ?? "", /버전 4에 맞춘 뒤 이 폴더가 바뀌었습니다\./);
+    const checkNeeded = versionGroup({
+        activeVersion: {revisionNo: 4, digest: AAA},
+        folderVersion: CCC,
+        ledger: ledgerOf([4, AAA]),
+        baseline: {revisionNo: 4, folderVersion: CCC, serverVersion: AAA},
+    });
+    assert.equal(checkNeeded.description, "확인 필요");
+    assert.match(checkNeeded.tooltip ?? "", /버전 4에 맞춘 뒤 이 폴더는 바뀌지 않았는데/);
+    // 양성 짝 — 조사가 갈리는 번호에서도 같은 모양이다(「4」에만 맞춘 정규식이 아니다).
+    const seven = versionGroup({
+        activeVersion: {revisionNo: 7, digest: AAA},
+        folderVersion: CCC,
+        ledger: ledgerOf([7, AAA]),
+        baseline: {revisionNo: 7, folderVersion: AAA, serverVersion: AAA},
+    });
+    assert.match(seven.tooltip ?? "", /버전 7에 맞춘 뒤/);
+});
+
+/**
+ * 🔴 **매뉴얼이 화면과 갈리면 고객이 없는 것을 찾는다.**
+ *
+ * `help.md` §버전 은 이 함수의 산출을 **그대로 인용**한다. 그런데 그 절의 인용은 코드펜스·백틱
+ * 인라인이라 `check-help-quotes.mjs` 의 세 형식(표제·괄호·`- 「…」 —`) 밖이고, 심의 실측으로
+ * **인용 다섯 곳을 옛 문면으로 되돌려도 그 검사기가 exit 0** 이었다. 그물을 여기 둔다 —
+ * 규칙의 소유자가 이 파일이기 때문이다.
+ *
+ * ⚠ **문서 교열을 빌드로 잡는 것이 아니다.** 무는 것은 「매뉴얼이 인용한 문면이 지금 산출에
+ *   실제로 있는가」 하나뿐이다. 문장·설명·오탈자는 여전히 사람 몫이다.
+ */
+test("매뉴얼이 인용한 버전 줄이 지금 산출에 그대로 있다", async () => {
+    const help = await readFile(new URL("../../vscode/media/help.md", import.meta.url), "utf8");
+    const rollback = versionGroup({
+        activeVersion: {revisionNo: 5, digest: AAA},
+        folderVersion: BBB,
+        ledger: ledgerOf([3, AAA], [4, BBB], [5, AAA]),
+    });
+    const lines = infoLabels(rollback);
+    assert.equal(lines.length, 2, "되돌림 형상이 두 줄이 아니다 — 인용 대조의 전제가 깨졌다");
+    // 매뉴얼이 인용하는 조각 — 지문 여덟 자는 매뉴얼 쪽 예시값이라 뺀다.
+    for (const quoted of lines.map((l) => l.slice(l.indexOf(" / ") + 3))) {
+        assert.ok(help.includes(quoted), `매뉴얼에 없는 문면을 화면이 그린다: ${quoted}`);
+    }
+    // 양성 짝 — 이 시험이 「아무 문자열이나 통과」가 아니다.
+    assert.ok(!help.includes("버전 5 · 3번 내용 그대로 아무거나"), "그물이 아무 문자열이나 통과시킨다");
 });
 
 /** 🔴 접미의 번호도 서버가 준 값이다 — `count` 가 비숫자를 거부해야 링크가 못 실린다. */
