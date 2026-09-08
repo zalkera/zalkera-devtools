@@ -71,8 +71,6 @@ export interface RevisionSource {
      * 이것은 「푼 트리가 어느 판인가」다. `null`·`undefined` = 모름.
      */
     versionDigest?: string | null;
-    /** 그 지문을 접은 **규칙 태그**(memo191 v2). 우리 규칙이 아니면 대조하지 않는다. */
-    versionRule?: string | null;
     expiresAt: string;
 }
 
@@ -105,7 +103,13 @@ export interface SiteRevision {
      * `null`·`undefined` = **모름**(지문 이전에 만들어진 판 · 구서버). 「같다」로 접지 마라.
      */
     versionDigest?: string | null;
-    /** 그 지문을 접은 **규칙 태그**(memo191 v2). 우리 규칙이 아니면 대조하지 않는다. */
+    /**
+     * 그 행의 지문을 접은 **규칙 태그**(memo191 v2).
+     *
+     * ⚠ **지금 이 값을 읽는 자리는 없다.** 서버가 옛 규칙 값을 아예 안 내보내므로(노출 게이트) 화면이
+     *   이것을 볼 이유가 없다. 「지문 없음 + 규칙 v1」로 「아직 다시 안 셌다」를 구별하고 싶어질 때
+     *   쓰라고 실어 둔다 — 쓰기 시작하면 그때 그물을 함께 세울 것.
+     */
     versionRule?: string | null;
     /**
      * **지금 실제로 서빙 중인가**(백엔드 명세 A). [isActive] 가 «가라»는 지시라면 이쪽은 «떠 있다»는

@@ -315,6 +315,12 @@ const WIRES = [
     ],
     [
         "packages/vscode/src/extension.ts",
+        "judgePackingGap(result.localVersion, result.serverVersion, result.serverVersionRule)",
+        "🔴 셋째 인자(서버 규칙)를 빼면 규칙 전환 창에서 **「포장 갭 · 도구의 결함」 거짓 경보**가 뜬다 — " +
+            "규칙이 다르면 값이 다른 것이 정상인데 없는 고장을 신고하게 한다. core 시험은 이 호출부를 못 본다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
         "  if (folderVersionTimer === null) folderVersionFresh = dir;",
         "🔴 **대기 중인 저장이 있는데 표를 세우면** 그 타이머의 재계산이 건너뛰어지고, 캐시가 저장 **전** " +
             "값으로 덮인다 — 사이드바가 「일치」를 다음 갱신까지 사실로 그린다(4회전 지적). 발행 경로가 그 자리다",
