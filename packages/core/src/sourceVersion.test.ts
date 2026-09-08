@@ -139,7 +139,7 @@ test("래퍼 경로를 안 벗기면 다른 판이 된다 — 언랩이 규칙�
  * 이 폭은 콘솔과 이 확장이 **같아야 하는 계약**이라 리터럴로 못박는다.
  */
 test("축약은 앞 8자다", () => {
-    assert.equal(shortVersion(vector("single").digest), "18704c64");
+    assert.equal(shortVersion(vector("single").digest), "7ec2f1c3");
     assert.equal(VERSION_DIGEST_SHORT, 8, "표시 폭 계약이 바뀌었다");
 });
 

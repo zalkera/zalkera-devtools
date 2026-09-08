@@ -41,7 +41,24 @@ import {createHash} from "node:crypto";
 import {Buffer} from "node:buffer";
 
 /** 규칙 판을 해시 입력에 실어 자기를 밝힌다. 백엔드 `SourceVersionDigest.RULE_TAG` 와 같아야 한다. */
-export const VERSION_RULE_TAG = "zalkera-source-v1";
+export const VERSION_RULE_TAG = "zalkera-source-v2";
+
+/**
+ * **해시 입력에서 빼는 경로.** 목록에서 빼는 것이 아니다 — 포장기는 계속 넣고 서버도 계속 싣는다.
+ * 빠지는 것은 **지문의 입력**뿐이다. 백엔드 `SourceVersionDigest.EXCLUDED_INPUT_PATHS` 와 같아야 한다.
+ *
+ * 🔴 `.zalkera/provenance.json` 은 **우리가 넣는 기록물**이지 고객 소스가 아니다. 그런데 포장기만 그것을
+ *    주입하고 서버 배제는 그 경로를 안 뺐다 — 그래서 **같은 소스가 어느 문(콘솔 zip / devtools)으로
+ *    들어왔느냐로 다른 판**이 됐다(실측: 같은 폴더가 `686b36a3…` vs `6fe064a3…`). 그 위에 방향 판정이
+ *    올라가면 화면이 **반대 방향을 확신 있게** 말하고 옆에서 「새 버전 배포」를 권한다.
+ *
+ * ⚠ **정확일치다.** `sub/.zalkera/provenance.json` 은 고객 파일이고, `.zalkera/pack.json` 은 배송 문서가
+ *   가리키는 실물이라 그대로 입력이다.
+ *
+ * ⛔ 여기에 `dist`·`.vscode` 를 더하지 마라(오너 확정) — `dist/` 만 다른 두 판이 같은 지문이 되어
+ *   STATIC 에서 **거짓 「일치」**가 된다.
+ */
+export const DIGEST_EXCLUDED_INPUT_PATHS: readonly string[] = [".zalkera/provenance.json"];
 
 /**
  * 화면 축약 길이. **비교에 쓰지 않는다.**
@@ -111,8 +128,11 @@ export function unwrapSingleRoot(paths: readonly string[]): string[] {
  * 입력 경로는 **이미 정규화된** 상대경로여야 한다. 언랩은 부르는 쪽이 한다([unwrapSingleRoot]) — 서버는 배제 **전** 목록으로 래퍼를 판정하므로 순서가 규칙의 일부다.
  */
 export function sourceVersionDigest(entries: readonly VersionEntry[]): string | null {
-    if (entries.length === 0) return null;
-    const sorted = [...entries].sort((a, b) => {
+    // ⚠ **배제는 여기 산다 — 부르는 쪽에 두지 않는다.** 부르는 자리가 셋(폴더 예측·시험의 서버측 계산·
+    //    벡터 시험)이라 호출부에 두면 한쪽이 빠뜨리고, 그 사실은 조용하다.
+    const input = entries.filter((e) => !DIGEST_EXCLUDED_INPUT_PATHS.includes(e.path));
+    if (input.length === 0) return null;
+    const sorted = [...input].sort((a, b) => {
         const byPath = Buffer.compare(Buffer.from(a.path, "utf8"), Buffer.from(b.path, "utf8"));
         return byPath !== 0 ? byPath : a.sha256.localeCompare(b.sha256);
     });

@@ -71,6 +71,8 @@ export interface RevisionSource {
      * 이것은 「푼 트리가 어느 판인가」다. `null`·`undefined` = 모름.
      */
     versionDigest?: string | null;
+    /** 그 지문을 접은 **규칙 태그**(memo191 v2). 우리 규칙이 아니면 대조하지 않는다. */
+    versionRule?: string | null;
     expiresAt: string;
 }
 
@@ -103,6 +105,8 @@ export interface SiteRevision {
      * `null`·`undefined` = **모름**(지문 이전에 만들어진 판 · 구서버). 「같다」로 접지 마라.
      */
     versionDigest?: string | null;
+    /** 그 지문을 접은 **규칙 태그**(memo191 v2). 우리 규칙이 아니면 대조하지 않는다. */
+    versionRule?: string | null;
     /**
      * **지금 실제로 서빙 중인가**(백엔드 명세 A). [isActive] 가 «가라»는 지시라면 이쪽은 «떠 있다»는
      * 사실이다 — 서빙박스가 자기가 띄운 판을 보고한 것이다.
@@ -222,6 +226,11 @@ export interface ArchiveConfirmed {
      * ⚠ 구서버는 이 칸을 안 보낸다 — `undefined` 는 「모름」이지 「같음」이 아니다.
      */
     versionDigest?: string | null;
+    /**
+     * 그 지문을 접은 **규칙 태그**(memo191 v2). 우리 규칙과 다르면 값이 다른 것이 **정상**이라
+     * 포장 갭 경고를 띄우면 안 된다 — 갈린 것은 도구가 아니라 판이다.
+     */
+    versionRule?: string | null;
     /** 그 판에 담긴 파일 수. 지문이 갈렸을 때 「어느 쪽이 더 뺐나」의 첫 단서다. */
     fileCount?: number;
 }

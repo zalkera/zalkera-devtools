@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {baselineOf, parseSourceMark} from "./localMark.ts";
 import {judgePackingGap} from "./publish.ts";
+import {VERSION_RULE_TAG} from "./sourceVersion.ts";
 import {ledgerFacts, type LedgerSnapshot} from "./versionLedger.ts";
 
 const A = "aa".repeat(32);
@@ -121,4 +122,19 @@ test("기준점 칸이 깨져도 소속은 살아 있다", () => {
 test("연결 표식은 기준점이 되지 않는다", () => {
     const mark = parseSourceMark(JSON.stringify({format: 2, origin: "linked", tenant: "credium", linkedAt: "t"}));
     assert.equal(baselineOf(mark, "0.27.0", "credium"), null);
+});
+
+/**
+ * 🔴 **규칙이 다르면 값이 다른 것이 정상이다.** 서버가 다른 판 규칙으로 접었으면 우리 예측과 안 맞는 것이
+ * 당연하고 **도구의 결함이 아니다** — 「포장 갭」으로 말하면 사람이 없는 고장을 신고한다.
+ * 규칙 전환(v1→v2) 창에서 구 확장이 그 경고를 보던 자리다.
+ */
+test("서버 규칙이 다르면 갭으로 안 센다", () => {
+    assert.equal(judgePackingGap(A, B, "zalkera-source-v1"), "rule-unknown");
+    // 같은 규칙이면 종전 판정 그대로 — 규칙 칸이 갭 탐지를 통째로 끄지 않는다.
+    assert.equal(judgePackingGap(A, B, VERSION_RULE_TAG), "gap");
+    assert.equal(judgePackingGap(A, A, VERSION_RULE_TAG), "match");
+    // 구서버는 규칙을 안 보낸다 — 그때는 지문만 보고 종전대로 판정한다(모름으로 접지 않는다).
+    assert.equal(judgePackingGap(A, A, undefined), "match");
+    assert.equal(judgePackingGap(A, B, null), "gap");
 });

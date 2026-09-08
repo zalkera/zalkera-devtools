@@ -112,6 +112,7 @@ import {
   folderVersionDigest,
   baselineOf,
   judgePackingGap,
+  VERSION_RULE_TAG,
   type Baseline,
   type LedgerSnapshot,
 } from "@zalkera/devtools-core";
@@ -4455,7 +4456,7 @@ function setStatus(text: string): void {
  * ⚠ 모름을 「같음」으로도 「갭」으로도 접지 않는다 — 구서버는 지문을 안 보낸다.
  */
 function reportPackingGap(tenant: CapturedTenant, result: PublishResult): void {
-  switch (judgePackingGap(result.localVersion, result.serverVersion)) {
+  switch (judgePackingGap(result.localVersion, result.serverVersion, result.serverVersionRule)) {
     case "gap": {
       log(
         `⚠ 포장 갭 — 빌드 #${result.revisionNo}\n` +
@@ -4473,6 +4474,14 @@ function reportPackingGap(tenant: CapturedTenant, result: PublishResult): void {
     case "server-silent":
       // 알림을 띄우지 않는다 — 고객이 할 수 있는 일이 없고, 「같음」을 주장하지도 않는다.
       log("서버가 이 응답에 판 지문을 싣지 않아 포장 규칙을 대조하지 못했습니다.");
+      break;
+    case "rule-unknown":
+      // ⚠ **경고를 띄우지 않는다.** 규칙 판이 다르면 값이 다른 것이 정상이고, 그것은 도구의 결함이 아니다 —
+      //    「포장 갭」으로 말하면 사람이 없는 고장을 신고한다. 실제 처방은 확장 갱신이다.
+      log(
+        `서버가 다른 판 규칙(${result.serverVersionRule})으로 접었습니다 — 이 확장은 ${VERSION_RULE_TAG} 입니다. ` +
+          "대조하지 않았습니다. 확장을 최신으로 올리시면 다시 대조됩니다.",
+      );
       break;
     case "local-unknown":
       log("이 폴더의 판을 못 읽어 포장 규칙을 대조하지 못했습니다.");

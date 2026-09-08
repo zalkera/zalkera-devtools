@@ -92,17 +92,27 @@ test("예측이 서버가 저장할 목록과 같다 — 평범한 사이트", a
     });
 });
 
-/** 🔴 ⑴ — 포장기가 넣는 출처 표시. 안 세면 발행 성공 직후부터 영구히 「다름」이 된다. */
-test("포장기가 주입하는 출처 표시를 예측이 센다", async () => {
+/**
+ * 🔴 **출처 표시는 판을 안 가른다**(규칙 v2). 그 파일은 **우리가 넣는 기록물**이라, 그것 때문에 같은 소스가
+ * 다른 판이 되면 「어느 문으로 들어왔나」가 판을 정하게 된다 — 방향 판정이 그 위에서 반대로 확신했다.
+ *
+ * ⚠ **세는 것은 그대로다.** 포장기는 계속 넣고 서버도 계속 싣는다. 빠지는 것은 해시 입력뿐이라
+ *   모집단 수(`fileCount`)는 그 파일을 **포함**한다 — 포장 갭 화면이 서버 수와 나란히 놓는 값이다.
+ */
+test("출처 표시는 지문을 안 바꾸고, 세는 수에는 든다", async () => {
     await withFolder(SITE, async (dir) => {
         const packed = await packProject({projectDir: dir, provenanceTenant: TENANT});
         assert.ok(
             (await import("./unzip.ts")).listZipEntries(packed.buffer).includes(".zalkera/provenance.json"),
             "포장기가 출처 표시를 안 넣었다 — 이 시험의 전제가 사라졌다",
         );
-        // 표시를 안 센 예측(연결 안 된 폴더 취급)은 **달라야** 한다 — 그래야 이 축이 load-bearing 이다.
-        assert.notEqual(await folderVersionDigest(dir, null), await serverSideDigest(packed.buffer));
-        assert.equal(await folderVersionDigest(dir, TENANT), await serverSideDigest(packed.buffer));
+        const bound = await folderVersionSummary(dir, TENANT);
+        const unbound = await folderVersionSummary(dir, null);
+        assert.equal(bound.digest, await serverSideDigest(packed.buffer), "서버가 저장할 값과 갈렸다");
+        assert.equal(bound.digest, unbound.digest, "출처 표시가 판을 갈랐다 — v2 가 없애려던 그것이다");
+        // 양성 짝 — 세는 수는 하나 다르다(빠진 것은 해시 입력뿐이라는 증거).
+        assert.equal(bound.fileCount, unbound.fileCount + 1, "세는 수에서까지 빠졌다");
+        assert.equal(bound.fileCount, (await serverSideKept(packed.buffer)).length, "서버 모집단과 갈렸다");
     });
 });
 
@@ -254,5 +264,69 @@ test("접은 항목 수가 서버 모집단과 같다 — zip 항목 수가 아�
         assert.equal((await serverSideKept(packed.buffer)).length, summary.fileCount, "서버가 세는 수와 다르다");
         // 🔴 zip 항목 수와는 **달라야** 한다 — 같으면 이 축이 아무것도 안 지킨다.
         assert.notEqual(summary.fileCount, packed.fileCount, "zip 항목 수와 같다 — 모집단이 안 갈렸다");
+    });
+});
+
+/** 콘솔 `<input type=file>` 형상 — 폴더의 **모든** 파일을 배제·주입 없이 담는다. */
+async function consoleZipOf(dir: string): Promise<Buffer> {
+    const {createZip} = await import("./zip.ts");
+    const entries: {path: string; data: Buffer}[] = [];
+    const walk = async (d: string, p: string): Promise<void> => {
+        for (const it of await readdir(d, {withFileTypes: true})) {
+            const rel = p === "" ? it.name : `${p}/${it.name}`;
+            if (it.isDirectory()) await walk(join(d, it.name), rel);
+            else if (it.isFile()) entries.push({path: rel, data: await readFile(join(d, it.name))});
+        }
+    };
+    await walk(dir, "");
+    entries.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+    return createZip(entries);
+}
+
+/**
+ * 🔴 **지문은 「어느 문으로 들어왔나」에 독립이어야 한다**(규칙 v2).
+ *
+ * 이 축이 없어서 결함이 살아 있었다 — 같은 소스를 콘솔 zip 으로 올린 판과 devtools 로 올린 판이
+ * **다른 지문**을 냈고(실측 `686b36a3…` vs `6fe064a3…`), 그 위에 올린 방향 판정이 두 문을 다 쓴
+ * 테넌트에서 **반대 방향을 확신 있게** 말했다. 상용에도 그런 테넌트가 둘 있었다.
+ */
+test("같은 소스는 어느 문으로 들어와도 같은 판이다", async () => {
+    await withFolder(SITE, async (dir) => {
+        const viaDevtools = await packProject({projectDir: dir, provenanceTenant: TENANT});
+        const viaConsole = await consoleZipOf(dir);
+        const fromDevtools = await serverSideDigest(viaDevtools.buffer);
+        const fromConsole = await serverSideDigest(viaConsole);
+        assert.ok(
+            (await import("./unzip.ts")).listZipEntries(viaDevtools.buffer).includes(".zalkera/provenance.json"),
+            "devtools 문이 출처 표시를 안 넣었다 — 이 시험의 전제가 사라졌다",
+        );
+        assert.equal(fromDevtools, fromConsole, "문에 따라 판이 갈렸다");
+        assert.equal(await folderVersionDigest(dir, TENANT), fromDevtools, "로컬 예측이 그 값과 갈렸다");
+    });
+});
+
+/**
+ * 🔴 **양성 짝 — 참으로 다른 내용은 여전히 다르다.** 콘솔 zip 이 `dist/` 를 실으면 그것은 **실제로 다른
+ * 소스**다(서버가 그 파일을 싣고 STATIC 이면 그대로 서빙한다). 배제를 `dist` 까지 넓히면 여기서 죽는다 —
+ * 그 방향으로 가면 「일치」가 거짓이 된다(오너 확정 경계).
+ */
+test("빌드 산출물이 든 zip 은 여전히 다른 판이다", async () => {
+    await withFolder({...SITE, "dist/bundle.js": "console.log(1)"}, async (dir) => {
+        const viaDevtools = await packProject({projectDir: dir, provenanceTenant: TENANT});
+        assert.notEqual(
+            await serverSideDigest(viaDevtools.buffer),
+            await serverSideDigest(await consoleZipOf(dir)),
+            "dist 가 든 zip 이 같은 판이 됐다 — 그러면 「일치」가 거짓이 된다",
+        );
+    });
+});
+
+/** `.zalkera/` 를 폴더째 빼지 않는다 — 그 안의 다른 파일은 배송 문서가 가리키는 실물이다. */
+test("`.zalkera/pack.json` 은 판을 가른다", async () => {
+    await withFolder({...SITE, ".zalkera/pack.json": '{"a":1}'}, async (dir) => {
+        const a = await folderVersionDigest(dir, TENANT);
+        await withFolder({...SITE, ".zalkera/pack.json": '{"a":2}'}, async (dir2) => {
+            assert.notEqual(a, await folderVersionDigest(dir2, TENANT), "pack.json 이 지문 밖으로 나갔다");
+        });
     });
 });

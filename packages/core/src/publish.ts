@@ -2,6 +2,7 @@ import type { ArchiveConfirmed, ZalkeraApi } from "./api.ts";
 import { isUploadBaseMoved } from "./api.ts";
 import { DevtoolsError } from "./errors.ts";
 import { folderVersionSummary } from "./folderVersion.ts";
+import { VERSION_RULE_TAG } from "./sourceVersion.ts";
 import { apiBaseUrl } from "./serverUrl.ts";
 import { packProject } from "./zip.ts";
 
@@ -82,6 +83,8 @@ export interface PublishResult {
     localVersionFileCount?: number;
     /** 서버가 이 판에 대해 저장한 판 지문. 구서버면 `undefined`(모름). */
     serverVersion?: string | null;
+    /** 그 지문을 접은 규칙 태그. 우리 규칙과 다르면 대조 자체가 성립하지 않는다(memo191 v2). */
+    serverVersionRule?: string | null;
     /** 서버가 센 파일 수. 지문이 갈렸을 때 어느 쪽이 더 뺐는지의 단서. */
     serverFileCount?: number;
     /** 서버가 보낸 한계·상태 안내. 있으면 **그대로 보여 준다**(memo66 §4). */
@@ -299,6 +302,7 @@ export async function publish(options: PublishOptions): Promise<PublishResult> {
         // ⚠ zip 항목 수(`fileCount`)가 아니라 **서버와 같은 모집단**의 수다 — 그쪽과 나란히 놓을 값이다.
         localVersionFileCount: local.fileCount,
         serverVersion: confirmed.versionDigest,
+        serverVersionRule: confirmed.versionRule,
         serverFileCount: confirmed.fileCount,
     };
 }
@@ -313,10 +317,20 @@ export async function publish(options: PublishOptions): Promise<PublishResult> {
  * ⚠ **모름을 「같음」으로 접지 않는다.** 구서버는 지문을 안 보내고, 빈 폴더는 예측이 없다.
  *   둘 다 「대조 못 했다」이지 「맞았다」가 아니다.
  */
-export type PackingGap = "match" | "gap" | "server-silent" | "local-unknown";
+export type PackingGap = "match" | "gap" | "server-silent" | "local-unknown" | "rule-unknown";
 
-export function judgePackingGap(local: string | null | undefined, server: string | null | undefined): PackingGap {
+/**
+ * ⚠ **규칙이 다르면 값이 다른 것이 정상이다.** 서버가 다른 규칙 판으로 접었으면 우리 예측과 안 맞는 것이
+ *   당연하고, 그것은 **도구의 결함이 아니다** — 「포장 갭」으로 말하면 사람이 없는 고장을 신고한다.
+ *   그때 실제 처방은 「확장을 갱신하십시오」다.
+ */
+export function judgePackingGap(
+    local: string | null | undefined,
+    server: string | null | undefined,
+    serverRule?: string | null,
+): PackingGap {
     if (server === undefined || server === null) return "server-silent";
+    if (serverRule !== undefined && serverRule !== null && serverRule !== VERSION_RULE_TAG) return "rule-unknown";
     if (local === undefined || local === null) return "local-unknown";
     return local === server ? "match" : "gap";
 }
