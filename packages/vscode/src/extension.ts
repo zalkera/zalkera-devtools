@@ -3477,21 +3477,22 @@ async function showHistory(): Promise<void> {
 
   output.show();
   log("── 버전 이력 ──");
-  // ⚠ **번호와 판을 함께 적는다**(memo191). 번호는 올릴 때마다 1씩 느는 **빌드 번호**라 「언제」만
-  //    말한다. 무엇이 담겼는지는 지문이 말하고, 그 둘이 어긋나는 자리가 실제로 있다 —
+  // ⚠ **번호와 지문을 함께 적는다**(memo191). 번호는 올릴 때마다 1씩 느는 **빌드 번호**라 「언제」만
+  //    말한다(화면 낱말은 「버전」이다 — 알림·콘솔과 같은 낱말이어야 같은 것인 줄 안다).
+  //    무엇이 담겼는지는 지문이 말하고, 그 둘이 어긋나는 자리가 실제로 있다 —
   //    **되돌린 판은 번호가 새것인데 지문이 같다**(같은 트리다). 지문이 없으면 이 목록이 그것을
   //    보여 줄 유일한 자리인데도 못 보여 준다.
   for (const r of revisions) {
     const when = revisionWhen(r.createdAt);
     const digest = shortVersion(r.versionDigest);
     log(
-      `${r.isActive ? "▶" : " "} 빌드 #${count(r.revisionNo)} · 판 ${digest ?? "지문 없음"} · ${r.status} · ${when}${
+      `${r.isActive ? "▶" : " "} 버전 ${count(r.revisionNo)} · 지문 ${digest ?? "없음"} · ${r.status} · ${when}${
         r.label ? ` · ${plainNotice(r.label, 80)}` : ""
       }`,
     );
   }
   log(`(총 ${revisions.length}개 · 바꾸려면 「버전 전환」을 쓰세요)`);
-  log("  빌드 번호는 «언제», 판은 «무엇이 담겼는가» 입니다 — 되돌린 판은 번호가 새것이고 판이 같습니다.");
+  log("  번호는 «언제», 지문은 «무엇이 담겼는가» 입니다 — 되돌린 판은 번호가 새것이고 지문이 같습니다.");
 }
 
 /** F2 — 문서 하나를 보고 진단을 갱신한다. 우리 프로젝트 밖 파일은 보지 않는다. */
@@ -4459,7 +4460,7 @@ function reportPackingGap(tenant: CapturedTenant, result: PublishResult): void {
   switch (judgePackingGap(result.localVersion, result.serverVersion, result.serverVersionRule)) {
     case "gap": {
       log(
-        `⚠ 포장 갭 — 빌드 #${result.revisionNo}\n` +
+        `⚠ 포장 갭 — 버전 ${result.revisionNo}\n` +
           `    로컬 예측  ${result.localVersion}\n` +
           `    서버 저장  ${result.serverVersion}\n` +
           `    파일 수    로컬 ${result.localVersionFileCount ?? "모름"} / 서버 ${result.serverFileCount ?? "모름"}\n` +

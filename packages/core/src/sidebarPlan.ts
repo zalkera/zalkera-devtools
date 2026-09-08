@@ -472,16 +472,18 @@ export function sidebarPlan(state: SidebarState): PlanGroup[] {
  *
  * ```
  * ▾ 버전
- *     서버 — 969a61e0 / 빌드 #4
+ *     서버 — 969a61e0 / 버전 4
  *     로컬 — 969a61e0
  * ```
  *
  * ■ 왜 두 값인가 — 오너가 세운 구분
- *   · **빌드 번호**(`빌드 #4`) — 올릴 때마다 1씩 느는 순번이다. **언제**를 말하지 **무엇**을 말하지
- *     않는다. CI 의 빌드 번호와 같은 역할이다.
+ *   · **빌드 번호**(화면에는 `버전 4`) — 올릴 때마다 1씩 느는 순번이다. **언제**를 말하지 **무엇**을
+ *     말하지 않는다. CI 의 빌드 번호와 같은 역할이다. ⚠ **성격은 빌드 번호인데 화면 낱말은 「버전」이다**
+ *     — 게시 알림·콘솔 버전 목록이 그 낱말을 쓰고, 한 번호를 두 이름으로 부르면 같은 것인 줄 모른다.
  *   · **판 지문**(`969a61e0`) — 그 판에 담긴 소스가 무엇인지를 말한다. 로컬도 같은 규칙으로 접을 수
  *     있어서, 이 값 하나로 「같은가」에 답이 난다.
- *   둘을 한 낱말로 부르면 「버전 4」가 무엇을 뜻하는지 아무도 말할 수 없게 된다 — 이 화면이 생긴 이유다.
+ *   낱말이 아니라 **두 값을 나란히 보이는 것**이 이 구분을 세운다 — 번호만 있으면 무엇이 담겼는지
+ *   아무도 말할 수 없고, 그게 이 화면이 생긴 이유다.
  *
  * ■ **축 이름은 「로컬 / 서버」다**
  *   오너가 처음 물은 축이 「내 로컬 · 이 zip · 원격 서버」였으므로 화면도 그 축을 그대로 쓴다.
@@ -489,7 +491,7 @@ export function sidebarPlan(state: SidebarState): PlanGroup[] {
  * ■ **항상 두 줄이고, 지문이 먼저다**
  *   라벨이 둘 다 두 글자라 값이 **같은 열에 세로로 정렬**되고, 사람은 「일치」라는 낱말을 읽기 전에
  *   두 값이 같은지를 **본다** — 판정 낱말보다 정렬이 강하다. 그래서 줄에서 판정 낱말을 걷었고,
- *   빌드 번호는 지문을 밀지 않게 **뒤에** 붙인다(서버 줄에만 — 로컬은 그 번호를 가질 수 없다).
+ *   번호는 지문을 밀지 않게 **뒤에** 붙인다(서버 줄에만 — 로컬은 그 번호를 가질 수 없다).
  *
  * ■ **묶음 머리가 결론을 적는다**(오너 확정)
  *   두 줄은 값을 보이고, 머리는 그 값들의 관계를 한 낱말로 적는다. 여덟 상태를 [VERSION_VERDICT] 하나가
@@ -524,8 +526,8 @@ export function versionView(state: SidebarState): {
     }
 
     // ⚠ **서버 값은 소독을 지난다.** 판 번호도 지문도 서버가 준 글자다(`notice.ts` 의 규율).
-    //   `count` 는 숫자가 아닌 값을 **거부**한다 — 서버가 null 을 보내도 「빌드 #0」이 안 뜬다.
-    const build = `빌드 #${count(active.revisionNo)}`;
+    //   `count` 는 숫자가 아닌 값을 **거부**한다 — 서버가 null 을 보내도 「버전 0」이 안 뜬다.
+    const build = `버전 ${count(active.revisionNo)}`;
     const theirs = shortVersion(active.digest);
     const mineShort = shortVersion(mine);
 
@@ -535,13 +537,13 @@ export function versionView(state: SidebarState): {
      * 🔴 이 표시가 **머리를 증명한다.** 없으면 되돌림 상황에서 화면이 자기모순으로 읽힌다:
      * ```
      * 버전 · 로컬이 더 최신
-     *   서버 — 3f8a1c9d / 빌드 #5      ← 5 > 4 인데 왜 로컬이 더 최신?
-     *   로컬 — 7c2e5b10 / 빌드 #4 내용
+     *   서버 — 3f8a1c9d / 버전 5             ← 5 > 4 인데 왜 로컬이 더 최신?
+     *   로컬 — 7c2e5b10 / 4번 내용 그대로
      * ```
-     * 「· #3 내용」이 붙으면 그 자리에서 풀린다. 머리가 가장 안 믿길 때가 이 표시가 필요한 때다.
+     * 「· 3번 내용 그대로」가 붙으면 그 자리에서 풀린다. 머리가 가장 안 믿길 때가 이 표시가 필요한 때다.
      *
      * ⚠ **「되돌림」이라 쓰지 않는다.** 같은 소스를 한 번 더 올려도 지문이 같아지므로 되돌린 것이
-     *   아닐 수 있다. 「#3 내용」은 원장이 말하는 사실 그대로다.
+     *   아닐 수 있다. 「3번 내용 그대로」는 원장이 말하는 사실 그대로다.
      */
     const serverSameAs = (() => {
         const first = facts.firstNo(active.digest);
@@ -585,7 +587,7 @@ export function versionView(state: SidebarState): {
         label:
             `서버 — ${digest === null ? "지문 없음" : plainNotice(digest, VERSION_DIGEST_SHORT)}` +
             ` / ${ours(build)}` +
-            (serverSameAs === null ? "" : ` · #${count(serverSameAs)} 내용`),
+            (serverSameAs === null ? "" : ` · ${count(serverSameAs)}번 내용 그대로`),
         icon: "cloud",
     });
 
@@ -605,13 +607,13 @@ export function versionView(state: SidebarState): {
             label:
                 n === null
                     ? `로컬 — ${plainNotice(digest, VERSION_DIGEST_SHORT)}`
-                    : `로컬 — ${plainNotice(digest, VERSION_DIGEST_SHORT)} / 빌드 #${count(n)} 내용`,
+                    : `로컬 — ${plainNotice(digest, VERSION_DIGEST_SHORT)} / ${count(n)}번 내용 그대로`,
             icon: VERSION_VERDICT[verdict].icon,
             // 아이콘을 못 보는 눈에게 판정을 나르는 유일한 자리다 — 머리와 같은 낱말을 싣는다.
             spoken:
                 n === null
                     ? `로컬 — ${plainNotice(digest, VERSION_DIGEST_SHORT)} · ${ours(head)}`
-                    : `로컬 — ${plainNotice(digest, VERSION_DIGEST_SHORT)} / 빌드 #${count(n)} 내용 · ${ours(head)}`,
+                    : `로컬 — ${plainNotice(digest, VERSION_DIGEST_SHORT)} / ${count(n)}번 내용 그대로 · ${ours(head)}`,
         };
     };
 
@@ -668,7 +670,7 @@ export function versionView(state: SidebarState): {
     ) {
         return done(
             "checkNeeded",
-            `빌드 #${count(baseline.revisionNo)} 를 맞춘 뒤 이 폴더는 바뀌지 않았는데 지문이 서버와 다릅니다.\n` +
+            `버전 ${count(baseline.revisionNo)}에 맞춘 뒤 이 폴더는 바뀌지 않았는데 지문이 서버와 다릅니다.\n` +
                 "① 그 판이 콘솔 zip 으로 올라가 도구가 빼는 파일(dist 등)을 담고 있거나\n" +
                 "② 지문이 생기기 전 규칙으로 저장됐거나\n" +
                 "③ 도구의 포장 규칙이 서버와 갈렸을 수 있습니다. 한 번 더 올리시면 맞춰집니다.",
@@ -703,7 +705,7 @@ export function versionView(state: SidebarState): {
     if (baseline !== null && mine !== baseline.folderVersion) {
         return done(
             "editing",
-            `빌드 #${count(baseline.revisionNo)} 를 맞춘 뒤 이 폴더가 바뀌었습니다.`,
+            `버전 ${count(baseline.revisionNo)}에 맞춘 뒤 이 폴더가 바뀌었습니다.`,
             [serverLine(theirs), localLine(mineShort, "editing")],
         );
     }

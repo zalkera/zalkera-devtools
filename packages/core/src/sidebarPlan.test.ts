@@ -463,7 +463,7 @@ test("버전 묶음은 서버 판을 모르면 지어내지 않는다", () => {
  */
 test("같으면 두 줄의 지문이 같은 자리에 온다 — 정렬이 판정을 나른다", () => {
     const g = versionGroup({activeVersion: {revisionNo: 4, digest: AAA}, folderVersion: AAA});
-    assert.deepEqual(infoLabels(g), ["서버 — aaaaaaaa / 빌드 #4", "로컬 — aaaaaaaa"]);
+    assert.deepEqual(infoLabels(g), ["서버 — aaaaaaaa / 버전 4", "로컬 — aaaaaaaa"]);
     // 두 줄에서 「— 」 뒤 8자가 같은 오프셋에 있어야 눈이 비교한다.
     const [server, local] = infoLabels(g);
     assert.equal(server!.slice(5, 13), local!.slice(5, 13), "지문이 같은 열에 안 왔다");
@@ -471,7 +471,7 @@ test("같으면 두 줄의 지문이 같은 자리에 온다 — 정렬이 판�
 
 test("다르면 그 자리의 값만 다르다", () => {
     const g = versionGroup({activeVersion: {revisionNo: 4, digest: AAA}, folderVersion: BBB});
-    assert.deepEqual(infoLabels(g), ["서버 — aaaaaaaa / 빌드 #4", "로컬 — bbbbbbbb"]);
+    assert.deepEqual(infoLabels(g), ["서버 — aaaaaaaa / 버전 4", "로컬 — bbbbbbbb"]);
 });
 
 /**
@@ -521,14 +521,14 @@ test("적대 입력이 라벨에 실리지 않는다", () => {
     assert.ok(infoLabels(ok)[0]!.includes("aaaaaaaa"), "정상 지문까지 사라졌다");
 });
 
-test("적대 판 번호는 「빌드 #?」로 접힌다 — count 가 비숫자를 거부한다", () => {
+test("적대 판 번호는 「버전 ?」로 접힌다 — count 가 비숫자를 거부한다", () => {
     const g = versionGroup({
         activeVersion: {revisionNo: "1 [열기](command:x)" as unknown as number, digest: AAA},
         folderVersion: AAA,
     });
     const server = infoLabels(g).find((l) => l.startsWith("서버"))!;
     assert.ok(!server.includes("command:"), `번호 자리로 링크가 샜다: ${server}`);
-    assert.match(server, /빌드 #\?/);
+    assert.match(server, /버전 \?/);
 });
 
 /**
@@ -568,12 +568,12 @@ test("다름을 「낡음」으로 말하지 않는다", () => {
 
 test("서버 판에 지문이 없으면 그 자리에 「지문 없음」이라 적는다", () => {
     const g = versionGroup({activeVersion: {revisionNo: 3, digest: null}, folderVersion: AAA});
-    assert.deepEqual(infoLabels(g), ["서버 — 지문 없음 / 빌드 #3", "로컬 — aaaaaaaa"]);
+    assert.deepEqual(infoLabels(g), ["서버 — 지문 없음 / 버전 3", "로컬 — aaaaaaaa"]);
 });
 
 test("로컬을 모르면 아는 쪽만 적는다", () => {
     const g = versionGroup({activeVersion: {revisionNo: 7, digest: BBB}, folderVersion: null});
-    assert.deepEqual(infoLabels(g), ["서버 — bbbbbbbb / 빌드 #7"]);
+    assert.deepEqual(infoLabels(g), ["서버 — bbbbbbbb / 버전 7"]);
 });
 
 /**
@@ -592,7 +592,7 @@ test("로컬 줄에는 빌드 번호가 없다", () => {
  */
 test("번호가 달라도 지문이 같으면 같은 자리에 같은 값이 온다 — 되돌린 판이 그 형상이다", () => {
     const g = versionGroup({activeVersion: {revisionNo: 99, digest: AAA}, folderVersion: AAA});
-    assert.deepEqual(infoLabels(g), ["서버 — aaaaaaaa / 빌드 #99", "로컬 — aaaaaaaa"]);
+    assert.deepEqual(infoLabels(g), ["서버 — aaaaaaaa / 버전 99", "로컬 — aaaaaaaa"]);
 });
 
 test("확장 판은 「버전」이 아니라 「도움」에 선다 — 사이트 판과 다른 축이다", () => {
@@ -719,8 +719,8 @@ test("되돌림에서 머리와 두 접미가 함께 선다", () => {
     });
     assert.equal(g.description, "로컬이 더 최신");
     assert.deepEqual(infoLabels(g), [
-        "서버 — aaaaaaaa / 빌드 #5 · #3 내용",
-        "로컬 — bbbbbbbb / 빌드 #4 내용",
+        "서버 — aaaaaaaa / 버전 5 · 3번 내용 그대로",
+        "로컬 — bbbbbbbb / 4번 내용 그대로",
     ]);
 });
 
@@ -732,7 +732,7 @@ test("서버가 더 나중 내용이면 그렇게 적는다", () => {
         ledger: ledgerOf([3, AAA], [5, CCC]),
     });
     assert.equal(g.description, "서버가 더 최신");
-    assert.deepEqual(infoLabels(g), ["서버 — cccccccc / 빌드 #5", "로컬 — aaaaaaaa / 빌드 #3 내용"]);
+    assert.deepEqual(infoLabels(g), ["서버 — cccccccc / 버전 5", "로컬 — aaaaaaaa / 3번 내용 그대로"]);
 });
 
 /**
@@ -774,7 +774,7 @@ test("작은 번호에 지문 없는 판이 있으면 방향을 말하지 않는
 test("원장이 없으면 방향도 접미도 없다", () => {
     const g = versionGroup({activeVersion: {revisionNo: 5, digest: AAA}, folderVersion: BBB});
     assert.equal(g.description, "다름");
-    assert.deepEqual(infoLabels(g), ["서버 — aaaaaaaa / 빌드 #5", "로컬 — bbbbbbbb"]);
+    assert.deepEqual(infoLabels(g), ["서버 — aaaaaaaa / 버전 5", "로컬 — bbbbbbbb"]);
 });
 
 /** 같은 내용이 셋 이상이면 줄에는 **가장 이른 번호** 하나. 콘솔 `sameSourceOf` 와 같은 선택이다. */
@@ -785,14 +785,14 @@ test("같은 내용이 여럿이면 가장 이른 번호를 든다", () => {
         ledger: ledgerOf([3, AAA], [4, BBB], [5, AAA], [7, AAA]),
     });
     assert.deepEqual(infoLabels(g), [
-        "서버 — aaaaaaaa / 빌드 #7 · #3 내용",
-        "로컬 — bbbbbbbb / 빌드 #4 내용",
+        "서버 — aaaaaaaa / 버전 7 · 3번 내용 그대로",
+        "로컬 — bbbbbbbb / 4번 내용 그대로",
     ]);
 });
 
 /**
  * 🔴 **「지문인가」를 묻는 술어는 하나여야 한다.** 느슨하면 `"abc"` 두 행이 서로 같다고 접혀,
- * 한 화면이 「지문 없음(모른다)」과 「빌드 #N 내용(안다)」을 동시에 말한다.
+ * 한 화면이 「지문 없음(모른다)」과 「N번 내용 그대로(안다)」을 동시에 말한다.
  */
 test("지문 모양이 아닌 값은 원장 판정에 안 들어간다", () => {
     const g = versionGroup({
@@ -924,7 +924,7 @@ test("적대 판 번호는 접미 자리로도 못 샌다", () => {
             folderVersion: BBB,
             ledger: ledgerOf([3, AAA], [4, BBB], [5, AAA]),
         })),
-        ["서버 — aaaaaaaa / 빌드 #5 · #3 내용", "로컬 — bbbbbbbb / 빌드 #4 내용"],
+        ["서버 — aaaaaaaa / 버전 5 · 3번 내용 그대로", "로컬 — bbbbbbbb / 4번 내용 그대로"],
     );
 });
 
@@ -975,7 +975,7 @@ test("이상한 판 번호가 섞여도 방향 게이트가 산다", () => {
             folderVersion: BBB,
             ledger: ledgerOf([1, CCC], [2, BBB], [3, AAA]),
         })),
-        ["서버 — aaaaaaaa / 빌드 #3", "로컬 — bbbbbbbb / 빌드 #2 내용"],
+        ["서버 — aaaaaaaa / 버전 3", "로컬 — bbbbbbbb / 2번 내용 그대로"],
     );
 });
 

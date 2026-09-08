@@ -97,7 +97,7 @@ export function ledgerFacts(snapshot: LedgerSnapshot | null): LedgerFacts {
     //   접는 동안 최솟값을 들면 배열도 스프레드도 없어진다.
     let lowestUnknown: number | null = null;
     for (const r of snapshot.revisions) {
-        // ⚠ 형제 `plausibleRevisionNo` 와 같은 잣대다 — 정수만으로는 `1e21` 이 통과해 「빌드 #1e+21」이 그려진다.
+        // ⚠ 형제 `plausibleRevisionNo` 와 같은 잣대다 — 정수만으로는 `1e21` 이 통과해 「버전 1e+21」이 그려진다.
         if (!plausibleRevisionNo(r.revisionNo)) continue;
         if (!isVersionDigest(r.versionDigest)) {
             unknownCount++;
