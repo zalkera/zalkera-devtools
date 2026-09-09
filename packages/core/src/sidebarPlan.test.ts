@@ -957,7 +957,14 @@ test("기준점 툴팁은 숫자마다 갈리는 조사를 안 쓴다", () => {
  *   실제로 있는가」 하나뿐이다. 문장·설명·오탈자는 여전히 사람 몫이다.
  */
 test("매뉴얼이 인용한 버전 줄이 지금 산출에 그대로 있다", async () => {
-    const help = await readFile(new URL("../../vscode/media/help.md", import.meta.url), "utf8");
+    // ⚠ **둘 다 본다.** `help.md` 는 편집기 안, `MANUAL.md` 는 고객 PDF 다 — 한쪽만 무는 그물은
+    //    다른 쪽이 갈리는 것을 못 잡는다(실제로 판 지문 축이 PDF 에만 세 판째 없었다).
+    const docs = await Promise.all(
+        ["../../vscode/media/help.md", "../../../doc/MANUAL.md"].map((rel) =>
+            readFile(new URL(rel, import.meta.url), "utf8"),
+        ),
+    );
+    const help = docs.join("\n");
     const rollback = versionGroup({
         activeVersion: {revisionNo: 5, digest: AAA},
         folderVersion: BBB,
@@ -967,7 +974,9 @@ test("매뉴얼이 인용한 버전 줄이 지금 산출에 그대로 있다", a
     assert.equal(lines.length, 2, "되돌림 형상이 두 줄이 아니다 — 인용 대조의 전제가 깨졌다");
     // 매뉴얼이 인용하는 조각 — 지문 여덟 자는 매뉴얼 쪽 예시값이라 뺀다.
     for (const quoted of lines.map((l) => l.slice(l.indexOf(" / ") + 3))) {
-        assert.ok(help.includes(quoted), `매뉴얼에 없는 문면을 화면이 그린다: ${quoted}`);
+        for (const [i, doc] of docs.entries()) {
+            assert.ok(doc.includes(quoted), `매뉴얼 ${i === 0 ? "help.md" : "MANUAL.md"} 에 없는 문면을 화면이 그린다: ${quoted}`);
+        }
     }
     // 양성 짝 — 이 시험이 「아무 문자열이나 통과」가 아니다.
     assert.ok(!help.includes("버전 5 · 3번 내용 그대로 아무거나"), "그물이 아무 문자열이나 통과시킨다");
