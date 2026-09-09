@@ -13,19 +13,43 @@ pandoc 을 쓰지 않는다 — 이 기계에 없다. 한글 PDF 는 /home/jongh
 """
 import sys, re
 sys.path.insert(0, "/home/jonghwa/tools")
-from ko_pdf import Doc
+from ko_pdf import Doc, REG as REG_PATH
 
 import os
 SRC = os.path.join(os.path.dirname(__file__), "..", "doc", "MANUAL.md")
 OUT = sys.argv[1] if len(sys.argv) > 1 else "/home/jonghwa/projects/zalkera/잘커라-확장-매뉴얼.pdf"
 
+# 나눔고딕에 **글리프가 없는 글자**를 있는 것으로 바꾼다. 안 바꾸면 gid 0(.notdef)이 실려
+# 고객 PDF 에 □ 로 나간다 — 화면에서는 멀쩡해 보이므로 눈으로는 안 잡힌다.
+# 새 글자를 매뉴얼에 쓰기 전에 `Font(REG).gid(ch)` 로 물어라. 아래 CHECK 가 어차피 막는다.
 CIRCLED = {"①":"1","②":"2","③":"3","④":"4","⑤":"5","⑥":"6","⑦":"7","⑧":"8","⑨":"9","⑩":"10",
-           "⑪":"11","⑫":"12","«":"<","»":">","⚠":"[주의]","→":"->","←":"<-","·":"-"}
+           "⑪":"11","⑫":"12","«":"<","»":">","⚠":"[주의]","→":"->","←":"<-","·":"-",
+           "▾":"▼","✅":"[정상]","🔴":"[중요]"}
 
 def glyphs(t):
     for a, b in CIRCLED.items():
         t = t.replace(a, b)
     return t
+
+
+def assert_renderable(text):
+    """치환 뒤에도 폰트에 없는 글자가 남아 있으면 **굽지 않고 죽는다**.
+
+    ⚠ 이것은 문서 교열이 아니라 **산출물이 깨지는가**다. gid 0 은 고객이 받는 PDF 에 □ 로
+      찍히고, 굽는 사람 화면에는 아무 표시도 안 난다 — 실제로 ✅·🔴 둘이 그렇게 나가고 있었다.
+    """
+    from ko_pdf import Font, BOLD
+    missing = {}
+    for f in (Font(REG_PATH), Font(BOLD)):
+        for ch in set(text):
+            if ch in "\n\r\t" or f.gid(ch):
+                continue
+            missing.setdefault(ch, text.count(ch))
+    if missing:
+        print("✗ 폰트에 없는 글자 %d 종 — 이대로 구우면 고객 PDF 에 □ 로 나갑니다." % len(missing))
+        for ch, n in sorted(missing.items()):
+            print("   %r U+%04X — 본문 %d회. scripts/manual-pdf.py 의 CIRCLED 에 바꿀 글자를 적으십시오." % (ch, ord(ch), n))
+        sys.exit(1)
 
 def clean(t):
     t = re.sub(r"\*\*(.+?)\*\*", r"\1", t)
@@ -33,7 +57,9 @@ def clean(t):
     t = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", t)
     return glyphs(t).strip()
 
-lines = open(SRC, encoding="utf-8").read().split("\n")
+_source = open(SRC, encoding="utf-8").read()
+assert_renderable(glyphs(_source))
+lines = _source.split("\n")
 d = Doc()
 d.header_band("잘커라 확장 사용 매뉴얼", "Zalkera VS Code Extension", "소스를 받아 고치고, 미리 보고, 올립니다")
 d.gap(18)
