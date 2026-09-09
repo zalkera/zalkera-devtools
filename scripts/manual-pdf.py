@@ -23,7 +23,7 @@ OUT = sys.argv[1] if len(sys.argv) > 1 else "/home/jonghwa/projects/zalkera/잘�
 # 고객 PDF 에 □ 로 나간다 — 화면에서는 멀쩡해 보이므로 눈으로는 안 잡힌다.
 # 새 글자를 매뉴얼에 쓰기 전에 `Font(REG).gid(ch)` 로 물어라. 아래 CHECK 가 어차피 막는다.
 CIRCLED = {"①":"1","②":"2","③":"3","④":"4","⑤":"5","⑥":"6","⑦":"7","⑧":"8","⑨":"9","⑩":"10",
-           "⑪":"11","⑫":"12","«":"<","»":">","⚠":"[주의]","→":"->","←":"<-","·":"-",
+           "⑪":"11","⑫":"12","«":"<","»":">","⚠":"[주의]","→":"->","←":"<-",
            "▾":"▼","✅":"[정상]","🔴":"[중요]"}
 
 def glyphs(t):
@@ -106,10 +106,12 @@ while i < len(lines):
     if s.startswith("#### "):
         d.para(clean(s[5:]), size=11.5, rgb=(0.11, 0.24, 0.45)); i += 1; continue
     if s.startswith("> "):
+        # ⚠ **이어 붙인 뒤에 clean 한다.** 줄마다 clean 하면 줄을 넘는 `**굵게**` 가 한쪽 `**` 만
+        #   들고 있어 정규식이 안 물고, 그 별 두 개가 **고객 PDF 에 그대로 인쇄된다**(실측).
         buf = []
         while i < len(lines) and lines[i].strip().startswith(">"):
-            buf.append(clean(lines[i].strip().lstrip("> ").strip())); i += 1
-        d.box([(" ".join(x for x in buf if x), False)], bg=(0.99, 0.96, 0.90))
+            buf.append(lines[i].strip().lstrip("> ").strip()); i += 1
+        d.box([(clean(" ".join(x for x in buf if x)), False)], bg=(0.99, 0.96, 0.90))
         d.gap(6); continue
     if s.startswith("- ") or s.startswith("* "):
         d.bullet(clean(s[2:])); i += 1; continue

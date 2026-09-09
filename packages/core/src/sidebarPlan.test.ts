@@ -973,13 +973,20 @@ test("매뉴얼이 인용한 버전 줄이 지금 산출에 그대로 있다", a
     const lines = infoLabels(rollback);
     assert.equal(lines.length, 2, "되돌림 형상이 두 줄이 아니다 — 인용 대조의 전제가 깨졌다");
     // 매뉴얼이 인용하는 조각 — 지문 여덟 자는 매뉴얼 쪽 예시값이라 뺀다.
-    for (const quoted of lines.map((l) => l.slice(l.indexOf(" / ") + 3))) {
+    for (const [line, quoted] of lines.map((l) => [l, l.slice(l.indexOf(" / ") + 3)] as const)) {
+        // 🔴 **자르기가 빈 문자열을 내면 아래 `includes` 가 늘 참이 된다** — 그물이 사라지는데
+        //    아무것도 안 죽는다(심의 변이 M5 실측). 자른 조각이 **줄의 꼬리**임을 먼저 못박는다.
+        assert.notEqual(line.indexOf(" / "), -1, `줄 모양이 바뀌었다 — 인용 대조가 무의미해진다: ${line}`);
+        assert.ok(quoted.length > 0, `자른 조각이 비었다 — includes 가 늘 참이 된다: ${line}`);
+        assert.ok(line.endsWith(quoted), `조각이 줄 끝이 아니다: ${line}`);
         for (const [i, doc] of docs.entries()) {
             assert.ok(doc.includes(quoted), `매뉴얼 ${i === 0 ? "help.md" : "MANUAL.md"} 에 없는 문면을 화면이 그린다: ${quoted}`);
         }
     }
-    // 양성 짝 — 이 시험이 「아무 문자열이나 통과」가 아니다.
-    assert.ok(!help.includes("버전 5 · 3번 내용 그대로 아무거나"), "그물이 아무 문자열이나 통과시킨다");
+    // 양성 짝 — 두 문서가 **각각** 물어야 한다. 종전 짝(`!includes("…아무거나")`)은 어떤 회귀에도
+    // 안 죽어 막는 척만 했다(심의 지적).
+    assert.equal(docs.length, 2, "매뉴얼 한쪽만 보고 있다");
+    for (const doc of docs) assert.ok(doc.includes("버전 목록"), "매뉴얼이 이 축을 아예 안 말한다");
 });
 
 /** 🔴 접미의 번호도 서버가 준 값이다 — `count` 가 비숫자를 거부해야 링크가 못 실린다. */
