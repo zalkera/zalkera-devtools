@@ -19,3 +19,5 @@ out/
 # `git add -A` 가 워크트리 7개를 embedded git repo 로 스테이징했다(심의 실측 · 2026-08-10).
 /.claude/
 /shared/
+# 고객 PDF 매뉴얼은 `scripts/manual-pdf.py` 가 `doc/MANUAL.md` 에서 굽는 산출물이다 — 원본 옆에 두되 실지 않는다.
+doc/*.pdf
