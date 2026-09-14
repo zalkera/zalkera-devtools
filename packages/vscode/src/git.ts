@@ -22,9 +22,8 @@
  *   `.vscode/settings.json` 이 정할 수 있는 값이라, 남이 만든 폴더가 우리 화면을 「깨끗함」으로 만들 수
  *   있다. 그때 `uncommitted` 는 `null`(셀 수 없음)이다.
  */
-import { sep } from "node:path";
 import * as vscode from "vscode";
-import { countUncommitted, type GitSnapshot } from "@zalkera/devtools-core";
+import { countUncommitted, isWithin, type GitSnapshot } from "@zalkera/devtools-core";
 
 interface GitChange {
   readonly uri: vscode.Uri;
@@ -109,8 +108,7 @@ export async function gitSnapshotOf(repo: GitRepository, dir: string): Promise<G
   // 변경 경로는 `repo.rootUri` 표기로 지어진다. 폴더를 **다른 대소문자**로 열면(macOS · `vscode.git` 은 대소문자를
   // 접어 레포를 잡아 준다) `dir` 이 그 표기의 하위가 아니라 `countUncommitted` 가 전부 「밖」으로 걸러 0 이 된다
   // (Fable 보안 실측). 글자 그대로의 하위가 아니면 셀 수 없다.
-  const root = repo.rootUri.fsPath;
-  const under = dir === root || dir.startsWith(root.endsWith(sep) ? root : root + sep);
+  const under = isWithin(dir, repo.rootUri.fsPath);
   const all = [repo.state.workingTreeChanges, repo.state.indexChanges, repo.state.untrackedChanges].flatMap(
     (list) => list.map((c) => c.uri.fsPath),
   );

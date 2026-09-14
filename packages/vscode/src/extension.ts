@@ -119,13 +119,14 @@ import {
   ensureEnvIgnored,
   excludeFromGit,
   gitStatusLine,
+  isWithin,
   tagOffer,
 } from "@zalkera/devtools-core";
 import { lstatSync, readFileSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { existsSync } from "node:fs";
-import { basename, dirname, join, relative, sep } from "node:path";
+import { basename, dirname, join, relative } from "node:path";
 import { readGit, type GitRepository } from "./git.ts";
 import { SecretTokenStore } from "./secretStore.ts";
 import {
@@ -193,7 +194,7 @@ async function whileExtracting<T>(target: string, run: () => Thenable<T>): Promi
   // `target` 은 푸는 폴더다. **열린 폴더 안을 쓸 때만** 감시기 문을 세운다 — 「소스 다운로드」·「zip 으로
   // 시작」이 옆 폴더로 갈 때 문을 세우면 열린 폴더의 남의 편집이 이유 없이 묻힌다(Fable 기능).
   const here = workspaceDir();
-  const writesWorkspace = here !== undefined && (target === here || target.startsWith(here + sep));
+  const writesWorkspace = here !== undefined && isWithin(target, here);
   const outcome = await receiveGuard.run(async () => {
     // 우리가 폴더를 통째로 쓰는 동안은 감시기가 그 쓰기를 「남이 바꿨다」로 읽지 않게 한다(아래
     // `ownWritesQuietUntil`). 푸는 쪽이 끝난 뒤 값을 심으므로(`seedFolderVersion`) 여기서 예약하면
@@ -3106,8 +3107,18 @@ async function publishCommand(): Promise<void> {
     git.snapshot.uncommitted === 0;
   // 「어느 커밋이 이 버전인가」를 나중에 묻는 자리가 출력 채널이다 — 레포일 때만 한 줄. 두 스냅샷이
   // 어긋났으면 그 사실도 적는다(그때 이 버전은 어느 커밋도 아니다).
+  if (git !== null && after === null) log(`버전 ${result.revisionNo} ← 포장 뒤 git 상태를 못 읽었습니다.`);
   if (after !== null) {
-    log(`버전 ${result.revisionNo} ← ${gitStatusLine(after.snapshot)}${settled ? "" : " (동의 앞과 포장 뒤의 git 상태가 달라 이 버전은 어느 커밋과도 같지 않습니다)"}`);
+    const differs =
+      after.snapshot.commit !== git!.snapshot.commit || after.snapshot.uncommitted !== git!.snapshot.uncommitted;
+    const why = settled
+      ? ""
+      : after.snapshot.uncommitted === null || git!.snapshot.uncommitted === null
+        ? " (변경을 셀 수 없어 이 버전이 어느 커밋과 같은지 말할 수 없습니다)"
+        : differs
+          ? " (동의 앞과 포장 뒤의 git 상태가 달라 이 버전은 어느 커밋과도 같지 않습니다)"
+          : " (커밋하지 않은 변경이 있어 이 버전은 어느 커밋과도 같지 않습니다)";
+    log(`버전 ${result.revisionNo} ← ${gitStatusLine(after.snapshot)}${why}`);
   }
   // ⚠ **취소가 늦었어도 여기서 되돌아가지 않는다.** 판은 만들어졌으므로 아래 부수효과(표식 갱신·
   //    폴더 기억·서버 고지)를 **그대로 해야 한다** — 건너뛰면 화면이 아니라 **디스크에 거짓**이
@@ -3409,7 +3420,7 @@ async function createGitTag(tag: TagOfferOn): Promise<void> {
       now === null
         ? "git 상태를 다시 읽지 못해"
         : now.uncommitted === null
-          ? "미추적 파일을 숨기는 git 설정이 켜져 변경을 셀 수 없어"
+          ? "git 설정이 변경 일부를 숨기거나 폴더 표기가 레포와 달라 변경을 셀 수 없어"
           : "발행한 뒤 커밋이 옮겨졌거나 고친 것이 있어";
     log(`git 태그를 만들지 않았습니다 — ${why}. 손으로 찍으시려면: ${manual}`);
     void vscode.window.showWarningMessage(
@@ -4590,7 +4601,8 @@ function watchWorkspaceWrites(dir: string): vscode.Disposable {
     }
     // 사이트에 안 묶인 폴더(잘커라와 무관한 창)는 셀 것이 없다 — 예약하면 사이드바만 두 번 헛그린다(Fable 성능).
     // 소속 표식은 배제 경로라 여기서 소속 변화를 볼 일이 없고, 명령이 `refreshSidebar` 를 직접 부른다.
-    if (currentFolderBinding() === null) return;
+    // 묶음의 **첫 사건**에서만 읽는다(타이머가 없을 때) — 표식 읽기는 사건마다 9µs 라 폭주 때 사건마다 읽을 이유가 없다.
+    if (folderVersionTimer === null && currentFolderBinding() === null) return;
     scheduleFolderVersion();
   };
   return vscode.Disposable.from(

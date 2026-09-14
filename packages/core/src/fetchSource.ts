@@ -27,10 +27,29 @@ import { isExcludedEntry, packProject } from "./zip.ts";
  * 서버 tar 의 항목 중 **디스크에 실현하지 않을 것** — zip 레인(`decideImportPlan`)·CLI(`pull` 의 `dropped`)과
  * **같은 술어**다. 종전에는 이 레인만 걸러내지 않아 서버가 보낸 `.git/config`(`core.fsmonitor`)·`.git/hooks/*`·
  * `.vscode/settings.json`·`.env*` 가 그대로 놓였다(Fable 보안 실측 · 탈취된 서버가 폴더를 여는 순간 명령을
- * 실행시킬 수 있는 자리). 정직한 서버의 판에는 어차피 없는 것들이라 정상 흐름은 안 바뀐다.
- * ⚠ `decide` 가 있으면 해제기가 **빈 폴더 항목을 미리 만들지 않는다**(`untar.ts`) — 파일의 부모는 쓸 때 만든다.
+ * 실행시킬 수 있는 자리). 서버는 `.git/`·`node_modules/`·`.github/workflows/`·`.env*` 만 벗기므로 콘솔 zip 으로
+ * 올린 판에는 `.vscode/`·`.idea/`·`.mcp.json`·`dist/`·`*.pem` 같은 것이 남아 있을 수 있다 — 그것도 zip 받기와
+ * 같게 빼고, **뺀 이름은 말한다**(「조용히 빼지 않는다」 · zip 레인의 `dropped` 와 같은 자리).
+ *
+ * 부수 이득: 종전에는 「서버 판으로 교체」가 남겨 둔 `keep` 이름(`.vscode` 등)과 tar 항목이 겹치면 `writeExclusive`
+ * 가 EEXIST 로 교체를 통째로 실패시켰다 — 이제 그 항목은 쓰지 않으니 교체가 산다.
  */
-const dropExcluded = (path: string): "create" | "skip" => (isExcludedEntry(path) ? "skip" : "create");
+function droppingExcluded(dropped: string[]): (path: string) => "create" | "skip" {
+    return (path) => {
+        if (!isExcludedEntry(path)) return "create";
+        dropped.push(path);
+        return "skip";
+    };
+}
+
+/** 뺀 이름을 한 줄로 — 폴더 항목은 `/` 로 끝나 파일과 갈린다. 많으면 앞 넷만 대고 나머지는 센다(zip 레인과 같은 문면 규율). */
+function droppedLine(dropped: readonly string[]): string | null {
+    if (dropped.length === 0) return null;
+    const files = dropped.filter((p) => !p.endsWith("/"));
+    const shown = files.slice(0, 4).join(" · ");
+    const rest = files.length - Math.min(files.length, 4);
+    return `정본에 싣지 않는 ${files.length}개는 빼고 풀었습니다: ${shown}${rest > 0 ? ` 외 ${rest}개` : ""}`;
+}
 
 export { extractTarGz };
 
@@ -182,6 +201,7 @@ export async function fetchSiteSource(options: FetchSourceOptions): Promise<Fetc
     //    고객 파일(`.vscode` — 배송 문서가 "있어도 괜찮습니다"라고 초대한 그것)이 사라진다.
     const before = await snapshotEntries(options.targetDir);
     let fileCount: number;
+    const dropped: string[] = [];
     try {
         // 소스 꾸러미는 `node_modules` 를 담을 수 없다 — 페이로드 경로와 갈리는 지점이다.
         // ⚠ **해제 상한을 명시한다.** 기본값도 같은 상수이지만([MAX_EXTRACT_BYTES]), 이 자리가 무엇을
@@ -189,13 +209,16 @@ export async function fetchSiteSource(options: FetchSourceOptions): Promise<Fetc
         fileCount = await extractTarGz(buffer, options.targetDir, {
             rejectVendored: true,
             maxBytes: MAX_SOURCE_EXTRACT_BYTES,
-            decide: dropExcluded,
+            decide: droppingExcluded(dropped),
+            emptyDirs: true,
         });
     } catch (cause) {
         await removeAdded(options.targetDir, before);
         throw cause;
     }
     report(`${fileCount}개 파일을 받았습니다.`);
+    const droppedNote = droppedLine(dropped);
+    if (droppedNote !== null) report(droppedNote);
     return { revisionNo, fileCount, sha256, versionDigest: got.versionDigest };
 }
 
@@ -272,6 +295,7 @@ export async function refreshSiteSource(options: RefreshSourceOptions): Promise<
 
     const keep = await keepNames(options.targetDir);
     let fileCount = 0;
+    const dropped: string[] = [];
     const { preserved, kept } = await replaceContents(
         options.targetDir,
         // 표식을 되살린다 — 아래 쓰기가 실패해도 **소속을 안 잃는다.**
@@ -283,11 +307,14 @@ export async function refreshSiteSource(options: RefreshSourceOptions): Promise<
             fileCount = await extractTarGz(buffer, options.targetDir, {
                 rejectVendored: true,
                 maxBytes: MAX_SOURCE_EXTRACT_BYTES,
-                decide: dropExcluded,
+                decide: droppingExcluded(dropped),
+                emptyDirs: true,
             });
         },
     );
     report(`${fileCount}개 파일로 갈아 끼웠습니다.`);
+    const droppedNote = droppedLine(dropped);
+    if (droppedNote !== null) report(droppedNote);
 
     // ⚠ **남의 소속은 안 덮는다.** `keep`(다른 사이트의 표식)·`unknown`(못 읽음)이면 안 쓴다 —
     //    「모른다」로 막지는 않되, 모르는 채로 **적지도** 않는다.
@@ -372,10 +399,12 @@ export async function downloadSourceZip(options: {
     //    「빈 폴더」 판정에 걸려 다음 시도가 막힌다.
     const work = await mkdtemp(join(tmpdir(), "zalkera-source-"));
     try {
+        // 임시 작업 폴더라 뺀 이름은 말하지 않는다 — 이어지는 포장기가 같은 술어로 다시 뺀다.
         const fileCount = await extractTarGz(got.buffer, work, {
             rejectVendored: true,
             maxBytes: MAX_SOURCE_EXTRACT_BYTES,
-            decide: dropExcluded,
+            decide: droppingExcluded([]),
+            emptyDirs: true,
         });
         report(`${fileCount}개 파일을 확인했습니다 — zip 으로 포장하는 중…`);
         // 아카이브가 한 겹 감싸고 있을 수 있다 — 포장 뿌리를 잘못 잡으면 `package.json` 이

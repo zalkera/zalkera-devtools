@@ -917,6 +917,14 @@ const WIRES = [
         "동의 앞 스냅샷만으로 태그를 권해 모달 중 옮겨진 커밋(또는 포장 중 편집)이 태그·손 명령에 실린다",
     ],
     [
+        // 확장의 tar 받기 레인 셋은 zip·CLI 와 **같은 배제 술어**를 지나야 한다 — 한 곳을 빼면 서버가 보낸
+        // `.git/config`(`core.fsmonitor`)·`.git/hooks/*` 가 그대로 놓인다(Fable 보안 실측 · 변이 M16 생존).
+        "packages/core/src/fetchSource.ts",
+        "decide: droppingExcluded(",
+        "받기 한 레인이 배제 술어를 안 지나 탈취된 서버의 `.git/**`·`.vscode/**` 가 폴더에 실현된다",
+        3,
+    ],
+    [
         // `status()` 실패를 신선으로 보면 1회전이 닫은 「낡은 값으로 깨끗함」이 돌아온다(Fable 변이 M7 생존).
         "packages/vscode/src/git.ts",
         "repo.status().then(() => true, () => false)",

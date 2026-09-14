@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import {mkdir, readFile, writeFile} from "node:fs/promises";
 import {join} from "node:path";
 import test from "node:test";
-import {affectsFolderVersion, countUncommitted, gitStatusLine, tagOffer, type GitSnapshot} from "./git.ts";
+import {affectsFolderVersion, countUncommitted, gitStatusLine, isWithin, tagOffer, type GitSnapshot} from "./git.ts";
 import {isExcludedEntry} from "./zip.ts";
 import {excludeFromGit} from "./gitExclude.ts";
 import {SOURCE_MARK_PATH} from "./localMark.ts";
@@ -25,7 +25,7 @@ test("git 한 줄 — 커밋하지 않은 변경은 수로 말한다", () => {
 test("🔴 git 한 줄 — 셀 수 없으면(미추적 숨김 설정) 「깨끗함」이라 말하지 않는다", () => {
     assert.equal(
         gitStatusLine({...clean, uncommitted: null}),
-        "git: main @ 1a2b3c4 · 커밋하지 않은 변경을 셀 수 없음(git 설정이 일부를 숨김)",
+        "git: main @ 1a2b3c4 · 커밋하지 않은 변경을 셀 수 없음",
     );
 });
 
@@ -175,18 +175,19 @@ test("🔴 exclude — 못 읽는 파일(권한 없음)은 빈 파일로 접어 
     assert.equal(await readFile(file, "utf8"), "secret-rule/\n*.bak\n", "고객의 exclude 규칙이 사라졌다");
 });
 
-test("🔴 exclude — 정규 파일이 아니면(FIFO) 읽지도 쓰지도 않고 곧 돌아온다", {skip: !canFifo}, async () => {
-    const {execFileSync} = await import("node:child_process");
+test("🔴 exclude — 정규 파일이 아니면(FIFO) 읽지도 쓰지도 않고 곧 돌아온다", {skip: !canFifo, timeout: 8_000}, async () => {
+    const {execFileSync, spawn} = await import("node:child_process");
     const dir = await repo(true);
     await mkdir(join(dir, ".git", "info"), {recursive: true});
     const file = join(dir, ".git", "info", "exclude");
     execFileSync("mkfifo", [file]);
+    // ⚠ **쓰는 쪽을 하나 세워 둔다.** 회귀한 코드(`readFile` 이 FIFO 를 읽음)는 쓰는 쪽이 없으면 영영 멈춰
+    //    러너까지 멈춘다(Fable 실측 400초). 이 쓰기가 3초 뒤 닫히면 회귀 코드는 EOF 로 빈 내용을 받아 「쓰기」로
+    //    넘어가고, 그러면 FIFO 자리가 파일로 바뀌어 아래 단언이 **빨갛게** 죽는다. 현재 코드는 `lstat` 만 보고
+    //    돌아오므로 이 쓰기는 읽는 쪽 없이 5초 뒤 `timeout` 이 거둔다.
+    spawn("timeout", ["5", "sh", "-c", `sleep 3 > "${file}"`], {detached: true, stdio: "ignore"}).unref();
     const {lstat} = await import("node:fs/promises");
-    // 옛 코드는 `readFile` 이 FIFO 에서 영영 멈춘다 — 시한이 곧 단언이다.
-    await Promise.race([
-        excludeFromGit(dir, SOURCE_MARK_PATH),
-        new Promise((_, reject) => setTimeout(() => reject(new Error("FIFO 에서 멈췄다")), 2_000)),
-    ]);
+    assert.equal(await excludeFromGit(dir, SOURCE_MARK_PATH), "failed");
     assert.equal((await lstat(file)).isFIFO(), true, "FIFO 가 파일로 바뀌었다");
 });
 
@@ -230,4 +231,14 @@ test("🔴 태그 권유 — 커밋 값이 sha 모양이 아니면 권하지 않
     assert.equal(tagOffer({...clean, commit: "HEAD~1"}, "acme", 5), null);
     assert.equal(tagOffer({...clean, commit: "a".repeat(40)}, "acme", 5)?.ref, "a".repeat(40));
     assert.equal(tagOffer({...clean, commit: "b".repeat(64)}, "acme", 5)?.ref, "b".repeat(64));
+});
+
+test("isWithin — 자신·하위는 참, 형제 접두(`site2`)·부모·밖은 거짓", () => {
+    assert.equal(isWithin("/w/site", "/w/site"), true);
+    assert.equal(isWithin("/w/site/src/a.ts", "/w/site"), true);
+    assert.equal(isWithin("/w/site", "/w/site/"), true, "뿌리 끝 구분자를 못 접었다");
+    assert.equal(isWithin("/w/site2", "/w/site"), false, "형제 접두를 하위로 봤다");
+    assert.equal(isWithin("/w", "/w/site"), false);
+    assert.equal(isWithin("/other/site", "/w/site"), false);
+    if (process.platform !== "win32") assert.equal(isWithin("/w/Site/a.ts", "/w/site"), false, "리눅스에서 대소문자를 접었다");
 });

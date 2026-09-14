@@ -145,6 +145,15 @@ test("차단3 — git 레포에 .gitignore 가 없으면 만들어 자격증명�
   strictEqual(existsSync(join(plain, ".gitignore")), false);
 });
 
+test("차단3 — 시작 소스 팩의 `.env.*` 줄을 알아본다(안 알아보면 첫 미리보기마다 `.gitignore` 가 바뀐다)", async () => {
+  const { writeFile } = await import("node:fs/promises");
+  const dir = await tempDir("zalkera-git-");
+  await mkdir(join(dir, ".git"), { recursive: true });
+  await writeFile(join(dir, ".gitignore"), "node_modules\n.env\n.env.*\n!.env.example\n");
+  strictEqual(await ensureEnvIgnored(dir), "already", "팩 규칙(`.env.*`)을 못 알아보고 줄을 또 붙였다");
+  strictEqual((await readFile(join(dir, ".gitignore"), "utf8")).includes(".env.local"), false);
+});
+
 test("차단4 — 큰 파일을 조용히 빼지 않고 이름을 대고 끊는다", async () => {
   const dir = await tempDir("zalkera-big-");
   await writeFile(join(dir, "package.json"), "{}");

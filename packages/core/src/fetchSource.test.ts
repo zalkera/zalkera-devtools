@@ -37,9 +37,25 @@ function header(name: string, size: number): Buffer {
     return h;
 }
 
-function tarGz(entries: Array<{ name: string; body: string }>): Buffer {
+/** 폴더 항목(typeflag 5) — 빈 폴더가 받기에서 살아남는지 재는 데 쓴다. */
+function dirHeader(name: string): Buffer {
+    const h = header(name.endsWith("/") ? name : `${name}/`, 0);
+    h.write("5", 156, 1, "ascii");
+    let sum = 0;
+    h.write("        ", 148, 8, "ascii");
+    for (const byte of h) sum += byte;
+    h.write(`${sum.toString(8).padStart(6, "0")}\0 `, 148, 8, "ascii");
+    return h;
+}
+
+function tarGz(entries: Array<{ name: string; body: string } | { dir: string }>): Buffer {
     const blocks: Buffer[] = [];
-    for (const { name, body } of entries) {
+    for (const entry of entries) {
+        if ("dir" in entry) {
+            blocks.push(dirHeader(entry.dir));
+            continue;
+        }
+        const { name, body } = entry;
         const data = Buffer.from(body, "utf8");
         blocks.push(header(name, data.length), data, Buffer.alloc((512 - (data.length % 512)) % 512));
     }
@@ -161,4 +177,48 @@ test("받을 판이 하나도 없으면 「없다」의 이유를 가른다", as
     (e: unknown) => e as DevtoolsError,
   );
   match(notReady?.hint ?? "", /만들어지는 중이거나 실패/);
+});
+
+test("🔴 받기는 zip 받기·CLI 와 같은 것을 뺀다 — 서버가 보낸 `.git/config`·`.vscode`·`.env.local`·`.mcp.json` 은 디스크에 놓이지 않는다", async () => {
+    const target = await tempDir("zalkera-src-drop-");
+    await mkdir(join(target, ".vscode"), { recursive: true });
+    await writeFile(join(target, ".vscode", "launch.json"), '{"고객이 만든 것":true}');
+    const payload = tarGz([
+        { name: "package.json", body: '{"name":"ok"}' },
+        { name: ".env.example", body: "ZALKERA_STOREFRONT_KEY=\n" }, // 값이 빈 서식 — **실린다**(양성 짝)
+        { name: ".git/config", body: "[core]\n\tfsmonitor = /tmp/evil.sh\n" },
+        { name: ".git/hooks/pre-commit", body: "#!/bin/sh\nrm -rf ~\n" },
+        { name: ".vscode/settings.json", body: '{"zalkera.tenant":"남의사이트"}' },
+        { name: ".env.local", body: "ZALKERA_STOREFRONT_KEY=oqsk_stolen\n" },
+        { name: ".mcp.json", body: '{"mcpServers":{"x":{"env":{"GITHUB_TOKEN":"ghp_x"}}}}' },
+        { dir: "public/uploads" }, // 빈 폴더 — 살아남아야 한다(콘솔 zip 으로 올린 판)
+    ]);
+    const seen: string[] = [];
+    const result = await fetchSiteSource({
+        api: api(payload), targetDir: target, fetchImpl: serve(payload), onProgress: (m: string) => seen.push(m),
+    } as never);
+
+    strictEqual(result.fileCount, 2, "쓴 파일 수가 뺀 것을 포함해 세어졌다");
+    const top = await readdir(target);
+    ok(!top.includes(".git"), `.git 이 실현됐다: ${top.join(", ")}`);
+    ok(!top.includes(".env.local"), ".env.local 이 실현됐다");
+    ok(!top.includes(".mcp.json"), ".mcp.json 이 실현됐다");
+    ok(top.includes(".env.example"), "값이 빈 서식까지 뺐다(양성 짝)");
+    ok(top.includes("public"), "빈 폴더가 사라졌다");
+    strictEqual((await readdir(join(target, "public"))).includes("uploads"), true, "빈 폴더 항목을 안 만들었다");
+    // 고객의 `.vscode/launch.json` 은 그대로, 서버가 보낸 `settings.json` 은 없다.
+    strictEqual(await readFile(join(target, ".vscode", "launch.json"), "utf8"), '{"고객이 만든 것":true}');
+    ok(!(await readdir(join(target, ".vscode"))).includes("settings.json"), "서버의 .vscode/settings.json 이 놓였다");
+    // 조용히 빼지 않는다 — 뺀 이름을 말한다.
+    ok(seen.some((m) => /빼고 풀었습니다/.test(m) && m.includes(".git/config")), `뺀 이름을 안 말했다: ${seen.join(" | ")}`);
+});
+
+test("받기 — 뺄 것이 없으면 「빼고 풀었습니다」를 말하지 않는다(양성 짝)", async () => {
+    const target = await tempDir("zalkera-src-nodrop-");
+    const payload = tarGz([{ name: "package.json", body: '{"name":"ok"}' }]);
+    const seen: string[] = [];
+    await fetchSiteSource({
+        api: api(payload), targetDir: target, fetchImpl: serve(payload), onProgress: (m: string) => seen.push(m),
+    } as never);
+    ok(!seen.some((m) => /빼고 풀었습니다/.test(m)), `뺀 것이 없는데 말했다: ${seen.join(" | ")}`);
 });

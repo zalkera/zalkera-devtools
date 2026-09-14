@@ -229,3 +229,13 @@ test("⑫ 손 목록은 포장기가 빼는 것에서 나온다 — 손으로 �
   assert.equal((await readdir(dir)).includes("node_modules"), false);
   assert.equal((await readdir(dir)).includes(".next"), false);
 });
+
+test("keepNames — 우리 원자 쓰기의 잔재(`*.zalkera-<hex>.tmp`)는 배제 술어에 들어도 남기지 않는다", async () => {
+    const dir = await tempDir("zalkera-keep-tmp-");
+    await writeFile(join(dir, ".env.local"), "ZALKERA_STOREFRONT_KEY=x\n");
+    await writeFile(join(dir, ".zalkera-0123456789ab.tmp"), "잔재");
+    await writeFile(join(dir, ".mcp.json.zalkera-abcdefabcdef.tmp"), "잔재");
+    const keep = await keepNames(dir);
+    assert.ok(keep.includes(".env.local"), "자격증명은 남겨야 한다(양성 짝)");
+    assert.equal(keep.some((n) => n.endsWith(".tmp")), false, `잔재를 남겼다: ${keep.join(" · ")}`);
+});

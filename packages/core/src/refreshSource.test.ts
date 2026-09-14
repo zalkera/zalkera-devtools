@@ -164,3 +164,21 @@ test("해제가 깨지면 **폴더가 원래대로 돌아온다** — 표식도 
     ok(!names.includes("good.txt"), "반쪽 해제가 남았다");
     strictEqual((await markOf(dir)).revisionNo, 3, "실패했는데 표식이 움직였다");
 });
+
+test("🔴 서버 tar 가 남겨 둘 이름(`.vscode`)과 겹쳐도 교체가 산다 — 종전엔 EEXIST 로 통째로 실패했다", async () => {
+    const dir = await workedFolder("bix", 3);
+    await mkdir(join(dir, ".vscode"), { recursive: true });
+    await writeFile(join(dir, ".vscode", "settings.json"), '{"zalkera.tenant":"bix"}');
+    const payload = tarGz([
+        { name: "package.json", body: '{"name":"new"}' },
+        { name: ".vscode/settings.json", body: '{"zalkera.tenant":"남의사이트"}' },
+        { name: ".git/config", body: "[core]\n\tfsmonitor = /tmp/evil.sh\n" },
+    ]);
+    const result = await refreshSiteSource({
+        api: api(payload), targetDir: dir, tenant: "bix", link: LINK, fetchImpl: serve(payload),
+    });
+    strictEqual(JSON.parse(await readFile(join(dir, "package.json"), "utf8")).name, "new");
+    strictEqual(await readFile(join(dir, ".vscode", "settings.json"), "utf8"), '{"zalkera.tenant":"bix"}', "고객 설정이 서버 것으로 덮였다");
+    ok(!(await readdir(dir)).includes(".git"), ".git 이 실현됐다");
+    ok(result.fileCount >= 1);
+});

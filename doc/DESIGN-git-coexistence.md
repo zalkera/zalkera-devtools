@@ -38,7 +38,7 @@
 ① **판 재계산 트리거는 저장뿐이다.** `scheduleFolderVersion()` 을 부르는 자리는
 `onDidSaveTextDocument` 하나이고, 파일 감시기는 없다.
 재현(종전 `7b5e7b1` 기준): `git show 7b5e7b1:packages/vscode/src/extension.ts | grep -c "scheduleFolderVersion()"` → 2(호출 1 + 정의 1) ·
-`grep -c createFileSystemWatcher packages/vscode/src/extension.ts` → 0.
+`git show 7b5e7b1:packages/vscode/src/extension.ts | grep -c createFileSystemWatcher` → 0.
 그래서 `git pull`·`git checkout`·`git stash`·에이전트의 직접 쓰기 뒤에는 **다음 저장이나 명령까지**
 사이드바 「버전」이 옛 결론을 그린다. 코드도 이 손을 안다 — 보호 경로 경고는 그래서 「열 때」도 본다
 (`warnProtectedPath` KDoc). 판 재계산에는 그 둘째 갈래가 없다.
@@ -52,9 +52,13 @@
 (`keepNames`). ⚠ 그러나 확장의 **tar 받기 레인**(`fetchSource.ts` 의 `extractTarGz` 셋)은 zip 레인·CLI 와
 달리 배제 술어를 안 지나, 서버가 보낸 `.git/config`·`.git/hooks/*`·`.vscode/**`·`.env*` 를 그대로 놓았다
 (Fable 보안 실측 — 탈취된 서버가 `core.fsmonitor` 로 폴더를 여는 순간 명령을 실행시킬 수 있는 자리).
-이 트랜치에서 `decide: dropExcluded` 로 세 레인의 술어를 한 벌로 맞췄다.
+이 트랜치에서 `decide: droppingExcluded(…)` 로 세 레인의 술어를 한 벌로 맞추고 뺀 이름을 말한다(서버가 벗기는
+것은 `.git/`·`node_modules/`·`.github/workflows/`·`.env*` 뿐이라 콘솔 zip 으로 올린 판에는 `.vscode/`·`.mcp.json`·
+`dist/`·`*.pem` 이 남아 있을 수 있다). 빈 폴더 항목은 `emptyDirs: true` 로 그대로 만든다(`pull` 의 「골라 쓰기」와
+갈린 자리 · `untar.ts`).
 재현: `grep -n '"\.git"' packages/core/src/zip.ts` · `grep -n "isExcludedEntry" packages/core/src/replaceDir.ts` ·
-`grep -n "decide: dropExcluded" packages/core/src/fetchSource.ts` → 3.
+`grep -c "decide: droppingExcluded(" packages/core/src/fetchSource.ts` → 3 · 그물 `fetchSource.test.ts` 「받기는 zip 받기·CLI 와
+같은 것을 뺀다」 + `check-wiring` 앵커 ×3.
 
 ④ **`.env.local` 은 미리보기를 켤 때 `.gitignore` 에 보장한다** — `.git/` 이 있을 때만, 없으면
 만들지 않는다(`ensureEnvIgnored`). 판정 축이 「`.gitignore` 가 있는가」에서 「`.git` 이 있는가」로
@@ -338,7 +342,11 @@ git 에 「`.gitignore` 수정됨」이 영구히 뜬다. `.git/info/exclude` �
 
 **안 한 권고(기록)**: exclude 의 `chmod` 를 rename 앞(tmp)으로 — 같은 사용자 경쟁이라 값이 작다 · `writeViaRename` 에
 「정확한 모드」 선택지는 `.env.local` 모드를 넓힐 위험이 있어 보류 · `ensureEnvIgnored` 실패를 확인 창 한 줄로 —
-로그로 둔다.
+로그로 둔다 · tar 레인의 낙하 이름 로그(zip 레인은 댄다 — `decide` 는 `skip` 만 돌려줘 이름을 모으려면 클로저) ·
+`decide` 가 있으면 해제기가 **빈 폴더 항목**을 안 만든다(git 이 관리하는 소스에는 빈 폴더가 없어 팩·확장 발행분은
+무영향 · 콘솔 zip 으로 올린 판의 빈 폴더만 받기에서 사라진다 — `untar.ts` type-5 갈래에 `decide` 를 물리는 것은 CLI
+`pull` 의 「손대지 않았다」 계약과 함께 봐야 한다) · 교체 뒤 `.gitignore` 는 서버 판의 것이라 `.env.local` 줄 보장이
+일시적(미리보기·다음 문에서 다시 보장 · 교체 직후에 넣으면 지문이 서버와 갈려 「수정 중」이 뜬다 — 트랜치 전부터의 틈).
 
 **남은 실물 확인(이 박스에 VS Code 가 없다)**: 침묵 창이 실제 감시기 드레인을 덮는가 · `git.untrackedChanges`
 폴더 설정이 실제로 흘러드는가 · 활성화 시 감시기가 중복 기동되지 않는가. 오너 박스의 데스크톱 VS Code 에서

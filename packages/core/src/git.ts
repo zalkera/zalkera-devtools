@@ -54,7 +54,7 @@ export function gitStatusLine(git: GitSnapshot | null): string {
               : "아직 커밋 없음";
     const changes =
         git.uncommitted === null
-            ? "커밋하지 않은 변경을 셀 수 없음(git 설정이 일부를 숨김)"
+            ? "커밋하지 않은 변경을 셀 수 없음"
             : git.uncommitted > 0
               ? `커밋하지 않은 변경 ${count(git.uncommitted)}개`
               : "깨끗함";
@@ -102,6 +102,19 @@ export function tagOffer(git: GitSnapshot | null, tenant: string, revisionNo: nu
     // 「이미 있습니다」로 죽는다(기능 심의). 코드 모양은 ref 이름 규칙 안이라 그대로 쓴다 — 모양이 아니면 안 권한다.
     if (!TENANT_CODE.test(tenant)) return null;
     return {name: `zalkera/${tenant}/v${revisionNo}`, message: `잘커라 ${tenant} 버전 ${revisionNo}`, ref: git.commit};
+}
+
+/**
+ * `child` 가 `parent` 자신이거나 그 **글자 그대로의** 하위 경로인가. 구분자 경계를 지킨다(`/w/site2` 는 `/w/site`
+ * 아래가 아니다). 윈도는 대소문자를 접는다. 두 자리(우리 쓰기 문 · 레포 뿌리 판정)가 한 벌을 쓴다(Fable 기능).
+ */
+export function isWithin(child: string, parent: string): boolean {
+    const fold = (p: string): string => (process.platform === "win32" ? p.toLowerCase() : p);
+    const trim = (p: string): string => (p.length > 1 && p.endsWith(sep) ? p.slice(0, -1) : p);
+    const c = trim(fold(child));
+    const root = trim(fold(parent));
+    if (c === root) return true;
+    return c.startsWith(root.endsWith(sep) ? root : root + sep);
 }
 
 /**

@@ -81,6 +81,13 @@ export interface UntarOptions {
      * @param path 뿌리 기준 상대 경로(`/` 구분자). [readTarGzManifest] 의 열쇠와 **같은 값**이다.
      */
     decide?: (path: string) => "create" | "replace" | "skip";
+    /**
+     * `decide` 가 있을 때 **폴더 항목도 만들 것인가.** 기본 `false` — `pull` 은 파일 몇 개만 골라 쓰는 중이라 안 쓸
+     * 경로의 폴더까지 만들면 「손대지 않았다」가 거짓이 된다(아래 type-5 갈래). 받기 세 레인(`fetchSource.ts`)은
+     * 반대로 「빼고 다 쓴다」라 `true` — 콘솔 zip 으로 올린 판의 빈 폴더가 받기에서 사라지지 않게(Fable 기능).
+     * 그때도 `decide(path)` 가 `"skip"` 이면 그 폴더는 만들지 않는다.
+     */
+    emptyDirs?: boolean;
 }
 
 /** 버퍼 해제(사이트 소스용). 반환은 **쓴 파일 수**다(디렉터리·링크는 안 센다). */
@@ -468,8 +475,12 @@ async function createSink(targetDir: string, options: UntarOptions) {
             if (entry.type === "5") {
                 // ⚠ `decide` 가 있으면 **빈 폴더를 미리 만들지 않는다.** 부르는 쪽은 파일 몇 개만
                 //   골라 쓰는 중이고, 안 쓸 경로의 폴더까지 만들면 「손대지 않았다」가 거짓이 된다.
-                //   쓸 파일의 부모는 아래 [descend] 가 필요할 때 만든다.
-                if (options.decide) return;
+                //   쓸 파일의 부모는 아래 [descend] 가 필요할 때 만든다. 「빼고 다 쓰는」 받기 레인은
+                //   `emptyDirs` 로 반대를 고르되, 빼는 경로(`skip`)의 폴더는 그때도 만들지 않는다.
+                if (options.decide) {
+                    if (options.emptyDirs !== true) return;
+                    if (options.decide(segments.join("/")) === "skip") return;
+                }
                 await descend(root, segments, verified);
                 return;
             }
