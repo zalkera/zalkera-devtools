@@ -115,12 +115,16 @@ import {
   VERSION_RULE_TAG,
   type Baseline,
   type LedgerSnapshot,
+  affectsFolderVersion,
+  gitStatusLine,
+  tagOffer,
 } from "@zalkera/devtools-core";
 import { lstatSync, readFileSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { existsSync } from "node:fs";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, join, relative } from "node:path";
+import { readGit, type GitRepository } from "./git.ts";
 import { SecretTokenStore } from "./secretStore.ts";
 import {
   describeNpm,
@@ -183,7 +187,18 @@ const receiveGuard = createReentrancyGuard();
 async function whileExtracting<T>(run: () => Thenable<T>): Promise<T | typeof BUSY> {
   // `withProgress` 가 주는 것은 `Thenable` 이라 그대로는 core 의 계약(`Promise`)에 안 맞는다.
   // **감싸는 자리는 여기 하나다** — 부르는 셋이 각자 감싸면 한쪽만 고쳐진다.
-  const outcome = await receiveGuard.run(async () => run());
+  const outcome = await receiveGuard.run(async () => {
+    // 우리가 폴더를 통째로 쓰는 동안은 감시기가 그 쓰기를 「남이 바꿨다」로 읽지 않게 한다(아래
+    // `ownWritesQuietUntil`). 푸는 쪽이 끝난 뒤 값을 심으므로(`seedFolderVersion`) 여기서 예약하면
+    // 그 심기가 헛되고 훑기가 한 번 더 돈다 — 3회전 성능 심의가 잡았던 그 ×2 다.
+    ownWriting = true;
+    try {
+      return await run();
+    } finally {
+      ownWriting = false;
+      ownWritesQuietUntil = Date.now() + OWN_WRITES_GRACE_MS;
+    }
+  });
   if (outcome === BUSY) {
     // ⚠ 문면이 **가리키는 것이 실제로 화면에 있어야 한다.** 이 갈래는 해제가 도는 동안에만
     //   서므로 진행 알림이 반드시 떠 있다 — 종전 문면(「진행 중인 알림을 확인해 주세요」)은
@@ -717,6 +732,8 @@ export function activate(context: vscode.ExtensionContext): void {
     //      **셈의 범위**였다 — 「경로별·세션당」이라 재시작이 편집기를 되열 때마다 처음이 됐다.
     //      지금은 「종류별·영구」라 한 종류에 평생 한 번이다. 셋을 넘을 수 없다.
     vscode.workspace.onDidOpenTextDocument((doc) => warnProtectedPath(doc)),
+    // T1 — 저장이 아닌 손(git·에이전트·터미널)이 바꾼 것도 판을 다시 센다. 폴더가 없으면 볼 것도 없다.
+    ...(workspaceDir() === undefined ? [] : [watchWorkspaceWrites(workspaceDir()!)]),
     vscode.window.registerTreeDataProvider("zalkera.sidebar", sidebar),
     register("zalkera.signIn", async () => {
       await signIn();
@@ -2102,6 +2119,8 @@ async function updateZipCommand(): Promise<void> {
   // ⚠ **무엇을 남기는지 계산해서 보여 준다.** 목록은 포장기가 zip 에서 빼는 것과 같은 술어로
   //    고른다(`keepNames`) — 손으로 열거하면 두 목록이 갈리고, 갈린 쪽이 영구 삭제된다.
   const keep = await keepNames(dir);
+  // 형제 「서버 판으로 교체」와 같은 이유·같은 자리(T2). 브랜치 이름도 남이 짓는 것이라 소독을 지난다.
+  const git = (await readGit(dir))?.snapshot ?? null;
   const ok = await vscode.window.showWarningMessage(
     ours("이 폴더의 소스를 고르신 zip 으로 갈아 끼웁니다. 지금 내용은 사라집니다."),
     {
@@ -2111,7 +2130,8 @@ async function updateZipCommand(): Promise<void> {
       //    있다. 형제 발행 모달과 같은 자를 댄다(보안 심의).
       detail:
         `${plainNotice(provNotice.line, 512)}\n\n${plainNotice(dir, 512)}\n\n` +
-        `그대로 두는 것: ${keep.length > 0 ? plainNotice(keep.join(" · "), 512) : "없습니다"}`,
+        `그대로 두는 것: ${keep.length > 0 ? plainNotice(keep.join(" · "), 512) : "없습니다"}` +
+        (git === null ? "" : `\n\n${plainNotice(gitStatusLine(git), 256)}`),
     },
     provNotice.action,
   );
@@ -2255,7 +2275,10 @@ async function updateFromServerCommand(): Promise<void> {
   const keep = await keepNames(dir);
   const from = declaredBaseRevisionNo(readSourceMarkAt(dir), String(tenant));
   const leftovers = await siblingStashes(dir);
-  const ask = say.serverReplaceConfirm(tenant, picked.revisionNo, dir, from, keep, leftovers);
+  // git 이 지켜 주는 것은 커밋한 것뿐이다 — 커밋하지 않은 변경이 있으면 이 문이 지운다. 그 사실을
+  // 동의 앞에 한 줄로 둔다(T2). 레포가 아니면 `null` 이고 줄이 안 붙는다. 막지 않는다.
+  const git = (await readGit(dir))?.snapshot ?? null;
+  const ask = say.serverReplaceConfirm(tenant, picked.revisionNo, dir, from, keep, leftovers, git);
   const answer = await vscode.window.showWarningMessage(
     ask.message,
     {modal: true, detail: ask.detail},
@@ -2971,8 +2994,12 @@ async function publishCommand(): Promise<void> {
   // 「사이트에 연결」로 이은 폴더와 무표식 폴더는 선언할 값이 없고, **없는 값을 지어내면 근거 없이
   // 남을 막는다.**
   const baseRevisionNo = declaredBaseRevisionNo(readSourceMarkAt(dir), tenant);
+  // 올라가는 것은 커밋이 아니라 **디스크의 파일**이다 — 커밋하지 않은 변경이 있으면 「이 커밋이
+  // 라이브」가 거짓이 된다. 그 사실을 동의 앞에 한 줄로 두고(T2), 같은 값으로 발행 뒤 태그를 권할지
+  // 정한다(T3 · `tagOffer`). 확인 **앞**에 읽는다 — 동의한 그 상태가 곧 올라가는 상태다.
+  const git = await readGit(dir);
   // ⚠ **무보호를 고지한다** — 문면은 core 가 만든다(변수를 모달에 이어 붙이면 소독 검사 밖으로 떨어진다).
-  const ask = say.publishConfirm(tenant, dir, currentFolderBinding(), baseRevisionNo != null);
+  const ask = say.publishConfirm(tenant, dir, currentFolderBinding(), baseRevisionNo != null, git?.snapshot ?? null);
   const confirm = await vscode.window.showWarningMessage(
     ask.message,
     { modal: true, detail: ask.detail },
@@ -3033,6 +3060,8 @@ async function publishCommand(): Promise<void> {
   log(
     `버전 ${countJosa(result.revisionNo, "으로/로")} 올렸습니다 — 파일 ${count(result.fileCount)}개 · ${Math.round(result.byteSize / 1024)}KB · 유형 ${result.siteType} · 상태 ${result.status}`,
   );
+  // 「어느 커밋이 이 버전인가」를 나중에 묻는 자리가 출력 채널이다 — 레포일 때만 한 줄.
+  if (git !== null) log(`버전 ${result.revisionNo} ← ${gitStatusLine(git.snapshot)}`);
   // ⚠ **취소가 늦었어도 여기서 되돌아가지 않는다.** 판은 만들어졌으므로 아래 부수효과(표식 갱신·
   //    폴더 기억·서버 고지)를 **그대로 해야 한다** — 건너뛰면 화면이 아니라 **디스크에 거짓**이
   //    남는다: 표식이 옛 판을 든 채라 다음 발행이 낡은 기반을 선언하고, **자기가 방금 만든 판**에
@@ -3105,7 +3134,9 @@ async function publishCommand(): Promise<void> {
       : await awaitBuild(api, result.revisionNo, tenant);
   if (!ready) return;
 
-  await announcePublished(api, result.revisionNo, tenant);
+  // T3 — 깨끗한 트리에서 올렸을 때만 태그를 권한다. 판정은 core(`tagOffer`), 쓰기는 사람이 누른 뒤다.
+  const offer = git === null ? null : tagOffer(git.snapshot, String(tenant), result.revisionNo);
+  await announcePublished(api, result.revisionNo, tenant, offer === null ? null : { ...offer, repo: git!.repo });
 }
 
 /**
@@ -3214,16 +3245,26 @@ async function pollReflection(
   log(`반영 확인 상한 도달 — 버전 ${revisionNo}(못 봤을 뿐, 반영 실패가 아니다)`);
 }
 
+/** 발행 뒤 권할 태그 — 이름·메시지(core 가 정함)와 그것을 만들 레포. */
+interface TagOfferOn {
+  name: string;
+  message: string;
+  repo: GitRepository;
+}
+
 /**
  * 게시됐다고 **알리고 끝낸다.** 물어볼 것이 없다 — 사이트는 이미 바뀌었다.
  *
  * 확인 없이 나가는 것을 확장이 막을 수는 없다(백엔드가 켠다). 그래서 **가서 볼 길**을 준다 —
- * 나갔다는 사실도, 볼 자리도 숨기지 않는다.
+ * 나갔다는 사실도, 볼 자리도 숨기지 않는다. 깨끗한 git 트리에서 올렸으면 **태그를 권하는 단추**도
+ * 같이 준다(T3) — 누르지 않으면 아무것도 안 쓴다.
  */
 async function announcePublished(
   api: ZalkeraApi,
   revisionNo: number,
   tenant: CapturedTenant,
+  // `null` 이면 단추가 없다 — 레포가 아니거나, 커밋하지 않은 변경이 있는 채로 올렸다(그 태그는 거짓이다).
+  tag: TagOfferOn | null = null,
 ): Promise<void> {
   const site = await siteUrlOf(api, tenant);
   // 게시 사실도 출력에 남긴다 — 알림은 몇 초 뒤 사라지고, `STATIC` 은 빌드를 안 타서 위
@@ -3246,10 +3287,17 @@ async function announcePublished(
   // 반영 확인은 **뒤에서 돈다.** 여기서 기다리면 단추가 뜨기까지 사람이 멈춰 선다 — 게시는 이미 끝났고
   // 사이트를 보러 갈 수 있어야 한다. 실패해도 이 흐름에 영향 0(그쪽은 전부 침묵으로 끝난다).
   void watchReflection(api, revisionNo, tenant);
+  // 태그 단추의 문면은 리터럴이다 — 이름(`zalkera/v5`)은 누른 뒤 알림이 말한다.
+  const makeTag = tag === null ? null : "git 태그 만들기";
   const chosen = await vscode.window.showInformationMessage(
     say.published(tenant, revisionNo),
     ...(open ? [open] : []),
+    ...(makeTag ? [makeTag] : []),
   );
+  if (tag !== null && chosen === makeTag) {
+    await createGitTag(tag);
+    return;
+  }
   if (!site || chosen !== open) return;
 
   // 브라우저를 못 여는 자리가 실제로 있다(원격 호스트·오프너 부재). 그때도 **게시는 끝났다** —
@@ -3263,6 +3311,30 @@ async function announcePublished(
   log(`브라우저를 열지 못했습니다 — 주소를 직접 여세요: ${site.url}`);
   void vscode.window.showInformationMessage(
     `브라우저를 자동으로 열지 못했습니다. 주소를 직접 열어 주세요 — ${plainNotice(site.url)}`,
+  );
+}
+
+/**
+ * 사람이 누른 뒤에만 도는 **확장의 유일한 git 쓰기**(T3). 태그는 로컬이다 — 원격에 올리는 것은
+ * VS Code 의 「태그 푸시」이고 그것도 사람 손이다.
+ *
+ * 실패(같은 이름의 태그가 이미 있음·git 오류)는 **발행의 실패가 아니다** — 판은 이미 게시됐다.
+ * 그래서 빨간창 대신 이유를 말하고 끝낸다. 오류 문장은 git 이 낸 것이라 표시 자리에서 소독한다.
+ */
+async function createGitTag(tag: TagOfferOn): Promise<void> {
+  try {
+    await tag.repo.tag(tag.name, tag.message);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    log(`git 태그 ${tag.name} 을 만들지 못했습니다: ${reason}`);
+    void vscode.window.showWarningMessage(
+      `git 태그 「${plainNotice(tag.name, 64)}」 를 만들지 못했습니다 — ${plainNotice(reason, 200)}`,
+    );
+    return;
+  }
+  log(`git 태그 ${tag.name} 을 만들었습니다(로컬) — ${tag.message}`);
+  void vscode.window.showInformationMessage(
+    `git 태그 「${plainNotice(tag.name, 64)}」 를 만들었습니다. 이 컴퓨터에만 있으니, 같이 올리시려면 「태그 푸시」를 쓰십시오.`,
   );
 }
 
@@ -4354,6 +4426,49 @@ async function refreshSidebar(): Promise<void> {
 
 /** 저장이 몰려 와도 훑기는 한 번이다. 사람이 손을 멈춘 뒤에 돈다. */
 let folderVersionTimer: ReturnType<typeof setTimeout> | null = null;
+
+/**
+ * **우리가 폴더를 쓰는 중인가** — 받기·풀기·갈아 끼우기(`whileExtracting`). 그동안 온 감시기 사건은
+ * 우리 것이라 재계산을 예약하지 않는다. 끝난 뒤 심는 값(`seedFolderVersion`)이 그 결과다.
+ */
+let ownWriting = false;
+/**
+ * 우리 쓰기가 끝난 뒤 감시기 사건이 **늦게** 도착하는 창. 파일 감시는 묶어서 보내므로 마지막 쓰기의
+ * 사건이 `finally` 뒤에 올 수 있다 — 그 사건 하나가 심은 값을 버리고 훑기를 한 번 더 돌린다.
+ * 2초는 실측이 아니라 여유다(VS Code 감시기의 묶음 지연은 보통 수백 ms).
+ */
+let ownWritesQuietUntil = 0;
+const OWN_WRITES_GRACE_MS = 2_000;
+
+/**
+ * **디스크가 바뀐 것을 알아차린다**(`DESIGN-git-coexistence.md` T1) — 저장이 아닌 손이 바꿨을 때.
+ *
+ * `git pull`·브랜치 전환·stash·에이전트의 직접 쓰기·터미널의 편집은 **저장 알림을 안 낸다.** 그동안
+ * 사이드바 「버전」은 옛 결론을 사실로 그렸다(「일치」인데 폴더는 이미 다르다). 감시기 사건을 저장과
+ * **같은 예약**(`scheduleFolderVersion`)으로 흘려 그 거짓을 닫는다 — 재계산 자체는 종전과 같다.
+ *
+ * ⚠ **거름이 곧 정확성이다.** 미리보기가 도는 동안 `.next/` 가 끊임없이 바뀌고, 그것을 예약하면
+ *   1.5초 묶음 타이머가 매번 되돌아가 **재계산이 영영 안 돈다**(기아). 거르는 술어는 지문이 세는
+ *   술어와 **같은 함수**다(`affectsFolderVersion` → `isExcludedEntry`) — 손 목록이면 갈린다.
+ * ⚠ 우리 자신의 쓰기(받기·갈아 끼우기)는 위 `ownWriting` 이 가른다.
+ */
+function watchWorkspaceWrites(dir: string): vscode.Disposable {
+  const watcher = vscode.workspace.createFileSystemWatcher(
+    new vscode.RelativePattern(dir, "**/*"),
+  );
+  const onEvent = (uri: vscode.Uri): void => {
+    if (uri.scheme !== "file") return;
+    if (ownWriting || Date.now() < ownWritesQuietUntil) return;
+    if (!affectsFolderVersion(relative(dir, uri.fsPath))) return;
+    scheduleFolderVersion();
+  };
+  return vscode.Disposable.from(
+    watcher,
+    watcher.onDidCreate(onEvent),
+    watcher.onDidChange(onEvent),
+    watcher.onDidDelete(onEvent),
+  );
+}
 /**
  * **「확인 중」을 화면에 띄웠는가.** 띄웠으면 값이 안 바뀌었더라도 **반드시 다시 그려서 걷어야 한다** —
  * 안 걷으면 사이드바가 그 낱말에 매달린 채 다음 명령까지 남는다.

@@ -4,8 +4,8 @@
 > VS Code 기본 Git(`vscode.git`) + GitHub Authentication + GitHub Pull Requests 확장에 맡기는
 > 방향으로 간다. 그 위에서 잘커라 확장과 **끊김 없이** 돌게 할 수 있는가.
 
-**상태: 제안 · 코드 미구현.** 문서 트랜치(T0)는 이 메모와 같은 판에 실린다. T1~T3 은 오너 결정 뒤
-3축 심의를 거쳐 구현한다.
+**상태: 구현 완료 · 미발행.** 오너 결정(2026-09-14): §8 의 ①·② **예** · ③ **아니오**. T0(문서)·T1·T1'·T2·T3
+전부 한 판에 실린다. 설계·구현 = Opus · 3축 심의 = §10.
 
 ---
 
@@ -22,7 +22,7 @@
 | git 명령 실행(커밋·푸시·stash) | **안 짓는다** | 제스처 없는 쓰기. 고객 레포는 고객 것이다 |
 | 디스크 변화 감지(T1) | **채택** | 지금은 **저장할 때만** 판을 다시 센다. `git pull`·`checkout`·에이전트 쓰기 뒤에 사이드바가 낡은 「일치」를 사실로 그린다(§1) |
 | 문 앞 git 한 줄(T2) | **채택** | 「서버 판으로 교체」·「zip 으로 교체」·「새 버전 배포」 확인 창에 `git: main @ 1a2b3c4 · 커밋하지 않은 변경 3개`. **막지 않는다** |
-| 발행 뒤 태그(T3) | **오너 결정** | 성공 알림에 「git 태그 만들기」 단추. 확장이 고객 git 에 **쓰는 첫 자리**라 오너가 연다(§8) |
+| 발행 뒤 태그(T3) | **채택(오너 결정 ①)** | 성공 알림에 「git 태그 만들기」 단추. 확장이 고객 git 에 **쓰는 첫 자리** — 누를 때만·깨끗한 트리에서만 |
 | `.zalkera/source.json` 을 `.git/info/exclude` 에(T1') | **채택** | CLI 가 `sync.json` 에 이미 쓰는 규칙과 같은 근거 — 커밋을 타고 넘어온 남의 기준점은 **거짓 상태**다(§5) |
 | 교체 뒤 `.github/workflows/` 소실 | **문서 먼저** | 서버가 그 폴더를 저장하지 않아 「서버 판으로 교체」가 지운다. git 에 삭제로 뜬다(§1 ⑥). 보존은 손 목록이라 보류 |
 | 판 ↔ 커밋 결속을 서버에 | **안 짓는다** | 접은 memo84 의 `commit_sha` 다. 결속은 git 태그(사람 것)로 충분하다 |
@@ -240,12 +240,12 @@ git 에 「`.gitignore` 수정됨」이 영구히 뜬다. `.git/info/exclude` �
 
 ---
 
-## 8. 오너 결정 대기
+## 8. 오너 결정 (2026-09-14 · 권고대로)
 
-1. **T3 태그** — 확장이 고객 git 에 쓰는 첫 자리다. 단추(누를 때만) 형태로 여는가.
-2. **`.vscode/settings.json` 커밋 권고**를 매뉴얼 §6 에 적는가 — 「전용 레포」 전제를 사람이
-   판단해야 한다.
-3. **교체 시 `.github/workflows/` 보존** — 지금은 문서로 알린다(§1 ⑥). 손 목록 없이 지키려면
+1. **T3 태그** — 확장이 고객 git 에 쓰는 첫 자리다. 단추(누를 때만) 형태로 여는가. → **예.**
+2. **`.vscode/settings.json` 커밋 권고**를 매뉴얼 §5 에 적는가 — 「전용 레포」 전제를 사람이
+   판단해야 한다. → **예**(단서 포함).
+3. **교체 시 `.github/workflows/` 보존** — 지금은 문서로 알린다(§1 ⑥). → **아니오**(문서로 둔다). 손 목록 없이 지키려면
    「서버가 저장하지 않는 접두는 서버 판이 지울 수 없다」는 규칙을 `keepNames` 에 얹어야 하는데
    `keepNames` 는 폴더 바로 아래 이름만 보고 `.github/` 전체는 서버가 저장하는 파일도 담는다
    (`CODEOWNERS` 같은). 부분 보존은 트리 걷기이고 그 실패면이 곧 「zip 으로 교체」가 막으려던
@@ -253,7 +253,25 @@ git 에 「`.gitignore` 수정됨」이 영구히 뜬다. `.git/info/exclude` �
 
 ---
 
-## 9. 관련
+## 9. 구현 자리 (코드 사실)
+
+| 트랜치 | 자리 | 그물 |
+|---|---|---|
+| T1 | `extension.ts` `watchWorkspaceWrites` → 기존 `scheduleFolderVersion()` · 거름 `affectsFolderVersion`(core `git.ts`) · 우리 쓰기 문 `ownWriting`/`ownWritesQuietUntil`(`whileExtracting`) | `git.test.ts` 거름 양성·음성 짝 · `check-wiring` 앵커 3 |
+| T1' | core `gitExclude.ts` `excludeFromGit` — `localMark.ts` `writeMarkText` 와 `pull.ts` `ignoreLedger` 가 같은 문 | `git.test.ts` 4건(한 줄·보존·git 없음·gitdir 파일) · `pull.e2e.test.ts` 종전 2건 |
+| T2 | `vscode/src/git.ts` `readGit`(`vscode.git` API 읽기) → `say.serverReplaceConfirm`·`say.publishConfirm` 일곱째/다섯째 인자 · zip 교체 모달 인라인 | `tenantScope.test.ts` 양성·음성·개행 위조 · `check-wiring` 앵커 2 · `check-notice` 소독 |
+| T3 | `tagOffer`(core) → `announcePublished(…, tag)` 「git 태그 만들기」 단추 → `createGitTag` | `git.test.ts` 권유 조건 5 · `check-wiring` 앵커 1 |
+
+⚠ **모듈 순환 하나를 실측으로 피했다.** `git.ts` 는 `zip.ts` 를 가져오고, `zip.ts` → `provenance.ts` →
+`localMark.ts` 가 `excludeFromGit` 을 부른다. 그래서 `excludeFromGit` 은 `node:fs` 만 가져오는 잎
+모듈(`gitExclude.ts`)에 산다 — 처음엔 `git.ts` 에 두었다가 `PROVENANCE_PATH` 초기화 전 접근으로 시험이
+통째로 죽었다.
+
+## 10. 3축 심의
+
+(심의 뒤 채운다.)
+
+## 11. 관련
 
 - `DESIGN-server-replace.md` §9 DON'T-BUILD(더티 검출 기각) — T2 는 검출이 아니라 **인용**이다.
   판정하지 않고 git 이 말하는 것을 그대로 옮긴다.
