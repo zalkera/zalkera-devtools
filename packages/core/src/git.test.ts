@@ -154,3 +154,49 @@ test("🔴 exclude — `exclude` 파일 자리가 링크면 따라가 쓰지 않
     await excludeFromGit(dir, SOURCE_MARK_PATH);
     assert.equal(await readFile(join(victim, "victim.txt"), "utf8"), "그대로", "링크 대상이 덮였다");
 });
+
+// ── 「없다」와 「못 읽는다」를 접지 않는다 — 1회전 보안이 실측으로 잡은 자리(권한 없는 exclude 가 빈 파일로 갈아 끼워졌다).
+//    ⚠ chmod 는 root 에서 무력하고 FIFO 는 윈도에 없다 — 그 자리에서는 건너뛴다(통과가 아니라 미실행).
+const canChmod = process.platform !== "win32" && (process.getuid?.() ?? 0) !== 0;
+const canFifo = process.platform !== "win32";
+
+test("🔴 exclude — 못 읽는 파일(권한 없음)은 빈 파일로 접어 갈아 끼우지 않는다", {skip: !canChmod}, async () => {
+    const {chmod} = await import("node:fs/promises");
+    const dir = await repo(true);
+    await mkdir(join(dir, ".git", "info"), {recursive: true});
+    const file = join(dir, ".git", "info", "exclude");
+    await writeFile(file, "secret-rule/\n*.bak\n");
+    await chmod(file, 0o200);
+    try {
+        await excludeFromGit(dir, SOURCE_MARK_PATH);
+    } finally {
+        await chmod(file, 0o644);
+    }
+    assert.equal(await readFile(file, "utf8"), "secret-rule/\n*.bak\n", "고객의 exclude 규칙이 사라졌다");
+});
+
+test("🔴 exclude — 정규 파일이 아니면(FIFO) 읽지도 쓰지도 않고 곧 돌아온다", {skip: !canFifo}, async () => {
+    const {execFileSync} = await import("node:child_process");
+    const dir = await repo(true);
+    await mkdir(join(dir, ".git", "info"), {recursive: true});
+    const file = join(dir, ".git", "info", "exclude");
+    execFileSync("mkfifo", [file]);
+    const {lstat} = await import("node:fs/promises");
+    // 옛 코드는 `readFile` 이 FIFO 에서 영영 멈춘다 — 시한이 곧 단언이다.
+    await Promise.race([
+        excludeFromGit(dir, SOURCE_MARK_PATH),
+        new Promise((_, reject) => setTimeout(() => reject(new Error("FIFO 에서 멈췄다")), 2_000)),
+    ]);
+    assert.equal((await lstat(file)).isFIFO(), true, "FIFO 가 파일로 바뀌었다");
+});
+
+test("exclude — 있던 모드(0664)를 umask 너머로 지킨다", {skip: !canChmod}, async () => {
+    const {chmod, stat} = await import("node:fs/promises");
+    const dir = await repo(true);
+    await mkdir(join(dir, ".git", "info"), {recursive: true});
+    const file = join(dir, ".git", "info", "exclude");
+    await writeFile(file, "*.log\n");
+    await chmod(file, 0o664);
+    await excludeFromGit(dir, SOURCE_MARK_PATH);
+    assert.equal((await stat(file)).mode & 0o777, 0o664, "그룹 쓰기가 사라졌다");
+});

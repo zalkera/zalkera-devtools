@@ -2276,7 +2276,7 @@ async function updateFromServerCommand(): Promise<void> {
   //    어느 판으로」·「무엇이 남는가」·「지난 잔재가 있는가」를 이미 알고 있어야 한다.
   // git 이 지켜 주는 것은 커밋한 것뿐이다 — 커밋하지 않은 변경이 있으면 이 문이 지운다. 그 사실을
   // 동의 앞에 한 줄로 둔다(T2). 레포가 아니면 `null` 이고 줄이 안 붙는다. 막지 않는다.
-  // 폴더 읽기 둘과 **겹쳐** 읽는다 — `git status` 지연이 그 뒤로 숨는다(성능 심의).
+  // 폴더 읽기 둘을 git 읽기와 겹친다 — 긴 축은 `git status` 쪽이라 얻는 것은 작다(2회전 성능 실측 0.1ms).
   const [keep, leftovers, gitRead] = await Promise.all([keepNames(dir), siblingStashes(dir), readGit(dir)]);
   const from = declaredBaseRevisionNo(readSourceMarkAt(dir), String(tenant));
   const git = gitRead?.snapshot ?? null;
@@ -3000,7 +3000,12 @@ async function publishCommand(): Promise<void> {
   //    `.gitignore` 밖에 있고, 아래 git 한 줄이 그것을 「커밋하지 않은 변경」으로 세며 매뉴얼은 「커밋하고
   //    다시 누르라」고 한다 — 따를수록 열쇠가 커밋된다(보안 심의). 포장 **앞**에 보장한다 — 뒤에 하면
   //    `.gitignore` 가 바뀌어 방금 심은 지문과 어긋난다. `.git` 이 없으면 무동작이다.
-  const ignored = await ensureEnvIgnored(dir).catch(() => "not-git" as const);
+  const ignored = await ensureEnvIgnored(dir).catch((error: unknown) => {
+    // 미리보기는 이 실패(링크 `.gitignore`·권한)에 멈추지만 발행은 열쇠를 만드는 자리가 아니라 진행한다.
+    // 다만 **말은 한다** — 이 실패는 곧 「`.env.local` 이 무보호일 수 있다」다(2회전 보안).
+    log(`.gitignore 에 .env.local 을 보장하지 못했습니다: ${error instanceof Error ? error.message : String(error)}`);
+    return "not-git" as const;
+  });
   if (ignored === "added" || ignored === "created") log(".gitignore 에 .env.local 을 보장했습니다(자격증명 커밋 방지).");
   // 올라가는 것은 커밋이 아니라 **디스크의 파일**이다 — 커밋하지 않은 변경이 있으면 「이 커밋이
   // 라이브」가 거짓이 된다. 그 사실을 동의 앞에 한 줄로 두고(T2), 같은 값으로 발행 뒤 태그를 권할지
@@ -3339,10 +3344,19 @@ async function createGitTag(tag: TagOfferOn): Promise<void> {
   //    기대지 않고 **HEAD 가 그 커밋이고 여전히 깨끗할 때만** 만든다. 아니면 sha 를 주고 손에 맡긴다.
   const now = (await readGit(tag.dir))?.snapshot ?? null;
   if (now === null || now.commit !== tag.ref || now.uncommitted !== 0) {
-    log(`git 태그를 만들지 않았습니다 — 발행한 커밋 ${tag.ref} 이 지금 HEAD 가 아니거나 트리가 깨끗하지 않습니다.`);
+    // 「못 읽음」과 「옮겨짐」을 가른다 — 원인을 단정하면 사람이 엉뚱한 데서 찾는다(2회전 기능).
+    // 손 명령은 출력 채널에도 남긴다 — 알림은 복사가 안 된다.
+    const manual = `git tag -a ${tag.name} -m "${tag.message}" ${tag.ref}`;
+    const why =
+      now === null
+        ? "git 상태를 다시 읽지 못해"
+        : "발행한 뒤 커밋이 옮겨졌거나 고친 것이 있어";
+    log(`git 태그를 만들지 않았습니다 — ${why}. 손으로 찍으시려면: ${manual}`);
     void vscode.window.showWarningMessage(
-      `발행한 뒤 커밋이 옮겨졌거나 고친 것이 있어 태그를 만들지 않았습니다. 손으로 찍으시려면: ` +
-        `git tag -a ${plainNotice(tag.name, 80)} -m "${plainNotice(tag.message, 80)}" ${plainNotice(tag.ref, 40)}`,
+      // 상한은 최대 길이 위다 — 이름 `zalkera/`+63+`/v`+10 = 83 · 메시지 81 · sha 40. 80 이면 63자 코드에서 잘린
+      // **틀린 명령**이 뜬다(2회전 보안 실측).
+      `${ours(why)} 태그를 만들지 않았습니다. 손으로 찍으시려면(출력 패널에도 있습니다): ` +
+        `git tag -a ${plainNotice(tag.name, 100)} -m "${plainNotice(tag.message, 100)}" ${plainNotice(tag.ref, 40)}`,
     );
     return;
   }
@@ -4475,9 +4489,10 @@ let ownWritesQuietCap = 0;
 /**
  * **침묵이 이만큼 이어져야 창이 닫힌다** — 시각 고정이 아니다. VS Code 는 감시기 사건을 200ms 마다
  * 500개씩만 흘려보내므로(초당 2,500개 상한 · 성능 심의가 `parcelWatcher.ts` 로 확인) 수천 파일을
- * 갈아 끼운 뒤에는 `finally` 뒤로도 몇 초 동안 우리 사건이 밀려온다. 고정 2초는 16k 파일에서 열렸고,
- * 열린 자리마다 3회전 성능 심의의 ×2 훑기가 돌아왔다(1회전 성능 실측). 밀려오는 사건은 200ms 간격의
- * 연속 덩어리라 그 안에 2초 공백이 안 생기고, 덩어리가 끝나면 2초 뒤 창이 닫힌다.
+ * 갈아 끼운 뒤에는 `finally` 뒤로도 몇 초 동안 우리 사건이 밀려온다. 고정 2초는 16k 파일에서 열리고
+ * 그 자리마다 3회전 성능 심의의 ×2 훑기가 돌아온다 — 쓰기 속도(12.9k/s)·VS Code 상수·해시 1.2초는
+ * 1회전 성능 실측이고, 「창이 열린다」는 그 위의 모델이다(실물 VS Code 미확인). 밀려오는 사건은 200ms
+ * 간격의 연속 덩어리라 그 안에 2초 공백이 안 생기고, 덩어리가 끝나면 2초 뒤 창이 닫힌다.
  *
  * 대가: 이 창 안에 온 **남의** 쓰기(에이전트가 갈아 끼우기 직후 고친 파일)도 함께 묻혀, 다음 사건이나
  * 저장까지 심은 「일치」가 남는다. 우리 쓰기와 남의 쓰기를 사건만으로 가를 수 없어 침묵으로 가른 것이다.

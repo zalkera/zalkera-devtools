@@ -876,6 +876,24 @@ const WIRES = [
         "빌드 대기 중 커밋한 사람의 태그가 라이브가 아닌 커밋을 가리킨다(구판 VS Code 는 `ref` 를 무시한다)",
     ],
     [
+        // 발행 앞의 `.env.local` 보장 — 빼면 「미리보기 → git init → 발행」에서 열쇠가 커밋된다(2회전 보안 변이 M12 생존).
+        "packages/vscode/src/extension.ts",
+        "const ignored = await ensureEnvIgnored(dir).catch(",
+        "발행 순서에서 `.env.local` 이 `.gitignore` 밖인 채 「커밋하지 않은 변경」으로 세어지고 매뉴얼은 커밋하라고 한다",
+    ],
+    [
+        // vscode 패키지는 시험이 못 닿는다 — `hidden` 판정을 빼면 미추적이 안 세어져 「깨끗함」이 거짓(2회전 변이 M2 생존).
+        "packages/vscode/src/git.ts",
+        "uncommitted: hidden ? null : countUncommitted(dir, all),",
+        "폴더 설정 `git.untrackedChanges: hidden` 에서 미추적 파일이 안 세어져 「깨끗함」이 거짓이 되고 태그 단추가 뜬다",
+    ],
+    [
+        // 거름이 창 판정보다 **먼저**여야 `.next/` 사건이 창을 밀지 않는다 — 순서를 되돌려도 초록이었다(2회전 변이 M7).
+        "packages/vscode/src/extension.ts",
+        "    if (!affectsFolderVersion(relative(dir, uri.fsPath))) return;\n    if (ownWriting) return;",
+        "미리보기의 `.next/` 사건이 우리 쓰기 창을 상한(30초)까지 밀어 그동안 남의 편집이 묻힌다",
+    ],
+    [
         "packages/vscode/src/extension.ts",
         "if (!affectsFolderVersion(relative(dir, uri.fsPath))) return;",
         "미리보기의 `.next/` 쓰기가 묶음 타이머를 매번 되돌려 재계산이 영영 안 돈다(기아)",

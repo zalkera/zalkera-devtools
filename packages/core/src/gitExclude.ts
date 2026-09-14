@@ -3,7 +3,7 @@
  * 아무것도 안 가져온다 — `localMark.ts`(표식)와 `pull.ts`(장부)가 부르는데, 둘 다 `zip.ts` 의 배제
  * 목록이 거꾸로 의존하는 자리라 여기가 `zip.ts` 쪽 모듈을 가져오는 순간 순환이 된다(`git.ts` KDoc).
  */
-import {lstat, readFile} from "node:fs/promises";
+import {chmod, lstat, readFile} from "node:fs/promises";
 import {join} from "node:path";
 import {ensureOwnDir, writeOwnFile} from "./safeWrite.ts";
 
@@ -51,7 +51,10 @@ export async function excludeFromGit(root: string, path: string): Promise<void> 
         if (current.split(/\r?\n/).some((line) => line.trim() === path)) return;
         const prefix = current === "" || current.endsWith("\n") ? "" : "\n";
         // 잎이 링크면 거절하고, 아니면 `rename` 으로 갈아 끼운다 — 맨 `writeFile` 은 링크를 따라간다.
-        await writeOwnFile(file, `${current}${prefix}${path}\n`, leaf === null ? 0o644 : leaf.mode & 0o777);
+        const mode = leaf === null ? 0o644 : leaf.mode & 0o777;
+        await writeOwnFile(file, `${current}${prefix}${path}\n`, mode);
+        // `writeFile(tmp, {mode})` 는 umask 를 지나 0664 가 0644 로 좁아진다(2회전 보안 실측) — 있던 모드로 되돌린다.
+        if (leaf !== null) await chmod(file, mode);
     } catch {
         // 부가다 — 위 KDoc. 링크 거절도 여기로 온다: 감추지 못한 표식은 커밋될 수 있지만 남의 파일을 쓰지는 않는다.
     }

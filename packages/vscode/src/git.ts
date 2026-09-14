@@ -65,7 +65,12 @@ const STATUS_TIMEOUT_MS = 3_000;
 
 /** `promise` 가 시한 안에 안 끝나면 `fallback`. 시한은 창을 굳히지 않으려는 것이지 판정이 아니다. */
 function within<T>(ms: number, promise: PromiseLike<T>, fallback: T): Promise<T> {
-  return Promise.race([promise, new Promise<T>((resolve) => setTimeout(() => resolve(fallback), ms))]);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const clock = new Promise<T>((resolve) => {
+    timer = setTimeout(() => resolve(fallback), ms);
+  });
+  // 먼저 끝난 쪽이 이기면 타이머를 지운다 — 명령마다 3초짜리 잔존 타이머를 남기지 않는다(2회전 성능).
+  return Promise.race([promise, clock]).finally(() => clearTimeout(timer));
 }
 
 /** 폴더를 품은 레포. 없으면 `null` — git 확장이 없거나 꺼졌거나 레포가 아니다. */
