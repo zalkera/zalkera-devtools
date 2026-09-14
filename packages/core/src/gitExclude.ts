@@ -38,11 +38,20 @@ export async function excludeFromGit(root: string, path: string): Promise<void> 
         // 조각마다 링크를 거절하며 만든다(`ensureOwnDir`) — `.git/info` 가 링크면 여기서 던지고 아래 catch 로 간다.
         const dir = await ensureOwnDir(root, ".git", "info");
         const file = join(dir, "exclude");
-        const current = await readFile(file, "utf8").catch(() => "");
+        // ⚠ **「없다」와 「못 읽는다」를 접지 않는다**(보안 심의 실측: 권한 없는 exclude 를 빈 파일로 읽고
+        //    `rename` 으로 갈아 끼워 고객의 규칙이 통째로 사라졌다). 없으면 새로 만들고, 있는데 정규 파일이
+        //    아니거나(FIFO 면 `readFile` 이 영영 멈춘다) 못 읽으면 **쓰지 않는다**. 모드는 있던 그대로 —
+        //    `rename` 은 새 파일이라 `core.sharedRepository` 레포의 그룹 쓰기가 사라진다.
+        const leaf = await lstat(file).catch((error: unknown) => {
+            if ((error as NodeJS.ErrnoException | undefined)?.code === "ENOENT") return null;
+            throw error;
+        });
+        if (leaf !== null && !leaf.isFile()) return;
+        const current = leaf === null ? "" : await readFile(file, "utf8");
         if (current.split(/\r?\n/).some((line) => line.trim() === path)) return;
         const prefix = current === "" || current.endsWith("\n") ? "" : "\n";
         // 잎이 링크면 거절하고, 아니면 `rename` 으로 갈아 끼운다 — 맨 `writeFile` 은 링크를 따라간다.
-        await writeOwnFile(file, `${current}${prefix}${path}\n`);
+        await writeOwnFile(file, `${current}${prefix}${path}\n`, leaf === null ? 0o644 : leaf.mode & 0o777);
     } catch {
         // 부가다 — 위 KDoc. 링크 거절도 여기로 온다: 감추지 못한 표식은 커밋될 수 있지만 남의 파일을 쓰지는 않는다.
     }

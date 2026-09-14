@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import {mkdir, readFile, writeFile} from "node:fs/promises";
 import {join} from "node:path";
 import test from "node:test";
-import {affectsFolderVersion, gitStatusLine, tagOffer, type GitSnapshot} from "./git.ts";
+import {affectsFolderVersion, countUncommitted, gitStatusLine, tagOffer, type GitSnapshot} from "./git.ts";
+import {isExcludedEntry} from "./zip.ts";
 import {excludeFromGit} from "./gitExclude.ts";
 import {SOURCE_MARK_PATH} from "./localMark.ts";
 import {tempDir} from "./testing/tempDir.ts";
@@ -19,6 +20,13 @@ test("git 한 줄 — 깨끗한 트리는 브랜치·짧은 sha·「깨끗함」
 
 test("git 한 줄 — 커밋하지 않은 변경은 수로 말한다", () => {
     assert.equal(gitStatusLine({...clean, uncommitted: 3}), "git: main @ 1a2b3c4 · 커밋하지 않은 변경 3개");
+});
+
+test("🔴 git 한 줄 — 셀 수 없으면(미추적 숨김 설정) 「깨끗함」이라 말하지 않는다", () => {
+    assert.equal(
+        gitStatusLine({...clean, uncommitted: null}),
+        "git: main @ 1a2b3c4 · 커밋하지 않은 변경을 셀 수 없음(미추적 파일을 숨기는 설정)",
+    );
 });
 
 test("git 한 줄 — 분리 HEAD 와 커밋 없는 레포를 가른다", () => {
@@ -38,7 +46,11 @@ test("🔴 브랜치 이름은 남이 짓는다 — 제어문자·개행이 모�
 
 test("감시기 거름 — 지문에 안 드는 경로는 재계산을 예약하지 않는다(기아 방지)", () => {
     for (const p of [".git/index", ".git/HEAD", "node_modules/x/index.js", ".next/server/app.js", "dist/a.js",
-        ".zalkera/source.json", ".env.local", ".vscode/settings.json", ".mcp.json", "", ".", "../outside.ts"]) {
+        ".zalkera/source.json", ".env.local", ".vscode/settings.json", ".mcp.json", "", ".", "../outside.ts",
+        // Windows 구분자로 와도 같은 답이어야 한다(음성 짝 — 변환을 빼면 `.next\\…` 가 통과한다).
+        ".next\\server\\app.js", "node_modules\\x\\index.js",
+        // 우리 원자 쓰기의 임시 이름 — 잔재도, rename 직전 한순간도 지문을 안 바꾼다.
+        ".zalkera/source.json.zalkera-0123456789ab.tmp", ".mcp.json.zalkera-abcdefabcdef.tmp", "src/a.ts.zalkera-000000000000.tmp"]) {
         assert.equal(affectsFolderVersion(p), false, `${p} 가 재계산을 예약한다`);
     }
 });
@@ -50,16 +62,40 @@ test("감시기 거름 — 지문에 드는 경로는 예약한다(양성 짝)",
     }
 });
 
-test("태그 권유 — 깨끗한 트리에서만, 이름은 zalkera/v{N}", () => {
-    assert.deepEqual(tagOffer(clean, "acme", 5), {name: "zalkera/v5", message: "잘커라 acme 버전 5"});
+test("태그 권유 — 깨끗한 트리에서만 · 이름은 zalkera/{사이트}/v{N} · 찍을 커밋은 발행 시점 HEAD", () => {
+    assert.deepEqual(tagOffer(clean, "acme", 5), {
+        name: "zalkera/acme/v5",
+        message: "잘커라 acme 버전 5",
+        ref: "1a2b3c4d5e6f7890",
+    });
 });
 
-test("🔴 태그 권유 — 더러운 트리·커밋 없음·레포 아님·판 번호 이상은 전부 권하지 않는다", () => {
+test("🔴 태그 권유 — 더러운 트리·셀 수 없음·커밋 없음·레포 아님·판 번호 이상·코드 모양 이상은 전부 권하지 않는다", () => {
     assert.equal(tagOffer({...clean, uncommitted: 1}, "acme", 5), null, "더러운 트리에 태그를 권했다");
+    assert.equal(tagOffer({...clean, uncommitted: null}, "acme", 5), null, "셀 수 없는데 태그를 권했다");
     assert.equal(tagOffer({...clean, commit: null}, "acme", 5), null, "커밋 없는 레포에 태그를 권했다");
     assert.equal(tagOffer(null, "acme", 5), null);
     assert.equal(tagOffer(clean, "acme", 0), null);
     assert.equal(tagOffer(clean, "acme", 2.5), null);
+    assert.equal(tagOffer(clean, "Acme", 5), null, "대문자 코드로 ref 이름을 만들었다");
+    assert.equal(tagOffer(clean, "a b", 5), null, "공백 든 코드로 ref 이름을 만들었다");
+});
+
+test("미커밋 수 — 폴더 아래만 · 경로로 중복을 뺀다(모노레포·스테이지 뒤 재수정)", () => {
+    const dir = "/w/site";
+    assert.equal(
+        countUncommitted(dir, ["/w/site/a.ts", "/w/site/a.ts", "/w/site/src/b.ts", "/w/other/c.ts", "/w/sitex/d.ts", "/w/site"]),
+        3,
+    );
+    assert.equal(countUncommitted(dir, []), 0);
+    assert.equal(countUncommitted(dir, ["/w/site/..foo", "/w/site/../site/e.ts"]), 2, "`..` 로 시작하는 이름을 밖으로 봤다");
+});
+
+test("우리 임시 이름은 포장·지문 술어에서도 빠진다 — 감시기와 한 벌", () => {
+    assert.equal(isExcludedEntry(".zalkera/source.json.zalkera-0123456789ab.tmp"), true);
+    assert.equal(isExcludedEntry("src/a.ts.zalkera-0123456789ab.tmp"), true);
+    assert.equal(isExcludedEntry("src/a.zalkera-0123456789ab.tmp.ts"), false, "이름 가운데 조각으로 오탐했다");
+    assert.equal(isExcludedEntry("src/zalkera-0123456789ab.tmp"), false, "점 없는 이름을 오탐했다");
 });
 
 async function repo(withGitDir: boolean): Promise<string> {

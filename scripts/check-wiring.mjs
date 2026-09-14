@@ -659,7 +659,8 @@ const WIRES = [
     // 두 자리다 — 「zip 으로 교체」와 「서버 판으로 교체」. 재료만 다르고 «무엇을 남기는지»를 세는 술어는 하나여야 한다.
     [
         "packages/vscode/src/extension.ts",
-        "const keep = await keepNames(dir);",
+        // 두 교체 문이 폴더 읽기와 git 읽기를 겹쳐 읽는다(`Promise.all`) — `keep` 이 그 첫 자리다.
+        "= await Promise.all([keepNames(dir), ",
         "손 목록으로 열거하면 포장기가 빼는 것과 갈린다 — 갈린 쪽이 영구 삭제된다",
         2,
     ],
@@ -836,8 +837,43 @@ const WIRES = [
     ],
     [
         "packages/vscode/src/extension.ts",
-        "if (ownWriting || Date.now() < ownWritesQuietUntil) return;",
+        "    if (ownWriting) return;",
         "우리 자신의 갈아 끼우기가 감시기를 타고 훑기를 한 번 더 돌린다(3회전 성능 심의의 ×2 가 돌아온다)",
+    ],
+    [
+        // 창은 시각이 아니라 **침묵**으로 닫힌다 — 이 줄이 빠지면 고정 2초가 되어 큰 트리에서 ×2 가 돌아온다.
+        "packages/vscode/src/extension.ts",
+        "      ownWritesQuietUntil = Math.min(now + OWN_WRITES_GRACE_MS, ownWritesQuietCap);",
+        "수천 파일을 갈아 끼운 뒤 밀려오는 우리 사건이 창을 넘겨 심은 값을 버린다(1회전 성능 실측 · 16k 파일 3~5초)",
+    ],
+    [
+        // 문만 잡으면 문을 **세우는 줄**을 지워도 초록이다(기능 심의 변이 ⑸ 실측) — 세우는 줄도 잡는다.
+        "packages/vscode/src/extension.ts",
+        "    ownWriting = true;",
+        "우리 쓰기 문이 영영 안 서서 감시기가 갈아 끼우기를 「남이 바꿨다」로 읽는다 — 문은 있는데 아무도 안 세운다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "      ownWritesQuietUntil = Date.now() + OWN_WRITES_GRACE_MS;",
+        "늦게 도착하는 우리 쓰기 사건이 심은 값을 버리고 훑기를 한 번 더 돌린다",
+    ],
+    [
+        // zip 교체 모달은 core 의 `say` 를 안 지나 인라인이다 — 읽는 줄만 잡으면 조립에서 빼도 초록(기능 심의 변이 ⑹).
+        "packages/vscode/src/extension.ts",
+        '(git === null ? "" : `\\n\\n${plainNotice(gitStatusLine(git), 256)}`)',
+        "zip 교체 확인 창에서 git 한 줄이 사라진다 — 커밋 안 한 변경을 말없이 지운다",
+    ],
+    [
+        // 「누를 때만 쓴다」 — 조건을 `if (tag !== null)` 로 바꾸면 자동 태그가 되는데 그물이 없었다(보안 심의).
+        "packages/vscode/src/extension.ts",
+        "if (tag !== null && chosen === makeTag) {",
+        "태그가 사람이 누르지 않아도 만들어진다 — 확장이 고객 git 에 제스처 없이 쓴다",
+    ],
+    [
+        // 누르는 순간 HEAD 가 발행한 커밋인지 다시 읽는 줄 — 빼면 구판 VS Code 에서 옮겨진 HEAD 에 찍힌다.
+        "packages/vscode/src/extension.ts",
+        "if (now === null || now.commit !== tag.ref || now.uncommitted !== 0) {",
+        "빌드 대기 중 커밋한 사람의 태그가 라이브가 아닌 커밋을 가리킨다(구판 VS Code 는 `ref` 를 무시한다)",
     ],
     [
         "packages/vscode/src/extension.ts",
@@ -846,7 +882,7 @@ const WIRES = [
     ],
     [
         "packages/vscode/src/extension.ts",
-        "const git = (await readGit(dir))?.snapshot ?? null;",
+        "const git = gitRead?.snapshot ?? null;",
         "교체 두 문의 확인 창에서 git 한 줄이 사라진다 — 커밋 안 한 변경을 말없이 지운다",
         2,
     ],

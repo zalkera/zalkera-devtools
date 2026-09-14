@@ -112,7 +112,8 @@ export async function ensureEnvIgnored(dir: string): Promise<"already" | "added"
     const ignored = content
         .split("\n")
         .map((line) => line.trim())
-        .some((line) => line === ".env.local" || line === ".env*" || line === ".env*.local");
+        // `.env.*` 는 시작 소스 팩과 매뉴얼 §5 가 권하는 줄이다 — 못 알아보면 줄을 또 붙인다.
+        .some((line) => line === ".env.local" || line === ".env*" || line === ".env.*" || line === ".env*.local");
     if (ignored) return "already";
 
     const suffix = content.endsWith("\n") || content.length === 0 ? "" : "\n";

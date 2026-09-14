@@ -11,10 +11,19 @@
  *   상류 `git.d.ts` 를 통째로 들여오지 않는다 — 사본은 낡고, 우리가 기대는 것은 필드 대여섯 개다.
  *   상류 서명(2026-09-14 조회): `Repository.state: {HEAD?: Branch; workingTreeChanges; indexChanges;
  *   untrackedChanges}` · `status(): Promise<void>` · `tag(name, message, ref?)`.
+ *   ⚠ **`ref` 는 VS Code 1.107 부터다.** 우리 engine 은 `^1.90.0` 이라 그 전 판에서는 셋째 인자가
+ *   **조용히 무시되고 HEAD 에 찍힌다**(기능 심의 실측). 그래서 태그를 만드는 쪽은 `ref` 에 기대지 않고
+ *   **누르는 순간의 HEAD 가 그 커밋인지 다시 읽어** 확인한다(`extension.ts` `createGitTag`).
+ *
+ * ■ 모르면 `null` 이다
+ *   `git status` 가 실패했거나(`index.lock`·`safe.directory`) 확장 활성화가 시한 안에 안 끝나면 낡은
+ *   상태로 「깨끗함」을 그리지 않는다 — 줄도 단추도 없는 쪽이 옳다. 폴더 설정 `git.untrackedChanges`
+ *   가 `hidden` 이면 미추적이 **어느 배열에도 안 와서** 수를 알 수 없다(`-uno`) — 그 설정은 폴더의
+ *   `.vscode/settings.json` 이 정할 수 있는 값이라, 남이 만든 폴더가 우리 화면을 「깨끗함」으로 만들 수
+ *   있다. 그때 `uncommitted` 는 `null`(셀 수 없음)이다.
  */
-import { isAbsolute, relative, sep } from "node:path";
 import * as vscode from "vscode";
-import type { GitSnapshot } from "@zalkera/devtools-core";
+import { countUncommitted, type GitSnapshot } from "@zalkera/devtools-core";
 
 interface GitChange {
   readonly uri: vscode.Uri;
@@ -34,7 +43,8 @@ export interface GitRepository {
   readonly rootUri: vscode.Uri;
   readonly state: GitRepositoryState;
   status(): Promise<void>;
-  tag(name: string, message: string): Promise<void>;
+  /** 셋째 인자(찍을 커밋)는 1.107+ 에서만 듣는다 — 위 KDoc. */
+  tag(name: string, message: string, ref?: string): Promise<void>;
 }
 interface GitApi {
   getRepository(uri: vscode.Uri): GitRepository | null;
@@ -44,12 +54,28 @@ interface GitExtension {
   getAPI(version: 1): GitApi;
 }
 
+/** git 확장 활성화를 기다리는 상한. 넘기면 「없는 것」으로 본다 — 확인 창이 말없이 굳는 것보다 낫다. */
+const ACTIVATE_TIMEOUT_MS = 5_000;
+/**
+ * `git status` 를 기다리는 상한. `status()` 는 git 프로세스 예닐곱을 돌리고(성능 심의 · `repository.ts`
+ * `updateModelState`) 리눅스 16k 파일에서 30ms 지만 윈도·큰 모노레포에서는 초 단위다. 넘기면 **모름**(`null`)
+ * — 낡은 값으로 「깨끗함」을 그리지 않는다.
+ */
+const STATUS_TIMEOUT_MS = 3_000;
+
+/** `promise` 가 시한 안에 안 끝나면 `fallback`. 시한은 창을 굳히지 않으려는 것이지 판정이 아니다. */
+function within<T>(ms: number, promise: PromiseLike<T>, fallback: T): Promise<T> {
+  return Promise.race([promise, new Promise<T>((resolve) => setTimeout(() => resolve(fallback), ms))]);
+}
+
 /** 폴더를 품은 레포. 없으면 `null` — git 확장이 없거나 꺼졌거나 레포가 아니다. */
 export async function gitRepositoryAt(dir: string): Promise<GitRepository | null> {
   const ext = vscode.extensions.getExtension<GitExtension>("vscode.git");
   if (!ext) return null;
-  // 아직 안 켜졌을 수 있다(활성화는 지연된다). 켜는 데 실패하면 **없는 것**으로 본다.
-  const exports = ext.isActive ? ext.exports : await ext.activate().then((e) => e, () => undefined);
+  // 아직 안 켜졌을 수 있다(활성화는 지연된다). 켜는 데 실패하거나 시한을 넘기면 **없는 것**으로 본다.
+  const exports = ext.isActive
+    ? ext.exports
+    : await within(ACTIVATE_TIMEOUT_MS, ext.activate().then((e) => e, () => undefined), undefined);
   if (!exports?.enabled) return null;
   try {
     return exports.getAPI(1).getRepository(vscode.Uri.file(dir));
@@ -60,28 +86,24 @@ export async function gitRepositoryAt(dir: string): Promise<GitRepository | null
 
 /**
  * 레포의 지금 상태를 **한 번 새로 읽어** 접는다. `status()` 가 `git status` 를 돌리므로 확인 창
- * 직전에 부르면 그 순간의 사실이다(감시 지연 뒤의 낡은 값이 아니라).
+ * 직전에 부르면 그 순간의 사실이다(감시 지연 뒤의 낡은 값이 아니라). **못 읽으면 `null`** — 낡은
+ * 상태로 「깨끗함」을 그리지 않는다(위 KDoc).
  *
- * ⚠ **이 폴더 아래만 센다.** 레포 뿌리가 폴더보다 위(모노레포)면 형제 패키지의 변경은 이 폴더의
- *   발행과 무관하다 — 그것까지 세면 「커밋하지 않은 변경 40개」가 남의 이야기가 된다.
- * ⚠ **경로로 중복을 뺀다.** 스테이지된 뒤 또 고친 파일은 `indexChanges` 와 `workingTreeChanges` 에
- *   둘 다 온다. 두 번 세면 수가 거짓이다.
+ * 폴더 안 판정·중복 제거는 core 의 [countUncommitted] 가 한다(순수 함수 · 시험이 문다).
  */
-export async function gitSnapshotOf(repo: GitRepository, dir: string): Promise<GitSnapshot> {
-  await repo.status().catch(() => undefined);
-  const inside = (c: GitChange): boolean => {
-    const rel = relative(dir, c.uri.fsPath);
-    return rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
-  };
-  const paths = new Set<string>();
-  for (const list of [repo.state.workingTreeChanges, repo.state.indexChanges, repo.state.untrackedChanges]) {
-    for (const c of list) if (inside(c)) paths.add(c.uri.fsPath);
-  }
+export async function gitSnapshotOf(repo: GitRepository, dir: string): Promise<GitSnapshot | null> {
+  const fresh = await within(STATUS_TIMEOUT_MS, repo.status().then(() => true, () => false), false);
+  if (!fresh) return null;
+  const hidden =
+    vscode.workspace.getConfiguration("git", vscode.Uri.file(dir)).get<string>("untrackedChanges") === "hidden";
+  const all = [repo.state.workingTreeChanges, repo.state.indexChanges, repo.state.untrackedChanges].flatMap(
+    (list) => list.map((c) => c.uri.fsPath),
+  );
   const head = repo.state.HEAD;
   return {
     branch: head?.name ?? null,
     commit: head?.commit ?? null,
-    uncommitted: paths.size,
+    uncommitted: hidden ? null : countUncommitted(dir, all),
   };
 }
 
@@ -89,5 +111,6 @@ export async function gitSnapshotOf(repo: GitRepository, dir: string): Promise<G
 export async function readGit(dir: string): Promise<{ repo: GitRepository; snapshot: GitSnapshot } | null> {
   const repo = await gitRepositoryAt(dir);
   if (repo === null) return null;
-  return { repo, snapshot: await gitSnapshotOf(repo, dir) };
+  const snapshot = await gitSnapshotOf(repo, dir);
+  return snapshot === null ? null : { repo, snapshot };
 }

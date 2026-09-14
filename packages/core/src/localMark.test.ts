@@ -288,3 +288,28 @@ test("판 번호가 판일 수 없는 값이면 선언하지 않는다", () => {
   }
   assert.strictEqual(declaredBaseRevisionNo(mark(2_147_483_647), "bix"), 2_147_483_647, "상한은 유효하다");
 });
+
+test("🔴 표식을 쓰면 `.git/info/exclude` 에 감춘다 — 배선을 빼도 초록이던 자리(기능 심의 변이 ⑺)", async () => {
+    const dir = tempDirSync("zalkera-mark-git-");
+    mkdirSync(join(dir, ".git"));
+    const r = await writeSourceMarkTo(dir, {
+        tenant: "acme",
+        revisionNo: 3,
+        sha256: "a".repeat(64),
+        fetchedAt: "2026-09-14T00:00:00.000Z",
+    });
+    assert.equal(r.ok, true);
+    assert.match(readFileSync(join(dir, ".git", "info", "exclude"), "utf8"), /^\.zalkera\/source\.json$/m);
+});
+
+test("표식 쓰기 — git 이 없으면 `.git` 을 만들지 않는다(양성 짝)", async () => {
+    const dir = tempDirSync("zalkera-mark-nogit-");
+    const r = await writeSourceMarkTo(dir, {
+        tenant: "acme",
+        revisionNo: 3,
+        sha256: "a".repeat(64),
+        fetchedAt: "2026-09-14T00:00:00.000Z",
+    });
+    assert.equal(r.ok, true);
+    assert.equal(existsSync(join(dir, ".git")), false);
+});

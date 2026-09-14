@@ -116,6 +116,7 @@ import {
   type Baseline,
   type LedgerSnapshot,
   affectsFolderVersion,
+  ensureEnvIgnored,
   gitStatusLine,
   tagOffer,
 } from "@zalkera/devtools-core";
@@ -197,6 +198,7 @@ async function whileExtracting<T>(run: () => Thenable<T>): Promise<T | typeof BU
     } finally {
       ownWriting = false;
       ownWritesQuietUntil = Date.now() + OWN_WRITES_GRACE_MS;
+      ownWritesQuietCap = Date.now() + OWN_WRITES_MAX_MS;
     }
   });
   if (outcome === BUSY) {
@@ -2118,9 +2120,9 @@ async function updateZipCommand(): Promise<void> {
 
   // ⚠ **무엇을 남기는지 계산해서 보여 준다.** 목록은 포장기가 zip 에서 빼는 것과 같은 술어로
   //    고른다(`keepNames`) — 손으로 열거하면 두 목록이 갈리고, 갈린 쪽이 영구 삭제된다.
-  const keep = await keepNames(dir);
   // 형제 「서버 판으로 교체」와 같은 이유·같은 자리(T2). 브랜치 이름도 남이 짓는 것이라 소독을 지난다.
-  const git = (await readGit(dir))?.snapshot ?? null;
+  const [keep, gitRead] = await Promise.all([keepNames(dir), readGit(dir)]);
+  const git = gitRead?.snapshot ?? null;
   const ok = await vscode.window.showWarningMessage(
     ours("이 폴더의 소스를 고르신 zip 으로 갈아 끼웁니다. 지금 내용은 사라집니다."),
     {
@@ -2272,12 +2274,12 @@ async function updateFromServerCommand(): Promise<void> {
 
   // ⚠ **되돌릴 수 없는 조작이라 재료를 «확인 앞»에 모은다.** 사람이 동의할 때 「어느 판에서
   //    어느 판으로」·「무엇이 남는가」·「지난 잔재가 있는가」를 이미 알고 있어야 한다.
-  const keep = await keepNames(dir);
-  const from = declaredBaseRevisionNo(readSourceMarkAt(dir), String(tenant));
-  const leftovers = await siblingStashes(dir);
   // git 이 지켜 주는 것은 커밋한 것뿐이다 — 커밋하지 않은 변경이 있으면 이 문이 지운다. 그 사실을
   // 동의 앞에 한 줄로 둔다(T2). 레포가 아니면 `null` 이고 줄이 안 붙는다. 막지 않는다.
-  const git = (await readGit(dir))?.snapshot ?? null;
+  // 폴더 읽기 둘과 **겹쳐** 읽는다 — `git status` 지연이 그 뒤로 숨는다(성능 심의).
+  const [keep, leftovers, gitRead] = await Promise.all([keepNames(dir), siblingStashes(dir), readGit(dir)]);
+  const from = declaredBaseRevisionNo(readSourceMarkAt(dir), String(tenant));
+  const git = gitRead?.snapshot ?? null;
   const ask = say.serverReplaceConfirm(tenant, picked.revisionNo, dir, from, keep, leftovers, git);
   const answer = await vscode.window.showWarningMessage(
     ask.message,
@@ -2994,6 +2996,12 @@ async function publishCommand(): Promise<void> {
   // 「사이트에 연결」로 이은 폴더와 무표식 폴더는 선언할 값이 없고, **없는 값을 지어내면 근거 없이
   // 남을 막는다.**
   const baseRevisionNo = declaredBaseRevisionNo(readSourceMarkAt(dir), tenant);
+  // 🔴 **`.env.local` 보호는 미리보기를 켤 때만 걸렸다.** 「미리보기 → git init → 발행」 순서면 열쇠가
+  //    `.gitignore` 밖에 있고, 아래 git 한 줄이 그것을 「커밋하지 않은 변경」으로 세며 매뉴얼은 「커밋하고
+  //    다시 누르라」고 한다 — 따를수록 열쇠가 커밋된다(보안 심의). 포장 **앞**에 보장한다 — 뒤에 하면
+  //    `.gitignore` 가 바뀌어 방금 심은 지문과 어긋난다. `.git` 이 없으면 무동작이다.
+  const ignored = await ensureEnvIgnored(dir).catch(() => "not-git" as const);
+  if (ignored === "added" || ignored === "created") log(".gitignore 에 .env.local 을 보장했습니다(자격증명 커밋 방지).");
   // 올라가는 것은 커밋이 아니라 **디스크의 파일**이다 — 커밋하지 않은 변경이 있으면 「이 커밋이
   // 라이브」가 거짓이 된다. 그 사실을 동의 앞에 한 줄로 두고(T2), 같은 값으로 발행 뒤 태그를 권할지
   // 정한다(T3 · `tagOffer`). 확인 **앞**에 읽는다 — 동의한 그 상태가 곧 올라가는 상태다.
@@ -3136,7 +3144,7 @@ async function publishCommand(): Promise<void> {
 
   // T3 — 깨끗한 트리에서 올렸을 때만 태그를 권한다. 판정은 core(`tagOffer`), 쓰기는 사람이 누른 뒤다.
   const offer = git === null ? null : tagOffer(git.snapshot, String(tenant), result.revisionNo);
-  await announcePublished(api, result.revisionNo, tenant, offer === null ? null : { ...offer, repo: git!.repo });
+  await announcePublished(api, result.revisionNo, tenant, offer === null ? null : { ...offer, repo: git!.repo, dir });
 }
 
 /**
@@ -3245,11 +3253,14 @@ async function pollReflection(
   log(`반영 확인 상한 도달 — 버전 ${revisionNo}(못 봤을 뿐, 반영 실패가 아니다)`);
 }
 
-/** 발행 뒤 권할 태그 — 이름·메시지(core 가 정함)와 그것을 만들 레포. */
+/** 발행 뒤 권할 태그 — 이름·메시지·찍을 커밋(core 가 정함)과 그것을 만들 레포·폴더. */
 interface TagOfferOn {
   name: string;
   message: string;
+  /** 발행 시점의 HEAD. 태그는 **이 커밋**에 찍혀야 한다 — 누르는 순간의 HEAD 가 아니라. */
+  ref: string;
   repo: GitRepository;
+  dir: string;
 }
 
 /**
@@ -3322,19 +3333,37 @@ async function announcePublished(
  * 그래서 빨간창 대신 이유를 말하고 끝낸다. 오류 문장은 git 이 낸 것이라 표시 자리에서 소독한다.
  */
 async function createGitTag(tag: TagOfferOn): Promise<void> {
-  try {
-    await tag.repo.tag(tag.name, tag.message);
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
-    log(`git 태그 ${tag.name} 을 만들지 못했습니다: ${reason}`);
+  // 🔴 **누르는 순간 다시 읽는다.** 단추는 빌드 대기(분 단위) 뒤에 뜨고 알림은 체류한다 — 그 사이
+  //    커밋하면 HEAD 는 발행한 커밋이 아니다. `tag(name, message, ref)` 의 `ref` 는 VS Code 1.107 부터라
+  //    구판(engine ^1.90)에서는 조용히 무시되고 HEAD 에 찍힌다(기능·보안 심의 실측). 그래서 `ref` 에
+  //    기대지 않고 **HEAD 가 그 커밋이고 여전히 깨끗할 때만** 만든다. 아니면 sha 를 주고 손에 맡긴다.
+  const now = (await readGit(tag.dir))?.snapshot ?? null;
+  if (now === null || now.commit !== tag.ref || now.uncommitted !== 0) {
+    log(`git 태그를 만들지 않았습니다 — 발행한 커밋 ${tag.ref} 이 지금 HEAD 가 아니거나 트리가 깨끗하지 않습니다.`);
     void vscode.window.showWarningMessage(
-      `git 태그 「${plainNotice(tag.name, 64)}」 를 만들지 못했습니다 — ${plainNotice(reason, 200)}`,
+      `발행한 뒤 커밋이 옮겨졌거나 고친 것이 있어 태그를 만들지 않았습니다. 손으로 찍으시려면: ` +
+        `git tag -a ${plainNotice(tag.name, 80)} -m "${plainNotice(tag.message, 80)}" ${plainNotice(tag.ref, 40)}`,
     );
     return;
   }
-  log(`git 태그 ${tag.name} 을 만들었습니다(로컬) — ${tag.message}`);
+  try {
+    await tag.repo.tag(tag.name, tag.message, tag.ref);
+  } catch (error) {
+    // vscode.git 의 `GitError.message` 는 상수(「Failed to execute git」)이고 이유는 `stderr` 에 있다.
+    const e = error as { stderr?: unknown; message?: unknown } | null;
+    const reason =
+      (typeof e?.stderr === "string" && e.stderr.trim()) ||
+      (typeof e?.message === "string" && e.message) ||
+      String(error);
+    log(`git 태그를 만들지 못했습니다: ${tag.name} — ${reason}`);
+    void vscode.window.showWarningMessage(
+      `git 태그 「${plainNotice(tag.name, 80)}」 를 만들지 못했습니다 — ${plainNotice(reason, 200)}`,
+    );
+    return;
+  }
+  log(`git 태그를 만들었습니다(로컬): ${tag.name} → ${tag.ref} — ${tag.message}`);
   void vscode.window.showInformationMessage(
-    `git 태그 「${plainNotice(tag.name, 64)}」 를 만들었습니다. 이 컴퓨터에만 있으니, 같이 올리시려면 「태그 푸시」를 쓰십시오.`,
+    `git 태그 「${plainNotice(tag.name, 80)}」 를 만들었습니다. 이 컴퓨터에만 있으니, 같이 올리시려면 「태그 푸시」를 쓰십시오.`,
   );
 }
 
@@ -4438,7 +4467,23 @@ let ownWriting = false;
  * 2초는 실측이 아니라 여유다(VS Code 감시기의 묶음 지연은 보통 수백 ms).
  */
 let ownWritesQuietUntil = 0;
+/**
+ * 창의 **절대 상한.** 창은 침묵으로 닫히지만(아래), 무엇인가 소스 경로를 끝없이 쓰면 영영 안 닫힐 수
+ * 있다 — 그때는 이 시각에 강제로 닫고 종전대로 재계산한다(×2 한 번이 낡은 화면보다 낫다).
+ */
+let ownWritesQuietCap = 0;
+/**
+ * **침묵이 이만큼 이어져야 창이 닫힌다** — 시각 고정이 아니다. VS Code 는 감시기 사건을 200ms 마다
+ * 500개씩만 흘려보내므로(초당 2,500개 상한 · 성능 심의가 `parcelWatcher.ts` 로 확인) 수천 파일을
+ * 갈아 끼운 뒤에는 `finally` 뒤로도 몇 초 동안 우리 사건이 밀려온다. 고정 2초는 16k 파일에서 열렸고,
+ * 열린 자리마다 3회전 성능 심의의 ×2 훑기가 돌아왔다(1회전 성능 실측). 밀려오는 사건은 200ms 간격의
+ * 연속 덩어리라 그 안에 2초 공백이 안 생기고, 덩어리가 끝나면 2초 뒤 창이 닫힌다.
+ *
+ * 대가: 이 창 안에 온 **남의** 쓰기(에이전트가 갈아 끼우기 직후 고친 파일)도 함께 묻혀, 다음 사건이나
+ * 저장까지 심은 「일치」가 남는다. 우리 쓰기와 남의 쓰기를 사건만으로 가를 수 없어 침묵으로 가른 것이다.
+ */
 const OWN_WRITES_GRACE_MS = 2_000;
+const OWN_WRITES_MAX_MS = 30_000;
 
 /**
  * **디스크가 바뀐 것을 알아차린다**(`DESIGN-git-coexistence.md` T1) — 저장이 아닌 손이 바꿨을 때.
@@ -4458,8 +4503,15 @@ function watchWorkspaceWrites(dir: string): vscode.Disposable {
   );
   const onEvent = (uri: vscode.Uri): void => {
     if (uri.scheme !== "file") return;
-    if (ownWriting || Date.now() < ownWritesQuietUntil) return;
+    // 거름이 먼저다 — `.next/` 사건이 창을 밀면 미리보기가 도는 내내 창이 안 닫힌다.
     if (!affectsFolderVersion(relative(dir, uri.fsPath))) return;
+    if (ownWriting) return;
+    const now = Date.now();
+    if (now < ownWritesQuietUntil) {
+      // 우리 쓰기의 늦은 사건이 아직 흐른다 — 침묵이 GRACE 만큼 이어질 때까지 창을 민다(상한 있음).
+      ownWritesQuietUntil = Math.min(now + OWN_WRITES_GRACE_MS, ownWritesQuietCap);
+      return;
+    }
     scheduleFolderVersion();
   };
   return vscode.Disposable.from(
