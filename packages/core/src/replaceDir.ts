@@ -32,7 +32,7 @@
  */
 import { mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { isExcludedEntry } from "./zip.ts";
+import { isExcludedEntry, isOwnTmp } from "./zip.ts";
 
 /**
  * **다시 만들어지는 것** — 손 목록에서 뺀다.
@@ -84,7 +84,8 @@ export function stashLeftovers(entryNames: readonly string[]): string[] {
  * 사고다. 단일 앱 소스가 계약이라 그 형상이 드문 것에 기대는 선택이다.
  */
 export async function keepNames(dir: string): Promise<string[]> {
-  return (await readdir(dir)).filter((n) => isExcludedEntry(n) && !REGENERABLE.has(n.toLowerCase()));
+  // 우리 원자 쓰기의 잔재(`*.zalkera-<hex>.tmp`)는 배제 술어에 들지만 **남길 것이 아니다** — 갈아 끼우면 사라져야 한다.
+  return (await readdir(dir)).filter((n) => isExcludedEntry(n) && !REGENERABLE.has(n.toLowerCase()) && !isOwnTmp(n));
 }
 
 /** 갈아 끼운 결과. */

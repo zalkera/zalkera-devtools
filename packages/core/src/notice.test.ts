@@ -307,3 +307,11 @@ test("방향 재정렬·격리 제어문자를 지운다 — 약한 방향표만
 test("정상 경로는 이 조임에 안 걸린다 — 한글·공백·점 포함", () => {
   strictEqual(plainNotice("/home/u/내 사이트-v7.2", 512), "/home/u/내 사이트-v7.2");
 });
+
+test("Cf 부류 전부를 지운다 — ALM(U+061C)·SHY(U+00AD)·WJ(U+2060)·BOM(U+FEFF)·태그 문자(U+E0041)", () => {
+    const line = plainNotice("main\u061Cx\u00ADy\u2060z\uFEFFw\u{E0041}v");
+    for (const ch of ["\u061C", "\u00AD", "\u2060", "\uFEFF", "\u{E0041}"]) {
+        strictEqual(line.includes(ch), false, `${ch.codePointAt(0)?.toString(16)} 가 살아남았다`);
+    }
+    strictEqual(line.replace(/\s+/g, ""), "mainxyzwv");
+});

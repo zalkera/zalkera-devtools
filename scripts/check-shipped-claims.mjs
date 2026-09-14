@@ -55,6 +55,8 @@ const RETIRED = [
     "`.git` 폴더는 건드리지 않습니다",
     "커밋 여부를 적지 않습니다",
     "git 이 바꾼 파일을 그 순간 알아채지 않습니다",
+    // T2/T3 은 `vscode.git` 을 통해 `git status`·(누르면) `git tag` 를 **돌린다** — 「git 명령을 실행하지 않고」는 거짓(Fable 보안).
+    "이 확장은 git 명령을 실행하지",
 ];
 
 const problems = [];

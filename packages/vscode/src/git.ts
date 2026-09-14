@@ -22,6 +22,7 @@
  *   `.vscode/settings.json` 이 정할 수 있는 값이라, 남이 만든 폴더가 우리 화면을 「깨끗함」으로 만들 수
  *   있다. 그때 `uncommitted` 는 `null`(셀 수 없음)이다.
  */
+import { sep } from "node:path";
 import * as vscode from "vscode";
 import { countUncommitted, type GitSnapshot } from "@zalkera/devtools-core";
 
@@ -99,8 +100,17 @@ export async function gitRepositoryAt(dir: string): Promise<GitRepository | null
 export async function gitSnapshotOf(repo: GitRepository, dir: string): Promise<GitSnapshot | null> {
   const fresh = await within(STATUS_TIMEOUT_MS, repo.status().then(() => true, () => false), false);
   if (!fresh) return null;
-  const hidden =
-    vscode.workspace.getConfiguration("git", vscode.Uri.file(dir)).get<string>("untrackedChanges") === "hidden";
+  // 설정은 **레포 뿌리** 스코프로 읽는다 — `vscode.git` 이 `git status` 인자를 정할 때 읽는 그 자리다(상류
+  // `repository.ts` `scopedConfig`). 폴더 스코프로 읽으면 다중 루트의 중첩 폴더에서 갈릴 수 있다(Fable 보안).
+  const config = vscode.workspace.getConfiguration("git", repo.rootUri);
+  // 둘 다 폴더의 `.vscode/settings.json` 이 정할 수 있는 값이고, 둘 다 변경을 **어느 배열에도 안 실리게** 한다
+  // (`-uno` · `--ignore-submodules`). 그때 0 을 「깨끗함」이라 말하면 거짓이다 — 셀 수 없다고 말한다.
+  const blind = config.get<string>("untrackedChanges") === "hidden" || config.get<boolean>("ignoreSubmodules") === true;
+  // 변경 경로는 `repo.rootUri` 표기로 지어진다. 폴더를 **다른 대소문자**로 열면(macOS · `vscode.git` 은 대소문자를
+  // 접어 레포를 잡아 준다) `dir` 이 그 표기의 하위가 아니라 `countUncommitted` 가 전부 「밖」으로 걸러 0 이 된다
+  // (Fable 보안 실측). 글자 그대로의 하위가 아니면 셀 수 없다.
+  const root = repo.rootUri.fsPath;
+  const under = dir === root || dir.startsWith(root.endsWith(sep) ? root : root + sep);
   const all = [repo.state.workingTreeChanges, repo.state.indexChanges, repo.state.untrackedChanges].flatMap(
     (list) => list.map((c) => c.uri.fsPath),
   );
@@ -108,7 +118,7 @@ export async function gitSnapshotOf(repo: GitRepository, dir: string): Promise<G
   return {
     branch: head?.name ?? null,
     commit: head?.commit ?? null,
-    uncommitted: hidden ? null : countUncommitted(dir, all),
+    uncommitted: blind || !under ? null : countUncommitted(dir, all),
   };
 }
 

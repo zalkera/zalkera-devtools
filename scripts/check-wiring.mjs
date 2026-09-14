@@ -234,7 +234,7 @@ const WIRES = [
     //    갈아 끼우기 «한복판»에서 실패한다. 형제 `updateZipCommand` 와 같은 자리다.
     [
         "packages/vscode/src/extension.ts",
-        "  await stopPreview();\n\n  const result = await whileExtracting(() =>",
+        "  await stopPreview();\n\n  const result = await whileExtracting(dir, () =>",
         "미리보기가 파일을 문 채로 갈아 끼우기가 시작된다 — 되돌리기가 도는 자리지만 애초에 " +
             "거기까지 안 가는 편이 낫다. 줄머리 고정이라 가드를 앞에 못 붙인다",
     ],
@@ -712,7 +712,7 @@ const WIRES = [
         //    신고). 지금은 셋이 각자 해제 직전에 잡으므로 **횟수가 셋**이다 — 하나만 세면 나머지
         //    둘을 벗겨도 초록이 된다.
         "packages/vscode/src/extension.ts",
-        "await whileExtracting(() =>",
+        "await whileExtracting(",
         "소스 받기·zip 시작·zip 교체가 겹쳐 돌아 두 꾸러미가 같은 폴더에 섞이고, 한쪽 롤백이 다른 쪽 파일을 지운다",
         4,
     ],
@@ -849,12 +849,18 @@ const WIRES = [
     [
         // 문만 잡으면 문을 **세우는 줄**을 지워도 초록이다(기능 심의 변이 ⑸ 실측) — 세우는 줄도 잡는다.
         "packages/vscode/src/extension.ts",
-        "    ownWriting = true;",
+        "    if (writesWorkspace) ownWriting = true;",
         "우리 쓰기 문이 영영 안 서서 감시기가 갈아 끼우기를 「남이 바꿨다」로 읽는다 — 문은 있는데 아무도 안 세운다",
     ],
     [
         "packages/vscode/src/extension.ts",
-        "      ownWritesQuietUntil = Date.now() + OWN_WRITES_GRACE_MS;",
+        "        ownWritesQuietUntil = Date.now() + OWN_WRITES_GRACE_MS;",
+        "늦게 도착하는 우리 쓰기 사건이 심은 값을 버리고 훑기를 한 번 더 돌린다",
+    ],
+    [
+        // 상한을 세우는 줄 — 빼면 cap 이 0 이라 `Math.min` 이 창을 첫 사건에 닫고 ×2 가 매번 돌아온다(Fable 변이 M6 생존).
+        "packages/vscode/src/extension.ts",
+        "        ownWritesQuietCap = Date.now() + OWN_WRITES_MAX_MS;",
         "늦게 도착하는 우리 쓰기 사건이 심은 값을 버리고 훑기를 한 번 더 돌린다",
     ],
     [
@@ -876,16 +882,51 @@ const WIRES = [
         "빌드 대기 중 커밋한 사람의 태그가 라이브가 아닌 커밋을 가리킨다(구판 VS Code 는 `ref` 를 무시한다)",
     ],
     [
-        // 발행 앞의 `.env.local` 보장 — 빼면 「미리보기 → git init → 발행」에서 열쇠가 커밋된다(2회전 보안 변이 M12 생존).
+        // 관문 본문 — `.env.local` 보장이 빠지면 「미리보기 → git init → 발행/교체」에서 열쇠가 커밋된다(2회전 보안 변이 M12).
         "packages/vscode/src/extension.ts",
         "const ignored = await ensureEnvIgnored(dir).catch(",
-        "발행 순서에서 `.env.local` 이 `.gitignore` 밖인 채 「커밋하지 않은 변경」으로 세어지고 매뉴얼은 커밋하라고 한다",
+        "관문에서 `.env.local` 보장이 빠진다 — 열쇠가 「커밋하지 않은 변경」으로 세어지고 매뉴얼은 커밋하라고 한다",
+    ],
+    [
+        // 보호 둘(`.env.local`·표식)은 git 한 줄을 읽기 **앞**이다 — 뒤면 줄이 덜 세어져 「깨끗함」+단추(Fable 변이 M13 생존).
+        // 세 문이 같은 순서로 지난다: 연접으로 고정한다.
+        "packages/vscode/src/extension.ts",
+        "  await prepareGitGate(dir);\n  const git = await readGit(dir);",
+        "발행 문에서 `.env.local`·표식 보호가 git 한 줄 뒤로 밀리거나 빠진다 — 열쇠가 「커밋하지 않은 변경」으로 세어져 커밋된다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "  await prepareGitGate(dir);\n  const [keep, leftovers, gitRead] = await Promise.all([keepNames(dir), ",
+        "「서버 판으로 교체」 문에 보호 둘이 없거나 뒤로 밀린다(Fable 기능 🟠-2)",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "  await prepareGitGate(dir);\n  const [keep, gitRead] = await Promise.all([keepNames(dir), ",
+        "「zip 으로 교체」 문에 보호 둘이 없거나 뒤로 밀린다(Fable 기능 🟠-2)",
+    ],
+    [
+        // 관문 본문 둘째 — 헬퍼를 비워도 위 연접 앵커는 초록이다.
+        "packages/vscode/src/extension.ts",
+        "await excludeFromGit(dir, SOURCE_MARK_PATH)",
+        "첫 사용(받기 → git init → 발행/교체)에서 표식이 「변경 1개」로 세어져 커밋되고, 그 뒤 exclude 는 효력이 없다",
+    ],
+    [
+        // 포장 뒤 스냅샷 — 동의 앞 값만 쓰면 모달·포장 사이의 커밋이 태그를 거짓으로 만든다(Fable 기능 🟠-1).
+        "packages/vscode/src/extension.ts",
+        "after.snapshot.commit === git.snapshot.commit &&",
+        "동의 앞 스냅샷만으로 태그를 권해 모달 중 옮겨진 커밋(또는 포장 중 편집)이 태그·손 명령에 실린다",
+    ],
+    [
+        // `status()` 실패를 신선으로 보면 1회전이 닫은 「낡은 값으로 깨끗함」이 돌아온다(Fable 변이 M7 생존).
+        "packages/vscode/src/git.ts",
+        "repo.status().then(() => true, () => false)",
+        "`git status` 실패(index.lock·safe.directory)를 새 값으로 믿고 낡은 상태로 「깨끗함」을 그린다",
     ],
     [
         // vscode 패키지는 시험이 못 닿는다 — `hidden` 판정을 빼면 미추적이 안 세어져 「깨끗함」이 거짓(2회전 변이 M2 생존).
         "packages/vscode/src/git.ts",
-        "uncommitted: hidden ? null : countUncommitted(dir, all),",
-        "폴더 설정 `git.untrackedChanges: hidden` 에서 미추적 파일이 안 세어져 「깨끗함」이 거짓이 되고 태그 단추가 뜬다",
+        "uncommitted: blind || !under ? null : countUncommitted(dir, all),",
+        "폴더 설정 `git.untrackedChanges: hidden`·`git.ignoreSubmodules` 나 대소문자가 다른 폴더 표기에서 변경이 안 세어져 「깨끗함」이 거짓이 되고 태그 단추가 뜬다",
     ],
     [
         // 거름이 창 판정보다 **먼저**여야 `.next/` 사건이 창을 밀지 않는다 — 순서를 되돌려도 초록이었다(2회전 변이 M7).
@@ -906,7 +947,7 @@ const WIRES = [
     ],
     [
         "packages/vscode/src/extension.ts",
-        "tagOffer(git.snapshot, String(tenant), result.revisionNo)",
+        "tagOffer(after!.snapshot, String(tenant), result.revisionNo)",
         "태그 권유가 core 판정을 안 지나면 더러운 트리에도 단추가 뜬다 — 그 태그는 라이브가 아닌 커밋을 가리킨다",
     ],
     [

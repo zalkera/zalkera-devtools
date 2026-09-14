@@ -404,6 +404,8 @@ const EXCLUDED_PREFIXES = [".zalkera/saved/"];
  * `.zalkera/source.json.zalkera-<hex>.tmp` 가 거름을 통과했다). 이름 규칙은 `safeWrite.ts` 와 한 벌이다.
  */
 const OWN_TMP = /\.zalkera-[0-9a-f]{12}\.tmp$/;
+/** 그 이름인가 — `keepNames` 가 잔재를 「그대로 두는 것」으로 남기지 않게 묻는 자리(Fable 기능). */
+export const isOwnTmp = (name: string): boolean => OWN_TMP.test(name.toLowerCase());
 
 /**
  * **경로로 빼는 판정 — 한 벌.**

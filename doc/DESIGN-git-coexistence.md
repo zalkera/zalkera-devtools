@@ -11,8 +11,8 @@
 
 ## 0. 결론 요약
 
-**정책 한 줄**: 확장은 **git 명령을 실행하지 않고, GitHub 에 접속하지 않고, 커밋·푸시·태그를
-스스로 만들지 않는다.** git 이 있는 폴더에서 확장이 하는 일은 셋뿐이다 — ⑴ 디스크가 바뀐 것을
+**정책 한 줄**: 확장은 **GitHub 에 접속하지 않고, 커밋·푸시를 만들지 않고, 사람이 누르지 않은 git 명령을
+돌리지 않는다**(`vscode.git` 을 통해 상태를 읽고, 누른 뒤에만 태그 하나를 만든다). git 이 있는 폴더에서 확장이 하는 일은 셋뿐이다 — ⑴ 디스크가 바뀐 것을
 **알아차리고**(재계산) ⑵ 되돌릴 수 없는 문 앞에서 git 상태를 **한 줄 읽어 주고** ⑶ 발행이 끝난
 뒤 「이 커밋이 그 판」이라는 표식을 **사람이 원할 때만** 남긴다.
 
@@ -37,7 +37,7 @@
 
 ① **판 재계산 트리거는 저장뿐이다.** `scheduleFolderVersion()` 을 부르는 자리는
 `onDidSaveTextDocument` 하나이고, 파일 감시기는 없다.
-재현: `grep -n "scheduleFolderVersion()" packages/vscode/src/extension.ts` → 호출 1건(저장 핸들러) + 정의 1건 ·
+재현(종전 `7b5e7b1` 기준): `git show 7b5e7b1:packages/vscode/src/extension.ts | grep -c "scheduleFolderVersion()"` → 2(호출 1 + 정의 1) ·
 `grep -c createFileSystemWatcher packages/vscode/src/extension.ts` → 0.
 그래서 `git pull`·`git checkout`·`git stash`·에이전트의 직접 쓰기 뒤에는 **다음 저장이나 명령까지**
 사이드바 「버전」이 옛 결론을 그린다. 코드도 이 손을 안다 — 보호 경로 경고는 그래서 「열 때」도 본다
@@ -47,9 +47,14 @@
 재료는 판 번호·폴더·남기는 이름·잔재다. 커밋하지 않은 변경이 있어도 아무 말이 없다.
 재현: `grep -n "serverReplaceConfirm\|publishConfirm" packages/core/src/tenantScope.ts`.
 
-③ **`.git` 은 이미 지킨다.** 포장기가 `.git` 을 뺀다(`zip.ts` 의 배제 목록). 「zip 으로 교체」·
-「서버 판으로 교체」는 같은 술어로 남길 이름을 고르므로 `.git` 이 자리에 남는다(`keepNames`).
-재현: `grep -n '"\.git"' packages/core/src/zip.ts` · `grep -n "isExcludedEntry" packages/core/src/replaceDir.ts`.
+③ **`.git` 은 포장·교체에서는 지켰지만 받기에서는 안 걸렀다.** 포장기가 `.git` 을 뺀다(`zip.ts` 의 배제
+목록). 「zip 으로 교체」·「서버 판으로 교체」는 같은 술어로 남길 이름을 고르므로 `.git` 이 자리에 남는다
+(`keepNames`). ⚠ 그러나 확장의 **tar 받기 레인**(`fetchSource.ts` 의 `extractTarGz` 셋)은 zip 레인·CLI 와
+달리 배제 술어를 안 지나, 서버가 보낸 `.git/config`·`.git/hooks/*`·`.vscode/**`·`.env*` 를 그대로 놓았다
+(Fable 보안 실측 — 탈취된 서버가 `core.fsmonitor` 로 폴더를 여는 순간 명령을 실행시킬 수 있는 자리).
+이 트랜치에서 `decide: dropExcluded` 로 세 레인의 술어를 한 벌로 맞췄다.
+재현: `grep -n '"\.git"' packages/core/src/zip.ts` · `grep -n "isExcludedEntry" packages/core/src/replaceDir.ts` ·
+`grep -n "decide: dropExcluded" packages/core/src/fetchSource.ts` → 3.
 
 ④ **`.env.local` 은 미리보기를 켤 때 `.gitignore` 에 보장한다** — `.git/` 이 있을 때만, 없으면
 만들지 않는다(`ensureEnvIgnored`). 판정 축이 「`.gitignore` 가 있는가」에서 「`.git` 이 있는가」로
@@ -140,7 +145,8 @@ T1' 도 `.git/info/exclude` 에 한 줄을 쓰지만 그것은 커밋되지 않�
 **우리 쓰기의 창은 침묵으로 닫는다.** `whileExtracting` 이 도는 동안은 감시기를 닫고, 끝난 뒤에는
 **소스 경로 사건이 2초 잠잠해질 때까지** 창을 민다(상한 30초). 고정 2초는 열렸다 — VS Code 는 감시기
 사건을 200ms 마다 500개씩만 흘려보내(초당 2,500개 · `parcelWatcher.ts`) 16k 파일을 갈아 끼우면
-`finally` 뒤로 3~5초 동안 우리 사건이 밀려오고, 그 뒤 심은 값이 버려져 ×2 훑기가 돌아온다 — 쓰기
+`finally` 뒤로 3~5초(파일당 사건 1 · tmp 사건까지 안 접히면 최대 12초 — VS Code 버퍼 30k 가 상한) 동안 우리
+사건이 밀려오고, 그 뒤 심은 값이 버려져 ×2 훑기가 돌아온다 — 쓰기
 속도·VS Code 상수·해시 시간은 1회전 성능 **실측**이고, 「창이 열린다」는 그 위의 **모델**이다(실물
 VS Code 미확인 · 2회전이 같은 상수로 시뮬레이션해 고정 2초는 16k 에서 8,000 사건 예약, 침묵 창은 0).
 실측 표(1회전 성능): 사건당 거름 비용 1.7µs · Next 16 Turbopack 콜드 첫 페이지 4,101사건/s 전부
@@ -152,8 +158,8 @@ git 확장이 이미 하는 감시에 얹히므로 비용이 0에 가깝다. 다
 감시기 하나로 두 손을 다 잡는 쪽이고, 감시기 비용이 실측으로 문제면 그때 좁힌다.
 
 **검증**: 시험은 순수 함수(거름 술어)에 건다. 실물은 `git checkout` 뒤 1.5초 안에 사이드바가
-「확인 중」→새 결론으로 가는지 눌러서 본다. 미리보기 켠 채 60초 두고 재계산이 **한 번은** 도는지
-본다(기아 반증).
+「확인 중」→새 결론으로 가는지 눌러서 본다. 기아 반증은 「유휴 60초에 재계산 0」이 아니다(그것은 `.next/`
+를 거르면 **정상**이다) — 미리보기가 도는 채로 파일 하나를 저장하고 1.5초 안에 재계산이 도는지가 반증이다.
 
 ### T1' — `.zalkera/source.json` 을 `.git/info/exclude` 에
 
@@ -193,7 +199,7 @@ git: main @ 1a2b3c4 · 깨끗함
 - git 확장이 없거나 꺼져 있거나 그 폴더가 레포가 아니면 **줄을 안 넣는다**. 「git 없음」이라 적지
   않는다 — 그건 판정이고, 판정하려면 `.git` 을 우리가 봐야 한다.
 - 막지 않는다. 「zip 으로 내보내기 먼저」 단추가 이미 있으므로 단추를 늘리지 않는다.
-- 발행 로그(출력 채널)에도 같은 줄을 남긴다 — `발행 → 버전 5 · git main @ 1a2b3c4 (미커밋 3)`.
+- 발행 로그(출력 채널)에도 같은 줄을 남긴다 — `버전 5 ← git: main @ 1a2b3c4 · 커밋하지 않은 변경 3개`(포장 뒤 값).
   나중에 「어느 커밋이 5번인가」를 묻는 자리가 출력 채널이다.
 
 **검증**: 세 갈래(없음·깨끗함·더러움) 문면 시험 + `untrackedChanges` 설정 두 값에서 합계가 같은지.
@@ -289,7 +295,7 @@ git 에 「`.gitignore` 수정됨」이 영구히 뜬다. `.git/info/exclude` �
 | 트랜치 | 자리 | 그물 |
 |---|---|---|
 | T1 | `extension.ts` `watchWorkspaceWrites` → 기존 `scheduleFolderVersion()` · 거름 `affectsFolderVersion`(core `git.ts`) · 우리 쓰기 문 `ownWriting`/`ownWritesQuietUntil`(`whileExtracting`) | `git.test.ts` 거름 양성·음성 짝 · `check-wiring` 앵커 3 |
-| T1' | core `gitExclude.ts` `excludeFromGit` — `localMark.ts` `writeMarkText` 와 `pull.ts` `ignoreLedger` 가 같은 문 | `git.test.ts` 4건(한 줄·보존·git 없음·gitdir 파일) · `pull.e2e.test.ts` 종전 2건 |
+| T1' | core `gitExclude.ts` `excludeFromGit` — `localMark.ts` `writeMarkText`·`pull.ts` `ignoreLedger`·확장 `prepareGitGate`(세 문) 가 같은 문 | `git.test.ts` exclude 11건(한 줄·보존·git 없음·gitdir 파일·`.git` 링크·잎 링크·권한·FIFO·모드·하드링크·결과) · `localMark.test.ts` 배선 2건 · `pull.e2e.test.ts` 종전 2건 |
 | T2 | `vscode/src/git.ts` `readGit`(`vscode.git` API 읽기) → `say.serverReplaceConfirm`·`say.publishConfirm` 일곱째/다섯째 인자 · zip 교체 모달 인라인 | `tenantScope.test.ts` 양성·음성·개행 위조 · `check-wiring` 앵커 2 · `check-notice` 소독 |
 | T3 | `tagOffer`(core) → `announcePublished(…, tag)` 「git 태그 만들기」 단추 → `createGitTag` | `git.test.ts` 권유 조건 5 · `check-wiring` 앵커 1 |
 
@@ -322,10 +328,22 @@ git 에 「`.gitignore` 수정됨」이 영구히 뜬다. `.git/info/exclude` �
 | 보안 | **이수** | 🟠 넷 전부 실측으로 닫힘(EACCES·FIFO·링크·하드링크 · `ref` 는 1.107 경계 확인). 🟡 4: 손 명령 소독 상한 80→100 · 발행 때 `.gitignore` 실패를 로그로 + 앵커 · FIFO·권한·모드 시험(그물 없던 자리) · 문장(「쓰는 첫 자리」·「git 명령 실행」·「`.git` 이 있으면 보장」·git 이 무시하는 파일도 올라감) — 전부 이행 |
 | 성능 | **이수** | 침묵 창 모델 재계산(16k: 고정 2초 8,000 예약 → 침묵 창 0 · 상한 30초는 남의 쓰기에만) · 새 비용 사건당 +0.28µs·`OWN_TMP` 0.02µs·번들 +0.7% · `within` 타이머 ≤2개(정리 넣음). 🟡 2: 「실측」→「모델」 문장 · `Promise.all` 주석 방향 — 이행 |
 
+### Fable 3축 (`791b346` · 오너 지시 · 각자 detached 워크트리)
+
+| 축 | 판정 | 잡은 것(요지) | 이행 |
+|---|---|---|---|
+| 기능 | 조건부 이수 | 🟠 태그·로그 재료가 「동의 앞」 스냅샷(모달·포장 사이의 커밋이 태그를 거짓으로) · 🟠 `.env.local`·표식 보호가 발행 문에만(교체 두 문 없음 · 첫 사용 흐름에서 표식이 「변경 1개」로 커밋) · 🟠 창 상한·`status` 실패 처분에 그물 없음(변이 M6·M7 생존) · 🟡 재확인 문면 셋째 상태 · 전역 `ownWriting` 이 옆 폴더 받기에도 · `keepNames` 가 tmp 잔재 보존 · `.env.*` 시험 · FIFO 시험 행 | 포장 뒤 `after` 스냅샷 — 앞뒤 같은 커밋·둘 다 깨끗할 때만 태그·로그 · `prepareGitGate`(세 문 · `readGit` 앞 · 연접 앵커 3) · 앵커 2 · 셋째 문면 · `whileExtracting(target)` 열린 폴더 안일 때만 문 · `isOwnTmp` · 시험 2 · FIFO 에 쓰는 쪽을 세움 |
+| 보안 | 조건부 이수 | 🟠 `git.ignoreSubmodules`(폴더 설정) 도 거짓 깨끗함 · 🟠 macOS 대소문자 불일치 폴더에서 `countUncommitted` 가 전부 걸러 0 · 🟠 tar 받기 레인이 서버의 `.git/**`·`.vscode/**` 를 실현(zip·CLI 는 걸러냄 · 실측) · 🟡 `tagOffer` 가 `commit` 모양을 안 봄(`-f` 가 ref 자리면 강제) · 하드링크 exclude 그물 · 「git 명령을 실행하지 않고」 절대문 · `ensureEnvIgnored` 「보장」 과장 · `plainNotice` 가 Cf 일부(ALM·SHY·WJ·BOM·태그 문자) 남김 · exclude 실패 침묵 · `files.watcherExclude` | `blind`(hidden·ignoreSubmodules) → `null` · `dir` 이 `repo.rootUri` 의 글자 그대로 하위가 아니면 `null` · 설정 스코프 `repo.rootUri` · `fetchSource` 세 레인에 `decide: dropExcluded` · `COMMIT_SHAPE` · 하드링크·결과 시험 · `\p{Cf}` 전부 · `ExcludeOutcome` + 관문 로그 · 문서 정정 + RETIRED |
+| 성능 | **이수** | 🟡 6: 해시 빈도 증가는 팩 규모 무해·1만 파일급은 캐시 트리거 없음 · T2 기다림 무표시(최악 8초) · 안 묶인 폴더 헛그리기 · 다중 루트 감시기 잔존 · 발행 때 `.gitignore` 쓰기로 1~2회 해시 · 「실측」 문구 | 500ms 넘는 해시 세션당 1회 로그 · 안 묶인 폴더 early return · 문구. 🟡-2(진행 표시)·🟡-4(`onDidChangeWorkspaceFolders`)는 다음 트랜치 |
+
+**안 한 권고(기록)**: exclude 의 `chmod` 를 rename 앞(tmp)으로 — 같은 사용자 경쟁이라 값이 작다 · `writeViaRename` 에
+「정확한 모드」 선택지는 `.env.local` 모드를 넓힐 위험이 있어 보류 · `ensureEnvIgnored` 실패를 확인 창 한 줄로 —
+로그로 둔다.
+
 **남은 실물 확인(이 박스에 VS Code 가 없다)**: 침묵 창이 실제 감시기 드레인을 덮는가 · `git.untrackedChanges`
 폴더 설정이 실제로 흘러드는가 · 활성화 시 감시기가 중복 기동되지 않는가. 오너 박스의 데스크톱 VS Code 에서
-「서버 판으로 교체」 뒤 사이드바가 「확인 중」을 거쳐 한 번만 세는지, 미리보기 켠 채 60초 두고 재계산이
-도는지를 눌러 보는 것이 그 확인이다.
+「서버 판으로 교체」 뒤 사이드바가 「확인 중」을 거쳐 한 번만 세는지, 미리보기가 도는 채로 파일 하나를
+저장해 1.5초 안에 재계산이 도는지(그리고 유휴 60초에는 안 도는지)를 눌러 보는 것이 그 확인이다.
 
 ## 11. 관련
 

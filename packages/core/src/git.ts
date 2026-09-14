@@ -30,10 +30,11 @@ export {excludeFromGit} from "./gitExclude.ts";
  * 작업 트리·인덱스·미추적을 **합쳐 경로로 중복을 뺀** 수다 — `git.untrackedChanges` 설정에 따라
  * 미추적이 두 배열 중 어디로 오는지가 갈리므로, 합쳐야 어느 설정에서도 같은 수가 된다.
  *
- * ⚠ **`null` 은 「셀 수 없다」다.** 그 설정이 `hidden` 이면 git 확장이 `git status -uno` 를 돌려 미추적이
- *   **어느 배열에도 안 온다** — 그때 0 을 「깨끗함」이라 말하면 거짓이다(보안 심의 실측). 그 설정은
- *   폴더의 `.vscode/settings.json` 이 정할 수 있는 값이라 남이 만든 폴더가 우리 화면을 「깨끗함」으로
- *   만들 수 있다. 모르면 모른다고 적고, 태그는 권하지 않는다.
+ * ⚠ **`null` 은 「셀 수 없다」다.** `git.untrackedChanges: hidden`(`-uno`)·`git.ignoreSubmodules`
+ *   (`--ignore-submodules`)이면 git 확장이 변경 일부를 **어느 배열에도 안 실어** 준다 — 그때 0 을 「깨끗함」이라
+ *   말하면 거짓이다(보안 심의 실측 · Fable). 둘 다 폴더의 `.vscode/settings.json` 이 정할 수 있는 값이라 남이 만든
+ *   폴더가 우리 화면을 「깨끗함」으로 만들 수 있다. 폴더를 레포 뿌리와 다른 대소문자로 열어 변경 경로가 폴더의
+ *   하위로 안 잡히는 경우도 같다. 모르면 모른다고 적고, 태그는 권하지 않는다.
  */
 export interface GitSnapshot {
     branch: string | null;
@@ -53,7 +54,7 @@ export function gitStatusLine(git: GitSnapshot | null): string {
               : "아직 커밋 없음";
     const changes =
         git.uncommitted === null
-            ? "커밋하지 않은 변경을 셀 수 없음(미추적 파일을 숨기는 설정)"
+            ? "커밋하지 않은 변경을 셀 수 없음(git 설정이 일부를 숨김)"
             : git.uncommitted > 0
               ? `커밋하지 않은 변경 ${count(git.uncommitted)}개`
               : "깨끗함";
@@ -79,6 +80,9 @@ export interface TagOffer {
     ref: string;
 }
 
+/** git 이 내는 객체 이름의 모양 — SHA-1 40 · SHA-256 64. `ref` 자리에 이것 말고는 안 넘긴다. */
+const COMMIT_SHAPE = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
+
 /**
  * 발행이 끝난 뒤 「git 태그 만들기」를 **권해도 되는가.** 되면 이름·메시지·찍을 커밋, 아니면 `null`.
  *
@@ -90,6 +94,9 @@ export interface TagOffer {
  */
 export function tagOffer(git: GitSnapshot | null, tenant: string, revisionNo: number): TagOffer | null {
     if (git === null || git.commit === null || git.uncommitted === null || git.uncommitted > 0) return null;
+    // `ref` 는 `git tag -a … <ref>` 의 마지막 인자다. 배열 인자라 셸 주입은 없지만 `-f` 같은 값이 오면 **강제
+    // 덮어쓰기**가 된다 — 오늘 `HEAD.commit` 은 `rev-parse` 출력이라 도달 불가지만, 모양이 아니면 안 권한다(Fable 보안).
+    if (!COMMIT_SHAPE.test(git.commit)) return null;
     if (!Number.isInteger(revisionNo) || revisionNo < 1) return null;
     // 이름에 사이트를 넣는다 — 한 레포로 여러 사이트를 돌리는 대행사에서 `zalkera/v5` 는 둘째 사이트부터
     // 「이미 있습니다」로 죽는다(기능 심의). 코드 모양은 ref 이름 규칙 안이라 그대로 쓴다 — 모양이 아니면 안 권한다.

@@ -27,14 +27,17 @@ import {ensureOwnDir, writeOwnFile} from "./safeWrite.ts";
  *   파일을 만들어 두면 그 파일이 다음 판에 실려 나간다. `.git` 이 **파일**인 경우(워크트리·
  *   서브모듈)도 건드리지 않는다 — 그 안쪽은 다른 자리에 있고 `mkdir` 이 실패한다.
  *
- * 던지지 않는다 — 이것은 부가이고, 못 해도 부른 쪽의 일(받기·표식 쓰기)은 이미 끝났다.
+ * 던지지 않는다 — 이것은 부가이고, 못 해도 부른 쪽의 일(받기·표식 쓰기)은 이미 끝났다. 대신 **무엇을 했는지
+ * 돌려준다** — `failed` 는 「git 은 있는데 못 감췄다」이고, 그때 표식은 커밋될 수 있으니 부른 쪽이 말한다(Fable 보안).
  */
-export async function excludeFromGit(root: string, path: string): Promise<void> {
+export type ExcludeOutcome = "no-git" | "already" | "written" | "failed";
+
+export async function excludeFromGit(root: string, path: string): Promise<ExcludeOutcome> {
     try {
         // `lstat` — `.git` 이 **링크**면 그 너머는 남의 레포다. 거기 줄을 적는 것은 우리 폴더 밖 쓰기라
         // 하지 않는다(이 레포가 `.vscode`·`.zalkera` 에 대는 자와 같은 자). 파일(워크트리 gitdir)도 아니다.
         const info = await lstat(join(root, ".git")).catch(() => null);
-        if (!info || !info.isDirectory()) return;
+        if (!info || !info.isDirectory()) return "no-git";
         // 조각마다 링크를 거절하며 만든다(`ensureOwnDir`) — `.git/info` 가 링크면 여기서 던지고 아래 catch 로 간다.
         const dir = await ensureOwnDir(root, ".git", "info");
         const file = join(dir, "exclude");
@@ -46,16 +49,18 @@ export async function excludeFromGit(root: string, path: string): Promise<void> 
             if ((error as NodeJS.ErrnoException | undefined)?.code === "ENOENT") return null;
             throw error;
         });
-        if (leaf !== null && !leaf.isFile()) return;
+        if (leaf !== null && !leaf.isFile()) return "failed";
         const current = leaf === null ? "" : await readFile(file, "utf8");
-        if (current.split(/\r?\n/).some((line) => line.trim() === path)) return;
+        if (current.split(/\r?\n/).some((line) => line.trim() === path)) return "already";
         const prefix = current === "" || current.endsWith("\n") ? "" : "\n";
         // 잎이 링크면 거절하고, 아니면 `rename` 으로 갈아 끼운다 — 맨 `writeFile` 은 링크를 따라간다.
         const mode = leaf === null ? 0o644 : leaf.mode & 0o777;
         await writeOwnFile(file, `${current}${prefix}${path}\n`, mode);
         // `writeFile(tmp, {mode})` 는 umask 를 지나 0664 가 0644 로 좁아진다(2회전 보안 실측) — 있던 모드로 되돌린다.
         if (leaf !== null) await chmod(file, mode);
+        return "written";
     } catch {
         // 부가다 — 위 KDoc. 링크 거절도 여기로 온다: 감추지 못한 표식은 커밋될 수 있지만 남의 파일을 쓰지는 않는다.
+        return "failed";
     }
 }

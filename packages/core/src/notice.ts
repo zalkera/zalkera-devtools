@@ -125,8 +125,10 @@ export function plainNotice(text: unknown, limit = 300): string {
   //    이 함수가 스스로 「제어문자를 없앤다」고 적어 둔 계약과 어긋났고, **남이 이름 짓는 로컬
   //    경로**가 표시 표면에 오르면서(작업 폴더 묶음·발행 확인 모달) 그 구멍이 실질화됐다:
   //    폴더 이름 하나로 확인 문면의 지시대상을 **시각적으로 뒤집을 수** 있다(보안 심의).
+  // ⚠ **부류로 지운다.** 종전 열거는 U+061C(ALM)·U+00AD·U+2060~2064·U+FEFF·태그 문자(U+E00xx)를 남겼다 —
+  //    `git check-ref-format` 이 전부 허용하는 글자다(Fable 보안 실측). 「제어문자를 없앤다」는 계약은 Cf 부류 전체다.
   const stripped = head.replace(
-    /[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2066-\u2069\u2028\u2029]+/g,
+    /[\u0000-\u001f\u007f-\u009f\u2028\u2029]|\p{Cf}/gu,
     " ",
   );
   const tidy = defang(stripped).replace(/\s+/g, " ").trim();

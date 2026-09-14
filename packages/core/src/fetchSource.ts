@@ -16,11 +16,22 @@ import { downloadBounded } from "./download.ts";
 import { extractTarGz } from "./untar.ts";
 import { keepNames, replaceContents } from "./replaceDir.ts";
 import { SOURCE_MARK_PATH, parseSourceMark, writeSourceMarkTo } from "./localMark.ts";
+
 import { decideImportBinding, type WorkspaceLink } from "./siteBinding.ts";
-import { packProject } from "./zip.ts";
+import { isExcludedEntry, packProject } from "./zip.ts";
 
 // 해제기 본체는 `untar.ts` 로 옮겼다(페이로드 스트리밍 경로와 **같은 파서**를 쓰기 위해 · §13.10.6).
 // 여기서 재수출한다 — 이 이름을 쓰던 호출부·테스트의 계약을 그대로 둔다.
+
+/**
+ * 서버 tar 의 항목 중 **디스크에 실현하지 않을 것** — zip 레인(`decideImportPlan`)·CLI(`pull` 의 `dropped`)과
+ * **같은 술어**다. 종전에는 이 레인만 걸러내지 않아 서버가 보낸 `.git/config`(`core.fsmonitor`)·`.git/hooks/*`·
+ * `.vscode/settings.json`·`.env*` 가 그대로 놓였다(Fable 보안 실측 · 탈취된 서버가 폴더를 여는 순간 명령을
+ * 실행시킬 수 있는 자리). 정직한 서버의 판에는 어차피 없는 것들이라 정상 흐름은 안 바뀐다.
+ * ⚠ `decide` 가 있으면 해제기가 **빈 폴더 항목을 미리 만들지 않는다**(`untar.ts`) — 파일의 부모는 쓸 때 만든다.
+ */
+const dropExcluded = (path: string): "create" | "skip" => (isExcludedEntry(path) ? "skip" : "create");
+
 export { extractTarGz };
 
 /**
@@ -178,6 +189,7 @@ export async function fetchSiteSource(options: FetchSourceOptions): Promise<Fetc
         fileCount = await extractTarGz(buffer, options.targetDir, {
             rejectVendored: true,
             maxBytes: MAX_SOURCE_EXTRACT_BYTES,
+            decide: dropExcluded,
         });
     } catch (cause) {
         await removeAdded(options.targetDir, before);
@@ -271,6 +283,7 @@ export async function refreshSiteSource(options: RefreshSourceOptions): Promise<
             fileCount = await extractTarGz(buffer, options.targetDir, {
                 rejectVendored: true,
                 maxBytes: MAX_SOURCE_EXTRACT_BYTES,
+                decide: dropExcluded,
             });
         },
     );
@@ -362,6 +375,7 @@ export async function downloadSourceZip(options: {
         const fileCount = await extractTarGz(got.buffer, work, {
             rejectVendored: true,
             maxBytes: MAX_SOURCE_EXTRACT_BYTES,
+            decide: dropExcluded,
         });
         report(`${fileCount}개 파일을 확인했습니다 — zip 으로 포장하는 중…`);
         // 아카이브가 한 겹 감싸고 있을 수 있다 — 포장 뿌리를 잘못 잡으면 `package.json` 이

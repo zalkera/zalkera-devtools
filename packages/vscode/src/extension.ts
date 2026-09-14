@@ -117,6 +117,7 @@ import {
   type LedgerSnapshot,
   affectsFolderVersion,
   ensureEnvIgnored,
+  excludeFromGit,
   gitStatusLine,
   tagOffer,
 } from "@zalkera/devtools-core";
@@ -124,7 +125,7 @@ import { lstatSync, readFileSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { existsSync } from "node:fs";
-import { basename, dirname, join, relative } from "node:path";
+import { basename, dirname, join, relative, sep } from "node:path";
 import { readGit, type GitRepository } from "./git.ts";
 import { SecretTokenStore } from "./secretStore.ts";
 import {
@@ -185,20 +186,27 @@ const receiveGuard = createReentrancyGuard();
  * 전부이기도 하다(`reentrancy.ts`). 그 구간은 진행 알림이 내내 떠 있고 상한도 있어(전송 15분),
  * 그때만 「푸는 중」이 참이다.
  */
-async function whileExtracting<T>(run: () => Thenable<T>): Promise<T | typeof BUSY> {
+async function whileExtracting<T>(target: string, run: () => Thenable<T>): Promise<T | typeof BUSY> {
   // `withProgress` 가 주는 것은 `Thenable` 이라 그대로는 core 의 계약(`Promise`)에 안 맞는다.
   // **감싸는 자리는 여기 하나다** — 부르는 셋이 각자 감싸면 한쪽만 고쳐진다.
+  //
+  // `target` 은 푸는 폴더다. **열린 폴더 안을 쓸 때만** 감시기 문을 세운다 — 「소스 다운로드」·「zip 으로
+  // 시작」이 옆 폴더로 갈 때 문을 세우면 열린 폴더의 남의 편집이 이유 없이 묻힌다(Fable 기능).
+  const here = workspaceDir();
+  const writesWorkspace = here !== undefined && (target === here || target.startsWith(here + sep));
   const outcome = await receiveGuard.run(async () => {
     // 우리가 폴더를 통째로 쓰는 동안은 감시기가 그 쓰기를 「남이 바꿨다」로 읽지 않게 한다(아래
     // `ownWritesQuietUntil`). 푸는 쪽이 끝난 뒤 값을 심으므로(`seedFolderVersion`) 여기서 예약하면
     // 그 심기가 헛되고 훑기가 한 번 더 돈다 — 3회전 성능 심의가 잡았던 그 ×2 다.
-    ownWriting = true;
+    if (writesWorkspace) ownWriting = true;
     try {
       return await run();
     } finally {
-      ownWriting = false;
-      ownWritesQuietUntil = Date.now() + OWN_WRITES_GRACE_MS;
-      ownWritesQuietCap = Date.now() + OWN_WRITES_MAX_MS;
+      if (writesWorkspace) {
+        ownWriting = false;
+        ownWritesQuietUntil = Date.now() + OWN_WRITES_GRACE_MS;
+        ownWritesQuietCap = Date.now() + OWN_WRITES_MAX_MS;
+      }
     }
   });
   if (outcome === BUSY) {
@@ -503,7 +511,9 @@ async function recomputeFolderVersion(dir: string | null, tenant: string | null)
     let changed = false;
     do {
       folderVersionPending = false;
+      const startedAt = Date.now();
       const digest = await folderVersionDigest(dir, tenant).catch(() => null);
+      noteSlowHash(Date.now() - startedAt);
       // 기준점도 **같은 순간에** 읽는다 — 따로 읽으면 「고쳤다」 판정이 두 시점을 섞어 재게 된다(memo191 ⑶).
       const baseline = baselineOf(readSourceMarkAt(dir), extensionVersion, tenant);
       changed =
@@ -519,6 +529,21 @@ async function recomputeFolderVersion(dir: string | null, tenant: string | null)
   } finally {
     folderVersionRunning = false;
   }
+}
+
+/**
+ * 전량 해시가 오래 걸리면 **세션당 한 번** 출력 채널에 남긴다.
+ *
+ * 감시기(T1)가 재계산 빈도를 늘렸다 — 팩 규모(168파일 · 26ms)에서는 무해하고 1만 파일급(1.1초/16k)에서
+ * 캐시(size+mtime)가 필요해지는데, 어느 고객이 그 경계를 넘었는지 알 길이 없었다(Fable 성능 심의).
+ * 이 한 줄이 그 트랜치의 착수 근거다. 문턱 500ms 는 잣대(2.0초/16k)의 넉넉한 아래다.
+ */
+let slowHashNoted = false;
+const SLOW_HASH_MS = 500;
+function noteSlowHash(elapsedMs: number): void {
+  if (slowHashNoted || elapsedMs < SLOW_HASH_MS) return;
+  slowHashNoted = true;
+  log(`이 폴더의 판 지문을 세는 데 ${Math.round(elapsedMs)}ms 걸렸습니다 — 파일이 많은 폴더입니다(이 세션에 한 번만 적습니다).`);
 }
 
 /**
@@ -1224,7 +1249,7 @@ async function openSite(pinned?: CapturedTenant): Promise<void> {
 
   // ⚠ **가드는 여기서부터다.** 위의 로그인·판 고르기·받을 자리 묻기는 사람의 답을 기다리는
   //    구간이라, 덮으면 답 없는 물음 하나가 형제 명령을 영영 막는다(`whileExtracting`).
-  const result = await whileExtracting(() =>
+  const result = await whileExtracting(target, () =>
     vscode.window.withProgress<FetchSourceResult>(
       {
         location: vscode.ProgressLocation.Notification,
@@ -1935,7 +1960,7 @@ async function importZipCommand(pinned?: CapturedTenant): Promise<void> {
 
   // ⚠ **가드는 여기서부터다** — 형제 받기와 같은 규율이다. zip 고르기·풀 자리 묻기를 덮으면
   //    답 없는 물음 하나가 창이 죽을 때까지 나머지를 막는다(`whileExtracting`).
-  const result = await whileExtracting(() =>
+  const result = await whileExtracting(target, () =>
     vscode.window.withProgress(
       {location: vscode.ProgressLocation.Notification, title: "사이트 소스를 푸는 중"},
       () => importZipInto(zip, plan, target),
@@ -2121,6 +2146,7 @@ async function updateZipCommand(): Promise<void> {
   // ⚠ **무엇을 남기는지 계산해서 보여 준다.** 목록은 포장기가 zip 에서 빼는 것과 같은 술어로
   //    고른다(`keepNames`) — 손으로 열거하면 두 목록이 갈리고, 갈린 쪽이 영구 삭제된다.
   // 형제 「서버 판으로 교체」와 같은 이유·같은 자리(T2). 브랜치 이름도 남이 짓는 것이라 소독을 지난다.
+  await prepareGitGate(dir);
   const [keep, gitRead] = await Promise.all([keepNames(dir), readGit(dir)]);
   const git = gitRead?.snapshot ?? null;
   const ok = await vscode.window.showWarningMessage(
@@ -2149,7 +2175,7 @@ async function updateZipCommand(): Promise<void> {
   // 여기서 [BUSY] 로 물러나면 **미리보기는 이미 멈춘 뒤다.** 그 순서를 바꾸지 않는다 — 멈추는
   // 것은 위 주석이 적은 이유로 해제 «앞»이어야 하고, 되돌릴 수 없는 것은 폴더뿐인데 그쪽은
   // 아무것도 안 건드렸다. 다시 눌러 주시면 된다.
-  const result = await whileExtracting(() =>
+  const result = await whileExtracting(dir, () =>
     vscode.window.withProgress(
       {location: vscode.ProgressLocation.Notification, title: "사이트 소스를 갈아 끼우는 중"},
       async () => {
@@ -2277,6 +2303,8 @@ async function updateFromServerCommand(): Promise<void> {
   // git 이 지켜 주는 것은 커밋한 것뿐이다 — 커밋하지 않은 변경이 있으면 이 문이 지운다. 그 사실을
   // 동의 앞에 한 줄로 둔다(T2). 레포가 아니면 `null` 이고 줄이 안 붙는다. 막지 않는다.
   // 폴더 읽기 둘을 git 읽기와 겹친다 — 긴 축은 `git status` 쪽이라 얻는 것은 작다(2회전 성능 실측 0.1ms).
+  // 보호 둘은 읽기 **앞**이다(`prepareGitGate` KDoc).
+  await prepareGitGate(dir);
   const [keep, leftovers, gitRead] = await Promise.all([keepNames(dir), siblingStashes(dir), readGit(dir)]);
   const from = declaredBaseRevisionNo(readSourceMarkAt(dir), String(tenant));
   const git = gitRead?.snapshot ?? null;
@@ -2299,7 +2327,7 @@ async function updateFromServerCommand(): Promise<void> {
   //    한복판에서 난다 — 형제 `updateZipCommand` 와 같은 순서다.
   await stopPreview();
 
-  const result = await whileExtracting(() =>
+  const result = await whileExtracting(dir, () =>
     vscode.window.withProgress(
       {location: vscode.ProgressLocation.Notification, title: "서버 판으로 갈아 끼우는 중"},
       () =>
@@ -2996,20 +3024,12 @@ async function publishCommand(): Promise<void> {
   // 「사이트에 연결」로 이은 폴더와 무표식 폴더는 선언할 값이 없고, **없는 값을 지어내면 근거 없이
   // 남을 막는다.**
   const baseRevisionNo = declaredBaseRevisionNo(readSourceMarkAt(dir), tenant);
-  // 🔴 **`.env.local` 보호는 미리보기를 켤 때만 걸렸다.** 「미리보기 → git init → 발행」 순서면 열쇠가
-  //    `.gitignore` 밖에 있고, 아래 git 한 줄이 그것을 「커밋하지 않은 변경」으로 세며 매뉴얼은 「커밋하고
-  //    다시 누르라」고 한다 — 따를수록 열쇠가 커밋된다(보안 심의). 포장 **앞**에 보장한다 — 뒤에 하면
-  //    `.gitignore` 가 바뀌어 방금 심은 지문과 어긋난다. `.git` 이 없으면 무동작이다.
-  const ignored = await ensureEnvIgnored(dir).catch((error: unknown) => {
-    // 미리보기는 이 실패(링크 `.gitignore`·권한)에 멈추지만 발행은 열쇠를 만드는 자리가 아니라 진행한다.
-    // 다만 **말은 한다** — 이 실패는 곧 「`.env.local` 이 무보호일 수 있다」다(2회전 보안).
-    log(`.gitignore 에 .env.local 을 보장하지 못했습니다: ${error instanceof Error ? error.message : String(error)}`);
-    return "not-git" as const;
-  });
-  if (ignored === "added" || ignored === "created") log(".gitignore 에 .env.local 을 보장했습니다(자격증명 커밋 방지).");
   // 올라가는 것은 커밋이 아니라 **디스크의 파일**이다 — 커밋하지 않은 변경이 있으면 「이 커밋이
-  // 라이브」가 거짓이 된다. 그 사실을 동의 앞에 한 줄로 두고(T2), 같은 값으로 발행 뒤 태그를 권할지
-  // 정한다(T3 · `tagOffer`). 확인 **앞**에 읽는다 — 동의한 그 상태가 곧 올라가는 상태다.
+  // 라이브」가 거짓이 된다. 그 사실을 동의 앞에 한 줄로 둔다(T2). 보호 둘(`prepareGitGate`)이 포장 **앞**
+  // 이어야 `.gitignore` 변경이 지문에 들어가 심은 값과 어긋나지 않는다.
+  // ⚠ 이 값은 **동의 앞** 스냅샷이다. 모달은 사람만 막고 에이전트·터미널은 그 사이에도 쓴다 — 태그·로그의
+  //    재료는 포장 뒤에 한 번 더 읽어 둘이 같을 때만 쓴다(아래 `after` · Fable 기능).
+  await prepareGitGate(dir);
   const git = await readGit(dir);
   // ⚠ **무보호를 고지한다** — 문면은 core 가 만든다(변수를 모달에 이어 붙이면 소독 검사 밖으로 떨어진다).
   const ask = say.publishConfirm(tenant, dir, currentFolderBinding(), baseRevisionNo != null, git?.snapshot ?? null);
@@ -3073,8 +3093,22 @@ async function publishCommand(): Promise<void> {
   log(
     `버전 ${countJosa(result.revisionNo, "으로/로")} 올렸습니다 — 파일 ${count(result.fileCount)}개 · ${Math.round(result.byteSize / 1024)}KB · 유형 ${result.siteType} · 상태 ${result.status}`,
   );
-  // 「어느 커밋이 이 버전인가」를 나중에 묻는 자리가 출력 채널이다 — 레포일 때만 한 줄.
-  if (git !== null) log(`버전 ${result.revisionNo} ← ${gitStatusLine(git.snapshot)}`);
+  // 🔴 **포장 뒤에 한 번 더 읽는다.** 동의 앞 값(`git`)과 이 값이 **같은 커밋이고 둘 다 깨끗**할 때만 「이
+  //    커밋 = 이 버전」이 참이다 — 모달·포장 사이에 커밋이나 편집이 끼면 앞 값은 올라간 것과 다르다
+  //    (Fable 기능 실측 시나리오). 로그·태그 권유·손 명령은 전부 이 값에서 나온다. 빌드 대기 전이라 지연은 ms 다.
+  const after = git === null ? null : await readGit(dir);
+  const settled =
+    git !== null &&
+    after !== null &&
+    after.snapshot.commit !== null &&
+    after.snapshot.commit === git.snapshot.commit &&
+    after.snapshot.uncommitted === 0 &&
+    git.snapshot.uncommitted === 0;
+  // 「어느 커밋이 이 버전인가」를 나중에 묻는 자리가 출력 채널이다 — 레포일 때만 한 줄. 두 스냅샷이
+  // 어긋났으면 그 사실도 적는다(그때 이 버전은 어느 커밋도 아니다).
+  if (after !== null) {
+    log(`버전 ${result.revisionNo} ← ${gitStatusLine(after.snapshot)}${settled ? "" : " (동의 앞과 포장 뒤의 git 상태가 달라 이 버전은 어느 커밋과도 같지 않습니다)"}`);
+  }
   // ⚠ **취소가 늦었어도 여기서 되돌아가지 않는다.** 판은 만들어졌으므로 아래 부수효과(표식 갱신·
   //    폴더 기억·서버 고지)를 **그대로 해야 한다** — 건너뛰면 화면이 아니라 **디스크에 거짓**이
   //    남는다: 표식이 옛 판을 든 채라 다음 발행이 낡은 기반을 선언하고, **자기가 방금 만든 판**에
@@ -3147,9 +3181,10 @@ async function publishCommand(): Promise<void> {
       : await awaitBuild(api, result.revisionNo, tenant);
   if (!ready) return;
 
-  // T3 — 깨끗한 트리에서 올렸을 때만 태그를 권한다. 판정은 core(`tagOffer`), 쓰기는 사람이 누른 뒤다.
-  const offer = git === null ? null : tagOffer(git.snapshot, String(tenant), result.revisionNo);
-  await announcePublished(api, result.revisionNo, tenant, offer === null ? null : { ...offer, repo: git!.repo, dir });
+  // T3 — 동의 앞·포장 뒤 두 스냅샷이 같은 커밋이고 깨끗할 때만 태그를 권한다. 판정은 core(`tagOffer`),
+  // 쓰기는 사람이 누른 뒤다.
+  const offer = settled ? tagOffer(after!.snapshot, String(tenant), result.revisionNo) : null;
+  await announcePublished(api, result.revisionNo, tenant, offer === null ? null : { ...offer, repo: after!.repo, dir });
 }
 
 /**
@@ -3258,6 +3293,29 @@ async function pollReflection(
   log(`반영 확인 상한 도달 — 버전 ${revisionNo}(못 봤을 뿐, 반영 실패가 아니다)`);
 }
 
+/**
+ * git 한 줄(T2)을 읽기 **전에** 세우는 보호 둘 — 세 문(교체 둘·발행)이 같은 순서로 지난다.
+ *
+ * ⑴ `.env.local` 을 `.gitignore` 에 — 「미리보기 → `git init` → 발행/교체」 순서면 열쇠가 `.gitignore` 밖이고,
+ *    아래 git 한 줄이 그것을 「커밋하지 않은 변경」으로 세며 매뉴얼은 「커밋하고 다시 누르라」고 한다 —
+ *    따를수록 열쇠가 커밋된다(1회전 보안 · Fable 기능이 교체 두 문에도 같은 구멍을 짚었다).
+ * ⑵ 표식 `.zalkera/source.json` 을 `.git/info/exclude` 에 — 받기가 git 없는 폴더에 표식을 쓴 뒤 `git init` 한
+ *    첫 사용에서는 표식이 아직 감춰지지 않아 그것도 「변경 1개」로 세어지고, 커밋되면 exclude 는 효력이 없다.
+ *
+ * 둘 다 `.git` 이 없으면 무동작이다. 실패는 로그로 말하고 진행한다 — 이 문들은 열쇠를 만드는 자리가 아니다.
+ * 🔴 **`readGit` 앞이어야 한다.** 뒤면 줄이 하나 덜 세어져 「깨끗함」+단추 → 누르면 거절(변이 실측).
+ */
+async function prepareGitGate(dir: string): Promise<void> {
+  const ignored = await ensureEnvIgnored(dir).catch((error: unknown) => {
+    log(`.gitignore 에 .env.local 을 보장하지 못했습니다: ${error instanceof Error ? error.message : String(error)}`);
+    return "not-git" as const;
+  });
+  if (ignored === "added" || ignored === "created") log(".gitignore 에 .env.local 을 보장했습니다(자격증명 커밋 방지).");
+  const hidden = await excludeFromGit(dir, SOURCE_MARK_PATH);
+  // 「git 은 있는데 못 감췼다」는 말한다 — 그때 표식(`.zalkera/source.json`)이 커밋될 수 있다(Fable 보안).
+  if (hidden === "failed") log(".zalkera/source.json 을 .git/info/exclude 에 감추지 못했습니다 — 커밋하지 마십시오.");
+}
+
 /** 발행 뒤 권할 태그 — 이름·메시지·찍을 커밋(core 가 정함)과 그것을 만들 레포·폴더. */
 interface TagOfferOn {
   name: string;
@@ -3350,7 +3408,9 @@ async function createGitTag(tag: TagOfferOn): Promise<void> {
     const why =
       now === null
         ? "git 상태를 다시 읽지 못해"
-        : "발행한 뒤 커밋이 옮겨졌거나 고친 것이 있어";
+        : now.uncommitted === null
+          ? "미추적 파일을 숨기는 git 설정이 켜져 변경을 셀 수 없어"
+          : "발행한 뒤 커밋이 옮겨졌거나 고친 것이 있어";
     log(`git 태그를 만들지 않았습니다 — ${why}. 손으로 찍으시려면: ${manual}`);
     void vscode.window.showWarningMessage(
       // 상한은 최대 길이 위다 — 이름 `zalkera/`+63+`/v`+10 = 83 · 메시지 81 · sha 40. 80 이면 63자 코드에서 잘린
@@ -4489,7 +4549,8 @@ let ownWritesQuietCap = 0;
 /**
  * **침묵이 이만큼 이어져야 창이 닫힌다** — 시각 고정이 아니다. VS Code 는 감시기 사건을 200ms 마다
  * 500개씩만 흘려보내므로(초당 2,500개 상한 · 성능 심의가 `parcelWatcher.ts` 로 확인) 수천 파일을
- * 갈아 끼운 뒤에는 `finally` 뒤로도 몇 초 동안 우리 사건이 밀려온다. 고정 2초는 16k 파일에서 열리고
+ * 갈아 끼운 뒤에는 `finally` 뒤로도 몇 초(파일당 사건 1 이면 16k 에서 5초 · tmp 사건까지 안 접히면 최대 12초 —
+ * 버퍼 30k 가 상한) 동안 우리 사건이 밀려온다. 고정 2초는 16k 파일에서 열리고
  * 그 자리마다 3회전 성능 심의의 ×2 훑기가 돌아온다 — 쓰기 속도(12.9k/s)·VS Code 상수·해시 1.2초는
  * 1회전 성능 실측이고, 「창이 열린다」는 그 위의 모델이다(실물 VS Code 미확인). 밀려오는 사건은 200ms
  * 간격의 연속 덩어리라 그 안에 2초 공백이 안 생기고, 덩어리가 끝나면 2초 뒤 창이 닫힌다.
@@ -4527,6 +4588,9 @@ function watchWorkspaceWrites(dir: string): vscode.Disposable {
       ownWritesQuietUntil = Math.min(now + OWN_WRITES_GRACE_MS, ownWritesQuietCap);
       return;
     }
+    // 사이트에 안 묶인 폴더(잘커라와 무관한 창)는 셀 것이 없다 — 예약하면 사이드바만 두 번 헛그린다(Fable 성능).
+    // 소속 표식은 배제 경로라 여기서 소속 변화를 볼 일이 없고, 명령이 `refreshSidebar` 를 직접 부른다.
+    if (currentFolderBinding() === null) return;
     scheduleFolderVersion();
   };
   return vscode.Disposable.from(

@@ -8,7 +8,7 @@ import {excludeFromGit} from "./gitExclude.ts";
 import {SOURCE_MARK_PATH} from "./localMark.ts";
 import {tempDir} from "./testing/tempDir.ts";
 
-const clean: GitSnapshot = {branch: "main", commit: "1a2b3c4d5e6f7890", uncommitted: 0};
+const clean: GitSnapshot = {branch: "main", commit: "1a2b3c4d5e6f7890" + "0".repeat(24), uncommitted: 0};
 
 test("git 한 줄 — 레포가 아니면 빈 문자열이다(「git 없음」은 판정이라 적지 않는다)", () => {
     assert.equal(gitStatusLine(null), "");
@@ -25,7 +25,7 @@ test("git 한 줄 — 커밋하지 않은 변경은 수로 말한다", () => {
 test("🔴 git 한 줄 — 셀 수 없으면(미추적 숨김 설정) 「깨끗함」이라 말하지 않는다", () => {
     assert.equal(
         gitStatusLine({...clean, uncommitted: null}),
-        "git: main @ 1a2b3c4 · 커밋하지 않은 변경을 셀 수 없음(미추적 파일을 숨기는 설정)",
+        "git: main @ 1a2b3c4 · 커밋하지 않은 변경을 셀 수 없음(git 설정이 일부를 숨김)",
     );
 });
 
@@ -66,7 +66,7 @@ test("태그 권유 — 깨끗한 트리에서만 · 이름은 zalkera/{사이�
     assert.deepEqual(tagOffer(clean, "acme", 5), {
         name: "zalkera/acme/v5",
         message: "잘커라 acme 버전 5",
-        ref: "1a2b3c4d5e6f7890",
+        ref: "1a2b3c4d5e6f7890" + "0".repeat(24),
     });
 });
 
@@ -199,4 +199,35 @@ test("exclude — 있던 모드(0664)를 umask 너머로 지킨다", {skip: !can
     await chmod(file, 0o664);
     await excludeFromGit(dir, SOURCE_MARK_PATH);
     assert.equal((await stat(file)).mode & 0o777, 0o664, "그룹 쓰기가 사라졌다");
+});
+
+test("🔴 exclude — 잎이 하드링크여도 대상 파일에 쓰지 않는다(rename 이 항목만 바꾼다)", {skip: process.platform === "win32"}, async () => {
+    const {link} = await import("node:fs/promises");
+    const dir = await repo(true);
+    const victim = await repo(false);
+    await writeFile(join(victim, "victim.txt"), "그대로\n");
+    await mkdir(join(dir, ".git", "info"), {recursive: true});
+    await link(join(victim, "victim.txt"), join(dir, ".git", "info", "exclude"));
+    assert.equal(await excludeFromGit(dir, SOURCE_MARK_PATH), "written");
+    assert.equal(await readFile(join(victim, "victim.txt"), "utf8"), "그대로\n", "하드링크 대상이 덮였다");
+    assert.match(await readFile(join(dir, ".git", "info", "exclude"), "utf8"), /^\.zalkera\/source\.json$/m);
+});
+
+test("exclude — 결과를 말한다: 없음·있음·씀·못 씀", async () => {
+    const plain = await repo(false);
+    assert.equal(await excludeFromGit(plain, SOURCE_MARK_PATH), "no-git");
+    const dir = await repo(true);
+    assert.equal(await excludeFromGit(dir, SOURCE_MARK_PATH), "written");
+    assert.equal(await excludeFromGit(dir, SOURCE_MARK_PATH), "already");
+    await mkdir(join(dir, ".git", "info", "exclude2"), {recursive: true});
+    const bad = await repo(true);
+    await mkdir(join(bad, ".git", "info", "exclude"), {recursive: true}); // 잎이 폴더 — 정규 파일이 아니다
+    assert.equal(await excludeFromGit(bad, SOURCE_MARK_PATH), "failed");
+});
+
+test("🔴 태그 권유 — 커밋 값이 sha 모양이 아니면 권하지 않는다(`-f` 가 ref 자리에 서면 강제 덮어쓰기다)", () => {
+    assert.equal(tagOffer({...clean, commit: "-f"}, "acme", 5), null);
+    assert.equal(tagOffer({...clean, commit: "HEAD~1"}, "acme", 5), null);
+    assert.equal(tagOffer({...clean, commit: "a".repeat(40)}, "acme", 5)?.ref, "a".repeat(40));
+    assert.equal(tagOffer({...clean, commit: "b".repeat(64)}, "acme", 5)?.ref, "b".repeat(64));
 });
