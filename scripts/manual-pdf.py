@@ -17,7 +17,9 @@ from ko_pdf import Doc, REG as REG_PATH
 
 import os
 SRC = os.path.join(os.path.dirname(__file__), "..", "doc", "MANUAL.md")
-OUT = sys.argv[1] if len(sys.argv) > 1 else "/home/jonghwa/projects/zalkera/잘커라-확장-매뉴얼.pdf"
+# 기본 출력은 원본(`doc/MANUAL.md`)과 **같은 폴더**다(오너 지시 2026-09-14) — 굽는 사람이 어디 두었는지 찾지 않게.
+# 산출물이라 git 에는 안 실린다(`.gitignore` 의 `doc/*.pdf`).
+OUT = sys.argv[1] if len(sys.argv) > 1 else os.path.join(os.path.dirname(__file__), "..", "doc", "잘커라-확장-매뉴얼.pdf")
 
 # 나눔고딕에 **글리프가 없는 글자**를 있는 것으로 바꾼다. 안 바꾸면 gid 0(.notdef)이 실려
 # 고객 PDF 에 □ 로 나간다 — 화면에서는 멀쩡해 보이므로 눈으로는 안 잡힌다.

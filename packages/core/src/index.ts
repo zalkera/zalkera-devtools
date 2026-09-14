@@ -152,6 +152,8 @@ export {
 } from "./upgradeNotice.ts";
 export { tokenPath } from "./tokenPath.ts";
 export { plainNotice, ours, count, countJosa } from "./notice.ts";
+export { affectsFolderVersion, countUncommitted, excludeFromGit, gitStatusLine, tagOffer } from "./git.ts";
+export type { GitSnapshot, TagOffer } from "./git.ts";
 export { say, type CapturedTenant } from "./tenantScope.ts";
 export { fetchPresetZip, type PresetZip } from "./presets.ts";
 export {

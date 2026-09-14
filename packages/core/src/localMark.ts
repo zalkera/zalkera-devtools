@@ -21,6 +21,7 @@
 /** 프로젝트 루트 기준 상대 경로. 조회는 이 상수 하나로 한다. */
 import {readFile} from "node:fs/promises";
 import {join} from "node:path";
+import {excludeFromGit} from "./gitExclude.ts";
 import {ensureOwnDir, writeOwnFile} from "./safeWrite.ts";
 import {isVersionDigest} from "./sourceVersion.ts";
 
@@ -281,10 +282,14 @@ async function writeMarkText(root: string, text: string): Promise<MergeResult> {
         //    뒤의 쓰기가 폴더 밖으로 나간다(잎만 보는 검사는 그것을 못 본다).
         await ensureOwnDir(root, ".zalkera");
         await writeOwnFile(join(root, SOURCE_MARK_PATH), text);
-        return {ok: true, text: ""};
     } catch (error) {
         return {ok: false, reason: error instanceof Error ? error.message : String(error)};
     }
+    // 표식은 **이 기계의 기준점**이라 커밋을 타고 남의 기계로 가면 거짓 상태가 된다 — git 이 있으면
+    // `.git/info/exclude` 에 감춘다(`.gitignore` 가 아닌 이유는 `excludeFromGit` KDoc). **부가**다 —
+    // 표식은 이미 섰고, 못 감춰도 이 함수는 참을 돌려준다(CLI 장부 `writeLedger` 와 같은 처분).
+    await excludeFromGit(root, SOURCE_MARK_PATH);
+    return {ok: true, text: ""};
 }
 
 /**

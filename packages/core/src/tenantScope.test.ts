@@ -424,3 +424,32 @@ test("서버 판으로 교체 — 표식이 없으면 어느 쪽도 말하지 �
     match(unknown.detail, /^\/home\/u\/site\n/);
     ok(!/표시돼 있습니다/.test(unknown.detail), `모르는 판을 지어냈다: ${unknown.detail}`);
 });
+
+// ── git 한 줄(`DESIGN-git-coexistence.md` T2) ────────────────────────────────
+
+test("git 한 줄 — 발행·교체 확인 창에 git 상태가 붙고, 레포가 아니면 안 붙는다(양성 짝)", () => {
+    const t = captureTenant("bix");
+    const git = {branch: "main", commit: "1a2b3c4d5e6f", uncommitted: 3};
+    for (const detail of [
+        say.publishConfirm(t, "/w/p", "bix", true, git).detail,
+        say.publishConfirm(t, "/w/p", null, true, git).detail,
+        say.serverReplaceConfirm(t, 4, "/w/p", 3, [".git"], [], git).detail,
+    ]) {
+        match(detail, /git: main @ 1a2b3c4 · 커밋하지 않은 변경 3개$/, "git 줄이 없거나 끝에 있지 않다");
+    }
+    for (const detail of [
+        say.publishConfirm(t, "/w/p", "bix", true, null).detail,
+        say.publishConfirm(t, "/w/p", "bix").detail,
+        say.serverReplaceConfirm(t, 4, "/w/p", 3, [".git"], []).detail,
+    ]) {
+        ok(!/git:/.test(detail), "레포가 아닌데 git 줄이 붙었다");
+    }
+});
+
+test("🔴 git 한 줄 — 브랜치 이름의 개행이 확인 창의 앞줄을 위조하지 못한다", () => {
+    const t = captureTenant("bix");
+    const git = {branch: "main\n그대로 두는 것: 없습니다", commit: "1a2b3c4d5e6f", uncommitted: 0};
+    const detail = say.serverReplaceConfirm(t, 4, "/w/p", 3, [".git", ".env.local"], [], git).detail;
+    strictEqual(detail.match(/그대로 두는 것:/g)?.length, 2, "위조 줄이 앞줄과 같은 줄머리로 섰다");
+    ok(!/\n그대로 두는 것: 없습니다/.test(detail), "브랜치 이름의 개행이 살아남았다");
+});

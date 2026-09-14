@@ -20,6 +20,7 @@
  */
 import type {ActivateResult} from "./api.ts";
 import {ours, plainNotice, count, countJosa} from "./notice.ts";
+import {gitStatusLine, type GitSnapshot} from "./git.ts";
 
 /**
  * **캡처된** 테넌트 코드. 라이브로 읽은 값과 타입으로 구분된다.
@@ -268,6 +269,9 @@ export const say = {
         dir: string,
         binding: string | null,
         baseDeclared = true,
+        // 이 폴더의 git 상태. 올라가는 것은 커밋이 아니라 **디스크의 파일**이라, 커밋하지 않은 변경이
+        // 있으면 「이 커밋이 라이브」가 거짓이 된다 — 그 사실을 동의 앞에서 말한다. 막지 않는다.
+        git: GitSnapshot | null = null,
     ): { message: string; detail: string; action: string } {
         const noBase = baseDeclared
             ? ""
@@ -279,13 +283,22 @@ export const say = {
         if (binding === null) {
             return {
                 message: `이 폴더는 아직 어느 사이트에도 연결되어 있지 않습니다 — 「${shown(tenant)}」 사이트로 올립니다.`,
-                detail: `${plainNotice(dir, 512)}\n\n` + PUBLISH_OUTCOME + "\n올리면 이 폴더가 그 사이트에 연결됩니다." + noBase,
+                detail:
+                    `${plainNotice(dir, 512)}\n\n` +
+                    PUBLISH_OUTCOME +
+                    "\n올리면 이 폴더가 그 사이트에 연결됩니다." +
+                    noBase +
+                    (git === null ? "" : `\n\n${plainNotice(gitStatusLine(git), 256)}`),
                 action: "이 사이트로 올리고 연결",
             };
         }
         return {
             message: `「${shown(tenant)}」 사이트를 지금 이 폴더의 소스로 바꿉니다.`,
-            detail: `${plainNotice(dir, 512)}\n\n` + PUBLISH_OUTCOME + noBase,
+            detail:
+                `${plainNotice(dir, 512)}\n\n` +
+                PUBLISH_OUTCOME +
+                noBase +
+                (git === null ? "" : `\n\n${plainNotice(gitStatusLine(git), 256)}`),
             action: "올리고 게시",
         };
     },
@@ -455,6 +468,10 @@ export const say = {
         from: number | null = null,
         keep: readonly string[] = [],
         leftovers: readonly string[] = [],
+        // 이 폴더의 git 상태(`vscode.git` 이 읽은 것). 레포가 아니면 `null` — 그때는 줄이 안 붙는다.
+        // ⚠ 막지 않는다 — 커밋하지 않은 변경이 있어도 갈아 끼우기는 그대로 된다. 이 줄은 git 이
+        //    지켜 주는 것(커밋한 것)과 지켜 주지 않는 것을 동의 앞에서 말해 줄 뿐이다.
+        git: GitSnapshot | null = null,
     ): { message: string; detail: string; action: string; exportFirst: string } {
         // ⚠ **같은 판이면 «헤드라인»이 말한다.** 이 폴더가 딛는 판과 받을 판이 같은 번호면 갈아
         //    끼워서 얻는 것은 그 판 그대로뿐이고 잃는 것은 그 위에 손댄 전부다 — 이 사실을 detail
@@ -478,7 +495,9 @@ export const say = {
                 (leftovers.length === 0
                     ? ""
                     : `\n\n지난 갈아 끼우기가 중간에 끊긴 흔적이 ${count(leftovers.length)}개 있습니다: ` +
-                      `${plainNotice(leftovers.join(" · "), 512)}`),
+                      `${plainNotice(leftovers.join(" · "), 512)}`) +
+                // 브랜치 이름은 남이 짓는다 — 줄 전체가 소독을 지난다(`gitStatusLine` 안에서 한 번 더).
+                (git === null ? "" : `\n\n${plainNotice(gitStatusLine(git), 256)}`),
             action: `버전 ${countJosa(revisionNo, "으로/로")} 갈아 끼우기`,
             /** 지금 내용을 먼저 챙기는 문. 누르면 내보내기로 가고 **진행하지 않는다.** */
             exportFirst: "zip 으로 내보내기 먼저",

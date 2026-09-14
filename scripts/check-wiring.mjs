@@ -130,7 +130,7 @@ const WIRES = [
     ],
     [
         "packages/vscode/src/extension.ts",
-        "const ask = say.serverReplaceConfirm(tenant, picked.revisionNo, dir, from, keep, leftovers);",
+        "const ask = say.serverReplaceConfirm(tenant, picked.revisionNo, dir, from, keep, leftovers, git);",
         "**`from` 이 빠지면 같은 판 고지가 소리 없이 사라진다.** 인자 기본값이 `null` 이라 빼도 컴파일이 " +
             "통과하고, core 시험은 값을 손으로 넣으므로 전건 초록이다 — 고객은 「버전 4로 갈아 끼웁니다」만 " +
             "보고 같은 판 위에서 손댄 것을 지운다",
@@ -614,7 +614,7 @@ const WIRES = [
     ],
     [
         "packages/vscode/src/extension.ts",
-        "say.publishConfirm(tenant, dir, currentFolderBinding(), baseRevisionNo != null)",
+        "say.publishConfirm(tenant, dir, currentFolderBinding(), baseRevisionNo != null, git?.snapshot ?? null)",
         "발행 확인이 소속을 안 봐 늘 일상 갈래가 되고(반사가 삼킨다) 「이 폴더」의 지시대상도 잃는다. " +
             "넷째 인자가 빠지면 **무표식 폴더가 조용히 무보호인 채로 올라간다** — 사람은 보호를 전제하는데",
     ],
@@ -659,7 +659,8 @@ const WIRES = [
     // 두 자리다 — 「zip 으로 교체」와 「서버 판으로 교체」. 재료만 다르고 «무엇을 남기는지»를 세는 술어는 하나여야 한다.
     [
         "packages/vscode/src/extension.ts",
-        "const keep = await keepNames(dir);",
+        // 두 교체 문이 폴더 읽기와 git 읽기를 겹쳐 읽는다(`Promise.all`) — `keep` 이 그 첫 자리다.
+        "= await Promise.all([keepNames(dir), ",
         "손 목록으로 열거하면 포장기가 빼는 것과 갈린다 — 갈린 쪽이 영구 삭제된다",
         2,
     ],
@@ -819,8 +820,98 @@ const WIRES = [
         "taskkill 이 없는 윈도 기계에서 처리되지 않은 error 이벤트가 되어 확장이 통째로 죽는다(spawn 의 ENOENT 는 던지지 않는다)",
     ],
     [
+        // 가드 본문이 블록이 된 뒤(감시기 문 `ownWriting`)에도 `run()` 은 **그 안에서** 돌아야 한다 —
+        // 위 앵커는 여는 줄만 보므로 본문을 비우고 밖에서 `run()` 을 불러도 초록이다.
         "packages/vscode/src/extension.ts",
-        "const outcome = await receiveGuard.run(async () => run());",
+        "      return await run();",
+        "가드 안에서 `run()` 을 안 돌리면 소스 받기가 겹친다 — 여는 줄 앵커는 본문을 못 본다",
+    ],
+    // ── git 과 맞물리는 셋(`DESIGN-git-coexistence.md`) ────────────────────────────
+    // 🔴 셋 다 **빼도 컴파일이 통과한다** — 인자 기본값이 `null` 이고, 감시기는 구독 목록의 한 항목이다.
+    //    core 시험은 값을 손으로 넣으므로 전건 초록이다. 사라지면 「git pull 뒤 낡은 일치」·「커밋 안 한
+    //    변경을 말없이 지우는 교체」·「더러운 트리에도 뜨는 태그 단추」가 소리 없이 돌아온다.
+    [
+        "packages/vscode/src/extension.ts",
+        "[watchWorkspaceWrites(workspaceDir()!)]",
+        "저장이 아닌 손(git·에이전트)이 바꾼 폴더를 사이드바가 옛 결론으로 그린다 — T1 의 배선",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "    if (ownWriting) return;",
+        "우리 자신의 갈아 끼우기가 감시기를 타고 훑기를 한 번 더 돌린다(3회전 성능 심의의 ×2 가 돌아온다)",
+    ],
+    [
+        // 창은 시각이 아니라 **침묵**으로 닫힌다 — 이 줄이 빠지면 고정 2초가 되어 큰 트리에서 ×2 가 돌아온다.
+        "packages/vscode/src/extension.ts",
+        "      ownWritesQuietUntil = Math.min(now + OWN_WRITES_GRACE_MS, ownWritesQuietCap);",
+        "수천 파일을 갈아 끼운 뒤 밀려오는 우리 사건이 창을 넘겨 심은 값을 버린다(1회전 성능 실측 · 16k 파일 3~5초)",
+    ],
+    [
+        // 문만 잡으면 문을 **세우는 줄**을 지워도 초록이다(기능 심의 변이 ⑸ 실측) — 세우는 줄도 잡는다.
+        "packages/vscode/src/extension.ts",
+        "    ownWriting = true;",
+        "우리 쓰기 문이 영영 안 서서 감시기가 갈아 끼우기를 「남이 바꿨다」로 읽는다 — 문은 있는데 아무도 안 세운다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "      ownWritesQuietUntil = Date.now() + OWN_WRITES_GRACE_MS;",
+        "늦게 도착하는 우리 쓰기 사건이 심은 값을 버리고 훑기를 한 번 더 돌린다",
+    ],
+    [
+        // zip 교체 모달은 core 의 `say` 를 안 지나 인라인이다 — 읽는 줄만 잡으면 조립에서 빼도 초록(기능 심의 변이 ⑹).
+        "packages/vscode/src/extension.ts",
+        '(git === null ? "" : `\\n\\n${plainNotice(gitStatusLine(git), 256)}`)',
+        "zip 교체 확인 창에서 git 한 줄이 사라진다 — 커밋 안 한 변경을 말없이 지운다",
+    ],
+    [
+        // 「누를 때만 쓴다」 — 조건을 `if (tag !== null)` 로 바꾸면 자동 태그가 되는데 그물이 없었다(보안 심의).
+        "packages/vscode/src/extension.ts",
+        "if (tag !== null && chosen === makeTag) {",
+        "태그가 사람이 누르지 않아도 만들어진다 — 확장이 고객 git 에 제스처 없이 쓴다",
+    ],
+    [
+        // 누르는 순간 HEAD 가 발행한 커밋인지 다시 읽는 줄 — 빼면 구판 VS Code 에서 옮겨진 HEAD 에 찍힌다.
+        "packages/vscode/src/extension.ts",
+        "if (now === null || now.commit !== tag.ref || now.uncommitted !== 0) {",
+        "빌드 대기 중 커밋한 사람의 태그가 라이브가 아닌 커밋을 가리킨다(구판 VS Code 는 `ref` 를 무시한다)",
+    ],
+    [
+        // 발행 앞의 `.env.local` 보장 — 빼면 「미리보기 → git init → 발행」에서 열쇠가 커밋된다(2회전 보안 변이 M12 생존).
+        "packages/vscode/src/extension.ts",
+        "const ignored = await ensureEnvIgnored(dir).catch(",
+        "발행 순서에서 `.env.local` 이 `.gitignore` 밖인 채 「커밋하지 않은 변경」으로 세어지고 매뉴얼은 커밋하라고 한다",
+    ],
+    [
+        // vscode 패키지는 시험이 못 닿는다 — `hidden` 판정을 빼면 미추적이 안 세어져 「깨끗함」이 거짓(2회전 변이 M2 생존).
+        "packages/vscode/src/git.ts",
+        "uncommitted: hidden ? null : countUncommitted(dir, all),",
+        "폴더 설정 `git.untrackedChanges: hidden` 에서 미추적 파일이 안 세어져 「깨끗함」이 거짓이 되고 태그 단추가 뜬다",
+    ],
+    [
+        // 거름이 창 판정보다 **먼저**여야 `.next/` 사건이 창을 밀지 않는다 — 순서를 되돌려도 초록이었다(2회전 변이 M7).
+        "packages/vscode/src/extension.ts",
+        "    if (!affectsFolderVersion(relative(dir, uri.fsPath))) return;\n    if (ownWriting) return;",
+        "미리보기의 `.next/` 사건이 우리 쓰기 창을 상한(30초)까지 밀어 그동안 남의 편집이 묻힌다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "if (!affectsFolderVersion(relative(dir, uri.fsPath))) return;",
+        "미리보기의 `.next/` 쓰기가 묶음 타이머를 매번 되돌려 재계산이 영영 안 돈다(기아)",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "const git = gitRead?.snapshot ?? null;",
+        "교체 두 문의 확인 창에서 git 한 줄이 사라진다 — 커밋 안 한 변경을 말없이 지운다",
+        2,
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "tagOffer(git.snapshot, String(tenant), result.revisionNo)",
+        "태그 권유가 core 판정을 안 지나면 더러운 트리에도 단추가 뜬다 — 그 태그는 라이브가 아닌 커밋을 가리킨다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "const outcome = await receiveGuard.run(async () => {",
         "호출부는 `whileExtracting` 을 부르는데 그 **본문**이 가드를 안 지나면 소스 받기가 겹친다 — " +
             "호출줄만 보는 검사는 래퍼 속을 못 본다(심의 실증: 본문을 `await run()` 으로 갈아도 초록이었다)",
     ],

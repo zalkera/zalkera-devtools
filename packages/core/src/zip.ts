@@ -399,6 +399,13 @@ const EXCLUDED_PATHS = new Set([".zalkera/source.json", SYNC_LEDGER_PATH, PROVEN
 const EXCLUDED_PREFIXES = [".zalkera/saved/"];
 
 /**
+ * 우리 원자 쓰기(`writeViaRename`)의 임시 이름. `rename` 직전 한순간만 있고 프로세스가 죽으면 잔재로
+ * 남는다 — 잔재를 포장하거나 지문에 세거나 감시기가 「남이 바꿨다」로 읽을 이유가 없다(기능 심의 실측:
+ * `.zalkera/source.json.zalkera-<hex>.tmp` 가 거름을 통과했다). 이름 규칙은 `safeWrite.ts` 와 한 벌이다.
+ */
+const OWN_TMP = /\.zalkera-[0-9a-f]{12}\.tmp$/;
+
+/**
  * **경로로 빼는 판정 — 한 벌.**
  *
  * 🔴 종전에는 [packProject] 의 훑기가 `EXCLUDED_PATHS` 만 인라인으로 보고 [EXCLUDED_PREFIXES] 는
@@ -409,7 +416,9 @@ const EXCLUDED_PREFIXES = [".zalkera/saved/"];
  * @param path 프로젝트 뿌리 기준 상대 경로. 구분자·대소문자는 부르는 쪽이 이미 골랐다고 본다.
  */
 function isExcludedPath(path: string): boolean {
-    return EXCLUDED_PATHS.has(path) || EXCLUDED_PREFIXES.some((prefix) => path.startsWith(prefix));
+    return (
+        EXCLUDED_PATHS.has(path) || EXCLUDED_PREFIXES.some((prefix) => path.startsWith(prefix)) || OWN_TMP.test(path)
+    );
 }
 
 /**
