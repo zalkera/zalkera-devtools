@@ -479,7 +479,8 @@ async function createSink(targetDir: string, options: UntarOptions) {
                 //   `emptyDirs` 로 반대를 고르되, 빼는 경로(`skip`)의 폴더는 그때도 만들지 않는다.
                 if (options.decide) {
                     if (options.emptyDirs !== true) return;
-                    if (options.decide(segments.join("/")) === "skip") return;
+                    // 폴더는 끝에 `/` 를 붙여 묻는다 — 부르는 쪽이 뺀 이름을 셀 때 파일과 가르는 표식이다.
+                    if (options.decide(`${segments.join("/")}/`) === "skip") return;
                 }
                 await descend(root, segments, verified);
                 return;

@@ -185,7 +185,11 @@ test("🔴 exclude — 정규 파일이 아니면(FIFO) 읽지도 쓰지도 않�
     //    러너까지 멈춘다(Fable 실측 400초). 이 쓰기가 3초 뒤 닫히면 회귀 코드는 EOF 로 빈 내용을 받아 「쓰기」로
     //    넘어가고, 그러면 FIFO 자리가 파일로 바뀌어 아래 단언이 **빨갛게** 죽는다. 현재 코드는 `lstat` 만 보고
     //    돌아오므로 이 쓰기는 읽는 쪽 없이 5초 뒤 `timeout` 이 거둔다.
-    spawn("timeout", ["5", "sh", "-c", `sleep 3 > "${file}"`], {detached: true, stdio: "ignore"}).unref();
+    // coreutils 가 없는 개발 박스(macOS)에서 `timeout` 이 없으면 ENOENT 가 처리되지 않은 `error` 로 러너를 죽인다 —
+    // 쓰는 쪽은 회귀 때만 뜻이 있으니 없으면 없는 대로 간다(현재 코드는 읽지 않아 시험은 그대로 참이다).
+    const writer = spawn("timeout", ["5", "sh", "-c", `sleep 3 > "${file}"`], {detached: true, stdio: "ignore"});
+    writer.on("error", () => {});
+    writer.unref();
     const {lstat} = await import("node:fs/promises");
     assert.equal(await excludeFromGit(dir, SOURCE_MARK_PATH), "failed");
     assert.equal((await lstat(file)).isFIFO(), true, "FIFO 가 파일로 바뀌었다");

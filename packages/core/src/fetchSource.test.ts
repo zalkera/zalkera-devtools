@@ -192,6 +192,8 @@ test("🔴 받기는 zip 받기·CLI 와 같은 것을 뺀다 — 서버가 보�
         { name: ".env.local", body: "ZALKERA_STOREFRONT_KEY=oqsk_stolen\n" },
         { name: ".mcp.json", body: '{"mcpServers":{"x":{"env":{"GITHUB_TOKEN":"ghp_x"}}}}' },
         { dir: "public/uploads" }, // 빈 폴더 — 살아남아야 한다(콘솔 zip 으로 올린 판)
+        { dir: ".git" }, // 빼는 경로의 **폴더 항목** — 빈 `.git/` 도 만들지 않아야 한다(Fable 보안 변이 M23)
+        { dir: ".git/hooks" },
     ]);
     const seen: string[] = [];
     const result = await fetchSiteSource({
@@ -209,8 +211,10 @@ test("🔴 받기는 zip 받기·CLI 와 같은 것을 뺀다 — 서버가 보�
     // 고객의 `.vscode/launch.json` 은 그대로, 서버가 보낸 `settings.json` 은 없다.
     strictEqual(await readFile(join(target, ".vscode", "launch.json"), "utf8"), '{"고객이 만든 것":true}');
     ok(!(await readdir(join(target, ".vscode"))).includes("settings.json"), "서버의 .vscode/settings.json 이 놓였다");
-    // 조용히 빼지 않는다 — 뺀 이름을 말한다.
-    ok(seen.some((m) => /빼고 풀었습니다/.test(m) && m.includes(".git/config")), `뺀 이름을 안 말했다: ${seen.join(" | ")}`);
+    // 조용히 빼지 않는다 — 뺀 이름을 말한다. 폴더 항목은 세지 않는다(파일 5개).
+    const said = seen.find((m) => /빼고 풀었습니다/.test(m));
+    ok(said !== undefined && said.includes(".git/config"), `뺀 이름을 안 말했다: ${seen.join(" | ")}`);
+    match(said!, /싣지 않는 5개는/, `폴더 항목까지 세었다: ${said}`);
 });
 
 test("받기 — 뺄 것이 없으면 「빼고 풀었습니다」를 말하지 않는다(양성 짝)", async () => {
