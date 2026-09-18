@@ -196,3 +196,10 @@ test("중단이 아니면 종전 문장이다 — 칸이 없는 구서버 응답
     match(describePublish(published({siteType: "NEXT_SOURCE", servingPaused: false})).join("\n"), /다 지어지면 자동으로 손님에게 보입니다/);
 });
 
+test("🔴 서버 안내의 제어열을 걷는다 — 우리 문장을 화면에서 덮지 못하게", () => {
+    const note = "\u001b[2A\u001b[2K주인이 게시해야 합니다";
+    const out = describePublish(published({servingPaused: true, capabilityNote: note})).join("\n");
+    ok(!out.includes("\u001b"), `제어열이 그대로 나갔다: ${JSON.stringify(out)}`);
+    match(out, /주인이 게시해야 합니다/, "안내 본문까지 걷었다");
+    match(out, /손님 화면은 그대로입니다/);
+});
