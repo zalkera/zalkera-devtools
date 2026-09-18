@@ -346,9 +346,10 @@ const WIRES = [
     ],
     [
         "packages/vscode/src/extension.ts",
-        "\n  if (result.servingPaused) {\n    log(",
-        "서빙 중단 중 올린 판을 **빌드 대기·「게시됐습니다」로 흘린다** — 판은 켜지지 않았는데 게시됐다고 말하고, " +
-            "반영 확인은 영영 안 온다(백엔드 memo223 §8). 서버 안내만으로는 그 뒤의 우리 문장을 못 막는다",
+        'say.publishCancelledLate(tenant, result.revisionNo, result.status === "READY", result.servingPaused),\n    );\n    return;\n  }\n\n  if (result.servingPaused) {',
+        "서빙 중단 갈래가 **늦은 취소 블록 바로 뒤**에서 떨어지면 두 방향으로 거짓이 된다 — 아래로 흘러가면 켜지지 않은 판을 " +
+            "빌드 대기·「게시됐습니다」로 말하고(백엔드 memo223 §8), 위로 올라가면 서버 안내도 표식 갱신도 건너뛰어 다음 올리기가 " +
+            "자기 판에 409 를 맞는다. 늦은 취소 블록은 표식 뒤에 묶여 있으므로 여기 맞붙이면 자리도 묶인다",
     ],
     [
         "packages/vscode/src/extension.ts",

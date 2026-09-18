@@ -141,7 +141,8 @@ export function describePublish(result: PublishOutcome): string[] {
               ? "지금 바로 손님에게 보입니다."
               : "사이트를 다시 짓는 중입니다 — 다 지어지면 자동으로 손님에게 보입니다.",
     ];
-    if (result.capabilityNote) lines.push(result.capabilityNote);
+    // 서버 문장은 표시 자리에서 소독한다 — 제어열이 섞이면 위의 우리 문장을 화면에서 덮을 수 있다(확장과 같은 상한).
+    if (result.capabilityNote) lines.push(plainNotice(result.capabilityNote, 300));
     if (!result.ledgerRebuilt) {
         lines.push(
             "",

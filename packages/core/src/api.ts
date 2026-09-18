@@ -146,7 +146,7 @@ export interface DraftPublishResult {
     /**
      * **서빙 중단 중이라 이 판이 켜지지 않았다**(백엔드 memo223 §8 — 이 계정은 중단을 못 푼다). 참이면 「게시됐습니다」·
      * 「빌드가 끝나면 게시됩니다」가 **거짓**이다 — 사이트 주인이 이 판을 게시해야 나간다(무엇을 해야 하는지는
-     * [capabilityNote] 가 말한다). 구서버는 안 보낸다 → `undefined`(중단 개념이 없던 서버 · 켜진다).
+     * [capabilityNote] 가 말한다). 구서버는 안 보낸다 → `undefined` — 그 서버는 올리기가 늘 중단을 풀었으므로 켜진다.
      */
     servingPaused?: boolean;
 }
@@ -232,7 +232,7 @@ export interface ArchiveConfirmed {
     /**
      * **서빙 중단 중이라 이 판이 켜지지 않았다**(백엔드 memo223 §8 — 이 계정은 중단을 못 푼다). 참이면 「게시됐습니다」·
      * 「빌드가 끝나면 게시됩니다」가 **거짓**이다 — 사이트 주인이 이 판을 게시해야 나간다(무엇을 해야 하는지는
-     * [capabilityNote] 가 말한다). 구서버는 안 보낸다 → `undefined`(중단 개념이 없던 서버 · 켜진다).
+     * [capabilityNote] 가 말한다). 구서버는 안 보낸다 → `undefined` — 그 서버는 올리기가 늘 중단을 풀었으므로 켜진다.
      */
     servingPaused?: boolean;
     /**
