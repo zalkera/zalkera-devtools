@@ -39,7 +39,7 @@ import {spawn} from "node:child_process";
 import {flagOn, flagValue, parseArgs} from "./args.ts";
 import {openAuth, openContext, version} from "./context.ts";
 import {confirm} from "./confirm.ts";
-import {describePush, describeStatus, describeStranded, DISCARD_PHRASE, pathLines} from "./report.ts";
+import {describePublish, describePush, describeStatus, describeStranded, DISCARD_PHRASE, pathLines} from "./report.ts";
 import {FileTokenStore, tokenPath} from "./tokenStore.ts";
 
 /**
@@ -213,21 +213,7 @@ async function main(argv: readonly string[]): Promise<number> {
                 label: flagValue(flags, "label") ?? undefined,
                 onProgress: (message: string) => process.stderr.write(`${message}\n`),
             });
-            const lines = [
-                `버전 ${countJosa(result.revisionNo, "으로/로")} 올렸습니다.`,
-                result.siteType === "STATIC"
-                    ? "지금 바로 손님에게 보입니다."
-                    : "사이트를 다시 짓는 중입니다 — 다 지어지면 자동으로 손님에게 보입니다.",
-            ];
-            if (result.capabilityNote) lines.push(result.capabilityNote);
-            if (!result.ledgerRebuilt) {
-                lines.push(
-                    "",
-                    "다만 새 버전의 파일 목록을 읽지 못해 이 폴더의 기준 기록을 지웠습니다.",
-                    "`zalkera baseline` 을 한 번 실행해 주세요 — 폴더의 파일은 건드리지 않습니다.",
-                );
-            }
-            process.stdout.write(`${lines.join("\n")}\n`);
+            process.stdout.write(`${describePublish(result).join("\n")}\n`);
             // 🔴 **판이 섰으면 0 이다.** `ledgerRebuilt` 가 거짓인 것은 「새 판 목록을 못 읽어
             //    기준 기록을 지웠다」는 뜻이고, **발행은 이미 성공했다**(STATIC 이면 라이브다).
             //    1 을 내면 스크립트의 재시도 루프가 같은 내용의 판을 하나 더 세운다 — 코어

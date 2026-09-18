@@ -89,6 +89,11 @@ export interface PublishResult {
     serverFileCount?: number;
     /** 서버가 보낸 한계·상태 안내. 있으면 **그대로 보여 준다**(memo66 §4). */
     capabilityNote: string;
+    /**
+     * 서빙 중단 중이라 이 판이 **켜지지 않았다**(서버 `servingPaused`). 참이면 빌드를 기다리지도 「게시됐습니다」라고
+     * 말하지도 않는다 — 둘 다 거짓이다. 구서버는 이 칸을 안 보내 늘 거짓이다.
+     */
+    servingPaused: boolean;
 }
 
 /**
@@ -298,6 +303,7 @@ export async function publish(options: PublishOptions): Promise<PublishResult> {
         status: confirmed.status,
         siteType: confirmed.siteType,
         capabilityNote: confirmed.capabilityNote,
+        servingPaused: confirmed.servingPaused === true,
         localVersion: local.digest,
         // ⚠ zip 항목 수(`fileCount`)가 아니라 **서버와 같은 모집단**의 수다 — 그쪽과 나란히 놓을 값이다.
         localVersionFileCount: local.fileCount,

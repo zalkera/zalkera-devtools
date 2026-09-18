@@ -143,6 +143,12 @@ export interface DraftPublishResult {
     status: string;
     /** 서버가 덧붙이는 안내. 빈 문자열일 수 있다. */
     capabilityNote: string;
+    /**
+     * **서빙 중단 중이라 이 판이 켜지지 않았다**(백엔드 memo223 §8 — 이 계정은 중단을 못 푼다). 참이면 「게시됐습니다」·
+     * 「빌드가 끝나면 게시됩니다」가 **거짓**이다 — 사이트 주인이 이 판을 게시해야 나간다(무엇을 해야 하는지는
+     * [capabilityNote] 가 말한다). 구서버는 안 보낸다 → `undefined`(중단 개념이 없던 서버 · 켜진다).
+     */
+    servingPaused?: boolean;
 }
 
 /** `activate` 응답에서 **우리가 쓰는 것**. 나머지 필드는 안 본다. */
@@ -223,6 +229,12 @@ export interface ArchiveConfirmed {
     status: string;
     /** 유형별 한계·상태를 서버가 사람 말로 적어 보낸다(memo66 §4 — 숨기지 않는다). */
     capabilityNote: string;
+    /**
+     * **서빙 중단 중이라 이 판이 켜지지 않았다**(백엔드 memo223 §8 — 이 계정은 중단을 못 푼다). 참이면 「게시됐습니다」·
+     * 「빌드가 끝나면 게시됩니다」가 **거짓**이다 — 사이트 주인이 이 판을 게시해야 나간다(무엇을 해야 하는지는
+     * [capabilityNote] 가 말한다). 구서버는 안 보낸다 → `undefined`(중단 개념이 없던 서버 · 켜진다).
+     */
+    servingPaused?: boolean;
     /**
      * **서버가 이 판에 대해 저장한 판 지문**(memo191 ⑵). 우리가 접은 예측과 다르면 그것은 **우리 결함**이다
      * — 포장 규칙이 서버와 갈렸다는 뜻이고, 이 칸이 없으면 그 사실이 조용하다(§10 에서 실제로 그랬다).

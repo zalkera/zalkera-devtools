@@ -258,7 +258,7 @@ const WIRES = [
     ],
     [
         "packages/vscode/src/extension.ts",
-        'say.publishCancelledLate(tenant, result.revisionNo, result.status === "READY"),',
+        'say.publishCancelledLate(tenant, result.revisionNo, result.status === "READY", result.servingPaused),',
         "늦은 취소 문면이 **판의 현재 상태를 안 보고** 늘 미래형으로 말한다 — `STATIC` 은 확정 즉시 " +
             "게시라 이미 손님에게 나갔는데 「준비되면 게시됩니다」라고 하면, 사람은 안 바뀐 줄 알고 " +
             "한 번 더 올린다. 문면 자체는 시험이 물지만 **어느 값을 넘기는지**는 여기서만 잡힌다",
@@ -343,6 +343,12 @@ const WIRES = [
         "「확인 중」의 소유권을 **살아 있는 타이머에게 넘기지 않으면** 저장 직후 1.5초 안에 다른 명령이 끼었을 때 " +
             "그 낱말이 화면에 남은 채 소유권만 사라져, 뒤이은 타이머 발화가 값 비교로 조기 반환한다 — " +
             "사이드바가 다음 명령까지 「확인 중」인 채로 굳는다(심의 실측)",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "\n  if (result.servingPaused) {\n    log(",
+        "서빙 중단 중 올린 판을 **빌드 대기·「게시됐습니다」로 흘린다** — 판은 켜지지 않았는데 게시됐다고 말하고, " +
+            "반영 확인은 영영 안 온다(백엔드 memo223 §8). 서버 안내만으로는 그 뒤의 우리 문장을 못 막는다",
     ],
     [
         "packages/vscode/src/extension.ts",

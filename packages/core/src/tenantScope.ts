@@ -371,7 +371,14 @@ export const say = {
      *   알고 다시 올린다. 취소가 실제로 하는 일은 **기다리기를 그만두는 것**뿐이라, 빌드 대기 취소와
      *   같은 의미론으로 강하시켜 말한다.
      */
-    publishCancelledLate(tenant: CapturedTenant, revisionNo: number, alreadyLive: boolean): string {
+    publishCancelledLate(tenant: CapturedTenant, revisionNo: number, alreadyLive: boolean, servingPaused = false): string {
+        // ⚠ **서빙 중단 중이면 어느 미래형도 거짓이다**(백엔드 memo223 §8) — 이 판은 사이트 주인이 게시해야 나간다.
+        if (servingPaused) {
+            return (
+                `취소보다 먼저 「${shown(tenant)}」 버전 ${countJosa(revisionNo, "이/가")} 만들어졌습니다. ` +
+                `서빙이 중단돼 있어 손님 화면은 그대로입니다 — 기다리기만 그만뒀습니다.`
+            );
+        }
         // ⚠ **`STATIC` 은 확정 즉시 게시다**(`status: "READY"`) — 기다릴 것이 아예 없다. 그 판에
         //    「준비되면 게시됩니다」라고 하면 **이미 손님에게 나간 것을 아직 안 나갔다고** 말하는
         //    거짓이고, 사람은 안 바뀐 줄 알고 한 번 더 올린다. 미래형은 빌드가 남은 판에만 쓴다.

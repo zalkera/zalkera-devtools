@@ -1,7 +1,7 @@
 import {match, ok, strictEqual} from "node:assert/strict";
 import {test} from "node:test";
 import {SYNC_LEDGER_FORMAT, syncStatus, type PushResult, type SyncLedger} from "@zalkera/devtools-core";
-import {describePush, describeStatus, describeStranded, DISCARD_PHRASE} from "./report.ts";
+import {describePublish, describePush, describeStatus, describeStranded, DISCARD_PHRASE} from "./report.ts";
 
 const ledger = (over: Partial<SyncLedger> = {}): SyncLedger => ({
     format: SYNC_LEDGER_FORMAT,
@@ -176,3 +176,23 @@ test("🔴 양방향 재정렬·제어문자도 지운다 — 지시대상을 �
     );
     ok(!lines.join("").includes("\u202e"), "강한 재정렬이 남았다");
 });
+
+// ── 편집 발행(백엔드 memo223 §8 — 서빙 중단 중에는 켜지지 않는다) ─────────────────────────
+
+const published = (over: Record<string, unknown> = {}) =>
+    ({revisionNo: 12, siteType: "STATIC", status: "READY", capabilityNote: "", ledgerRebuilt: true, files: 3, ...over}) as never;
+
+test("🔴 서빙이 중단돼 있으면 「손님에게 보입니다」를 안 쓴다 — 판은 섰지만 켜지지 않았다", () => {
+    for (const siteType of ["STATIC", "NEXT_SOURCE"]) {
+        const out = describePublish(published({siteType, servingPaused: true, capabilityNote: "주인이 게시해야 합니다"})).join("\n");
+        ok(!/손님에게 보입니다/.test(out), `중단 중인데 보인다고 했다(${siteType}):\n${out}`);
+        match(out, /손님 화면은 그대로입니다/);
+        match(out, /주인이 게시해야 합니다/, "서버 안내를 삼켰다");
+    }
+});
+
+test("중단이 아니면 종전 문장이다 — 칸이 없는 구서버 응답도", () => {
+    match(describePublish(published()).join("\n"), /지금 바로 손님에게 보입니다/);
+    match(describePublish(published({siteType: "NEXT_SOURCE", servingPaused: false})).join("\n"), /다 지어지면 자동으로 손님에게 보입니다/);
+});
+

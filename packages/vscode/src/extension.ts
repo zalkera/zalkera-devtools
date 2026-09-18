@@ -3179,8 +3179,16 @@ async function publishCommand(): Promise<void> {
     //       가면 그만이다). 그래서 `check-wiring` 이 **줄머리부터** 연속 조각으로 고정한다 — 위
     //       두 문장을 조건부로 감싸는 길까지 같이 막는다.
     void vscode.window.showInformationMessage(
-      say.publishCancelledLate(tenant, result.revisionNo, result.status === "READY"),
+      say.publishCancelledLate(tenant, result.revisionNo, result.status === "READY", result.servingPaused),
     );
+    return;
+  }
+
+  // 🔴 **서빙 중단 중이면 여기서 끝난다**(백엔드 memo223 §8). 판은 섰지만 켜지지 않았다 — 빌드를 기다려 「게시됐습니다」라고
+  //    하면 거짓이고, 반영 확인은 오지 않는다. 무엇을 해야 켜지는지는 위에서 띄운 서버 안내(`capabilityNote`)가 말한다.
+  //    ⚠ 표식·폴더 기억 **뒤**라야 한다 — 판은 만들어졌으므로 다음 발행의 기반은 이 판이다(늦은 취소와 같은 까닭).
+  if (result.servingPaused) {
+    log(`버전 ${result.revisionNo} ← 서빙이 중단돼 있어 켜지지 않았습니다(손님 화면은 그대로입니다).`);
     return;
   }
 

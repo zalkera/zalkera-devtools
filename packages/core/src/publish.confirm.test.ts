@@ -367,3 +367,27 @@ test("서버가 다른 규칙으로 접었으면 갭으로 안 센다", async ()
   const same = await publishAgainst(dir, { ...CONFIRMED, versionRule: VERSION_RULE_TAG });
   strictEqual(judgePackingGap(same.localVersion, same.serverVersion, same.serverVersionRule), "gap");
 });
+
+// ── 서빙 중단 중 올린 판(백엔드 memo223 §8) ───────────────────────────────────
+
+/**
+ * 🔴 **중단 중이면 판은 서지만 켜지지 않는다.** 서버가 `servingPaused` 를 실어 보내면 결과가 그것을 나른다 — 부르는
+ * 쪽(확장·CLI)이 빌드를 기다려 「게시됐습니다」라고 하는 거짓을 이 칸 하나가 가른다.
+ */
+test("서버가 서빙 중단을 알리면 결과가 그것을 나른다 — 안 보내면 거짓(구서버)", async () => {
+  const dir = await project();
+  strictEqual((await publishAgainst(dir, { ...CONFIRMED, servingPaused: true })).servingPaused, true, "중단을 버렸다");
+  strictEqual((await publishAgainst(dir, { ...CONFIRMED, servingPaused: false })).servingPaused, false);
+  strictEqual((await publishAgainst(dir, CONFIRMED)).servingPaused, false, "칸이 없는 구서버 응답을 중단으로 읽었다");
+});
+
+test("늦은 취소 문면은 서빙 중단이면 어느 미래형·「게시됐습니다」도 안 쓴다", () => {
+  const t = captureTenant("bix");
+  for (const 말 of [say.publishCancelledLate(t, 12, true, true), say.publishCancelledLate(t, 12, false, true)]) {
+    ok(!/게시됐습니다|게시됩니다/.test(말), `중단 중인데 게시를 말했다: ${말}`);
+    ok(말.includes("만들어졌습니다"), `판이 생긴 사실을 안 말했다: ${말}`);
+    ok(말.includes("손님 화면은 그대로"), `켜지지 않았다는 사실을 안 말했다: ${말}`);
+  }
+  // 양성 짝 — 중단이 아니면 종전 문면이다.
+  match(say.publishCancelledLate(t, 12, true, false), /이미 게시됐습니다/);
+});

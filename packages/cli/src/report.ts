@@ -11,6 +11,7 @@ import {
     countJosa,
     plainNotice,
     trimPaths,
+    type PublishOutcome,
     type PushResult,
     type StrandedPlan,
     type SyncStatus,
@@ -124,6 +125,32 @@ const BLOCKER_TEXT: Record<SyncStatus["blockers"][number], string> = {
     STRANDED:
         "사이트 쪽에서 편집 중이던 것이 지금 버전 위가 아닙니다. 그대로는 켤 수 없습니다.\n`zalkera discard` 로 그 편집을 버릴 수 있습니다 — 버리기 전에 무엇이 걸려 있는지 보여 줍니다.",
 };
+
+/**
+ * 편집을 판으로 올린 결과(`zalkera publish`).
+ *
+ * 🔴 **서빙이 중단돼 있으면 「손님에게 보입니다」 두 문장이 다 거짓이다**(백엔드 memo223 §8) — 이 계정으로는 중단을 못 풀어
+ *    판은 섰지만 켜지지 않았다. 무엇을 해야 켜지는지는 서버 안내(`capabilityNote`)가 말하므로 우리 문장은 사실만 적는다.
+ */
+export function describePublish(result: PublishOutcome): string[] {
+    const lines = [
+        `버전 ${countJosa(result.revisionNo, "으로/로")} 올렸습니다.`,
+        result.servingPaused === true
+            ? "서빙이 중단돼 있어 손님 화면은 그대로입니다."
+            : result.siteType === "STATIC"
+              ? "지금 바로 손님에게 보입니다."
+              : "사이트를 다시 짓는 중입니다 — 다 지어지면 자동으로 손님에게 보입니다.",
+    ];
+    if (result.capabilityNote) lines.push(result.capabilityNote);
+    if (!result.ledgerRebuilt) {
+        lines.push(
+            "",
+            "다만 새 버전의 파일 목록을 읽지 못해 이 폴더의 기준 기록을 지웠습니다.",
+            "`zalkera baseline` 을 한 번 실행해 주세요 — 폴더의 파일은 건드리지 않습니다.",
+        );
+    }
+    return lines;
+}
 
 /**
  * 올리기 결과를 사람의 문장으로.
