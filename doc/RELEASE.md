@@ -94,6 +94,7 @@ unset VSCE_PAT
 키링(`gnome-keyring`·`secret-tool`)이 없어 `vsce` 의 폴백이 **매번** 발동하고, 그러면 이 기계에서
 도는 **모든** 에이전트가 같은 사용자로 그 파일을 읽는다. 되살아나면 `npm run package` 가 굽기
 끝에 경고한다 — `npx vsce logout <퍼블리셔>` 로 지운다.
+⚠ vsce 4 는 키링을 `@napi-rs/keyring` 으로 연다(3 의 `keytar` 대신). 이 박스에서 잰 결과 Secret Service 가 없어 여는 순간 실패하고(`org.freedesktop.secrets` 없음) **파일 폴백이 그대로 발동한다** — 재현: `node -e "require('@napi-rs/keyring/keytar.js').findCredentials('vscode-vsce').then(r=>console.log('ok',r.length),e=>console.log('ERR',e.message))"` 가 `ERR` 이면 위 문장이 맞다. `ok` 가 나오는 박스에서는 토큰이 키링에 앉으므로 이 절과 `package-vsix.mjs` 의 경고를 다시 본다.
 
 `VSCE_PAT` 가 저장분보다 **먼저** 쓰인다(`vsce` 의 `getPAT()` 가 `options.pat` 를 먼저 반환한다 —
 소스 확인). 그래서 주입하는 쪽이 항상 이긴다.
