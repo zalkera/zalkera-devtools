@@ -27,7 +27,23 @@ import { fileURLToPath } from "node:url";
 import { basename, dirname, join } from "node:path";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-const read = (p) => readFileSync(join(root, p), "utf8");
+/**
+ * ⚠ **읽은 것을 기억한다.** 이 검사기는 한 파일을 **핀 수만큼** 다시 읽는다 — `extension.ts`(256 KB)
+ *   하나를 156번 읽어 매 실행 39 MB 였다(심의 실측 · 199 ms → 47 ms). 핀이 늘 때마다 자라는
+ *   형상이라 자리가 커지기 전에 닫는다.
+ *
+ * ⚠ **판정은 한 글자도 안 바뀐다** — 이 검사기는 읽기만 하고, 한 실행 안에서 파일이 바뀌지 않는다.
+ *   (변이 실험은 «다음» 실행이 새 프로세스라 캐시를 물려받지 않는다.)
+ */
+const readCache = new Map();
+const read = (p) => {
+    let text = readCache.get(p);
+    if (text === undefined) {
+        text = readFileSync(join(root, p), "utf8");
+        readCache.set(p, text);
+    }
+    return text;
+};
 
 /** [파일, 있어야 하는 조각, 사라지면 무슨 일이 나는가] */
 const WIRES = [
