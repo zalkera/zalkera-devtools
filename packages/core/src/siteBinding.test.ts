@@ -272,7 +272,9 @@ test("decideSiteChoice 와 decideTenantScope 가 **전 칸에서** 어긋나지 
         const where = `open=${siteFolderOpen} folder=${folderOpen} binding=${binding} current=${current}`;
         // ⚠ **「적힌다」로 뭉개지 않는다.** `!== "none"` 만 보면 **어디에** 적히는지가 새어,
         //   폴더 없는 창의 값이 워크스페이스로 가는 변이를 못 본다 — 그 창에는 워크스페이스가
-        //   없으므로 그 값은 **아무 데도 안 적히는 것과 같다**(화면은 정했다고 말한다).
+        //   없으므로 그 값은 **아무 데도 안 적힌다**. 그 변이의 실제 얼굴은 조용한 실패가 아니라
+        //   **쓰기가 던져 오류로 끝나는 것**이다(`configTargetFor` 가 `Workspace` 를 고르고
+        //   VS Code 가 워크스페이스 없는 창에서 그 갱신을 거절한다).
         if (choice.kind === "elsewhere") {
           // 아무것도 안 적는 갈래끼리 맞아야 한다.
           assert.equal(scope, "none", where);

@@ -476,6 +476,16 @@ const WIRES = [
             "조건 핀만으로는 이 바꿔치기를 못 본다",
     ],
     [
+        // ⚠ **두 대입을 «둘 다» 박는다.** 한쪽만 박으면 안 박은 쪽은 아무 문면으로나 바뀐다 —
+        //    실측으로 `elsewhereTitle` 대입을 `noSourceYet` 으로 갈아도 전건 초록이었다(심의).
+        //    제목은 이 화면이 **어느 상황에서 섰는지**를 말하는 유일한 줄이라, 새면 화면이
+        //    자기가 왜 떴는지를 거짓으로 말한다.
+        "packages/vscode/src/extension.ts",
+        "quick.title = say.elsewhereTitle(picked, prompt.binding);",
+        "형제 문면으로 새면 폴더가 없는 창에 「이 폴더는 ○○ 에 연결돼 있습니다」가 뜨거나, " +
+            "소속이 다른 폴더에 그 사실을 안 말하게 된다",
+    ],
+    [
         "packages/vscode/src/extension.ts",
         "quick.title = say.noFolderTitle(picked);",
         "제목이 형제 문면으로 새면 「이 폴더는 ○○ 에 연결돼 있습니다」라고 **없는 폴더를 말한다**. " +
