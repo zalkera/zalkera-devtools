@@ -112,12 +112,30 @@ export type SiteChoice =
     /** 소속 없던 소스 폴더가 이 사이트를 입양했다 — 연결 사실을 알린다. */
     | {kind: "adopted"}
     /** 소속이 다르다 — 이 창은 그대로 두고 [ElsewhereOption] 을 낸다. */
-    | {kind: "elsewhere"};
+    | {kind: "elsewhere"}
+    /**
+     * **열린 폴더가 없는 창이다** — 고른 사이트는 창에 적혔지만 일할 자리가 없다.
+     * [ElsewhereOption] 을 그대로 낸다: 그 넷이 곧 「폴더를 정하는 길」이라 여기서도 같은 길이다.
+     *
+     * ⚠ **`elsewhere` 와 적히는 것이 다르다.** 저쪽은 아무것도 안 적히지만(`none`) 여기는
+     *   창의 사이트가 **적힌다**(`global`) — 취소해도 그 값은 남는다. 그러니 이 갈래의 화면에서
+     *   「바꾸지 않았습니다」로 말하면 안 된다.
+     */
+    | {kind: "no-folder"};
 
 export interface ChoiceInput {
     picked: string;
     binding: string | null;
     siteFolderOpen: boolean;
+    /**
+     * 창에 **폴더가 열려 있는가**. `siteFolderOpen` 이 참이면 이것도 참이다(소스 폴더는 폴더다).
+     *
+     * ⚠ **`siteFolderOpen` 하나로는 「폴더가 없다」와 「폴더는 있는데 소스가 아니다」가 한 칸에
+     *   접힌다.** 그 둘은 사람이 할 일이 다르다 — 앞은 자리를 **정해야** 하고, 뒤는 이미 자리에
+     *   서 있다(그 폴더가 빈 폴더면 받기가 거기로 간다 · [decideFetchTargetPlan]). 화면 문면도
+     *   그만큼 달라야 해서, 접으면 둘 중 하나에 거짓말을 하게 된다.
+     */
+    folderOpen: boolean;
     /**
      * **고르기 전**의 유효 사이트. `unchanged` 를 가리는 데만 쓴다.
      *
@@ -147,6 +165,13 @@ export function decideSiteChoice(input: ChoiceInput): SiteChoice {
         return input.current === input.picked ? {kind: "unchanged"} : {kind: "switched"};
     }
     if (input.siteFolderOpen) return {kind: "adopted"};
+    // ⚠ **`siteFolderOpen` 을 먼저 본다 — 모순 입력의 방어선이 여기다.** 두 불리언은 「소스 폴더면
+    //    폴더다」라는 불변식으로 묶여 있는데, 타입이 그것을 못 지킨다. 순서를 뒤집으면 잘못 지은
+    //    입력 한 칸이 입양을 통째로 삼켜, 소스 폴더를 열어 둔 사람이 폴더를 다시 고르게 된다.
+    if (!input.folderOpen) return {kind: "no-folder"};
+    // ⚠ **`unchanged` 는 폴더가 있을 때만 참이다.** 폴더가 없는 창에서 「이미 그 사이트로 작업
+    //    중」이라고 말하면 작업할 자리가 없는 사람에게 다 됐다고 말하는 것이다 — 그 칸은 위에서
+    //    이미 `no-folder` 로 갔다(오너 판정).
     return input.current === input.picked ? {kind: "unchanged"} : {kind: "switched"};
 }
 

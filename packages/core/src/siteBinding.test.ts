@@ -77,6 +77,7 @@ test("제안 — 소속이 없으면 입양, 같으면 그냥 전환", () => {
       picked: "alpha",
       binding: null,
       siteFolderOpen: true,
+      folderOpen: true,
       current: "beta",
     }),
     { kind: "adopted" },
@@ -86,19 +87,22 @@ test("제안 — 소속이 없으면 입양, 같으면 그냥 전환", () => {
       picked: "alpha",
       binding: "alpha",
       siteFolderOpen: true,
+      folderOpen: true,
       current: "beta",
     }),
     { kind: "switched" },
   );
-  // 폴더가 없으면 덮을 소속도 없다 — 오늘의 동작 그대로.
+  // 폴더가 아예 없는 창은 **자리를 정하는 물음**으로 간다 — 종전에는 `switched` 로 접혀
+  // 「사이트: alpha」 알림 하나로 끝났고, 다음에 할 일이 화면에 없었다.
   assert.deepEqual(
     decideSiteChoice({
       picked: "alpha",
       binding: null,
       siteFolderOpen: false,
+      folderOpen: false,
       current: "beta",
     }),
-    { kind: "switched" },
+    { kind: "no-folder" },
   );
 });
 
@@ -131,11 +135,15 @@ test("소스 아닌 폴더에 구판 링크가 남아 있어도 전역을 더럽
 // ── 아무것도 안 바뀐 것을 안 바뀌었다고 말하는가 ──────────────────────────
 
 test("이미 그 사이트면 unchanged — 「바꿨습니다」는 거짓이다", () => {
+  // ⚠ **폴더가 있는 칸만 잰다.** 폴더가 없는 창의 재선택은 `unchanged` 가 아니라 `no-folder` 다
+  //   (오너 판정) — 작업할 자리가 없는 사람에게 「이미 작업 중」은 다 됐다는 말이 된다. 그 칸은
+  //   아래 「폴더 없는 창에서 같은 사이트를 다시 골라도」가 따로 잠근다.
   for (const siteFolderOpen of [false, true]) {
     const choice = decideSiteChoice({
       picked: "alpha",
       binding: siteFolderOpen ? "alpha" : null,
       siteFolderOpen,
+      folderOpen: true,
       current: "alpha",
     });
     assert.deepEqual(choice, { kind: "unchanged" }, `siteFolderOpen=${siteFolderOpen}`);
@@ -146,7 +154,7 @@ test("어긋난 창에서 자기 사이트를 고르면 switched — 복원이 �
   // 표식은 alpha 인데 링크 잔재로 유효 사이트가 beta 인 창. alpha 를 고르면 링크가 표식에
   // 맞춰지므로 **실제로 바뀐다** — 여기서 unchanged 로 접으면 복원 사실을 숨긴다.
   assert.deepEqual(
-    decideSiteChoice({ picked: "alpha", binding: "alpha", siteFolderOpen: true, current: "beta" }),
+    decideSiteChoice({ picked: "alpha", binding: "alpha", siteFolderOpen: true, folderOpen: true, current: "beta" }),
     { kind: "switched" },
   );
 });
@@ -154,7 +162,7 @@ test("어긋난 창에서 자기 사이트를 고르면 switched — 복원이 �
 test("소속이 다르면 elsewhere — 로컬본을 알든 모르든 갈래는 하나다", () => {
   // 종전에는 `offer` 로 접혀 선택지가 하나뿐이었다. 무엇을 낼지는 elsewhereOptions 가 정한다.
   assert.deepEqual(
-    decideSiteChoice({ picked: "beta", binding: "alpha", siteFolderOpen: true, current: "alpha" }),
+    decideSiteChoice({ picked: "beta", binding: "alpha", siteFolderOpen: true, folderOpen: true, current: "alpha" }),
     { kind: "elsewhere" },
   );
 });
@@ -254,11 +262,14 @@ test("decideSiteChoice 와 decideTenantScope 가 **전 칸에서** 어긋나지 
   // 「화면은 y 라고 말하는데 아무것도 안 적힌다」가 이 축의 오래된 실패다. 두 함수가 소속을
   // 보는 순서를 달리하면 그 형상이 조용히 되살아난다 — 전수로 잠근다.
   for (const siteFolderOpen of [false, true]) {
+    // ⚠ **모순 조합(`siteFolderOpen` 만 참)도 돈다.** 두 불리언은 「소스 폴더면 폴더다」로 묶여
+    //   있는데 타입이 그것을 못 지킨다 — 그 칸까지 돌려야 판정의 순서가 방어선이라는 것이 참이 된다.
+    for (const folderOpen of [false, true]) {
     for (const binding of [null, "alpha", "beta"]) {
       for (const current of ["alpha", "beta", ""]) {
-        const choice = decideSiteChoice({ picked: "alpha", binding, siteFolderOpen, current });
+        const choice = decideSiteChoice({ picked: "alpha", binding, siteFolderOpen, folderOpen, current });
         const scope = decideTenantScope({ siteFolderOpen, binding, chosen: "alpha" });
-        const where = `open=${siteFolderOpen} binding=${binding} current=${current}`;
+        const where = `open=${siteFolderOpen} folder=${folderOpen} binding=${binding} current=${current}`;
         if (choice.kind === "elsewhere") {
           // 아무것도 안 적는 갈래끼리 맞아야 한다.
           assert.equal(scope, "none", where);
@@ -268,16 +279,56 @@ test("decideSiteChoice 와 decideTenantScope 가 **전 칸에서** 어긋나지 
         }
       }
     }
+    }
   }
 });
 
 test("소속은 있는데 소스가 아닌 폴더 — 「바꿨습니다」로 말하지 않는다", () => {
   // package.json 을 지웠거나 아직 안 받은 자리. 종전 순서에서는 switched 인데 아무것도 안 적혔다.
   assert.deepEqual(
-    decideSiteChoice({ picked: "beta", binding: "alpha", siteFolderOpen: false, current: "alpha" }),
+    decideSiteChoice({ picked: "beta", binding: "alpha", siteFolderOpen: false, folderOpen: true, current: "alpha" }),
     { kind: "elsewhere" },
   );
   assert.equal(decideTenantScope({ siteFolderOpen: false, binding: "alpha", chosen: "beta" }), "none");
+});
+
+// ── 폴더가 없는 창 ────────────────────────────────────────────────────────
+
+test("폴더 없는 창에서 같은 사이트를 다시 골라도 no-folder — 「이미 작업 중」은 자리가 있을 때의 말이다", () => {
+  // 오너 판정. 폴더가 없으면 그 사람이 하려던 일은 **자리를 정하는 것**이고, 그것은 사이트를
+  // 바꿨는지와 무관하다. `unchanged` 로 접으면 다음 걸음이 화면에서 사라진다.
+  assert.deepEqual(
+    decideSiteChoice({ picked: "alpha", binding: null, siteFolderOpen: false, folderOpen: false, current: "alpha" }),
+    { kind: "no-folder" },
+  );
+});
+
+test("폴더는 열렸는데 소스가 아닌 창은 no-folder 가 아니다 — 그 사람은 이미 자리에 서 있다", () => {
+  // 두 칸을 한 불리언으로 접으면 여기가 샌다. 빈 폴더를 열어 둔 사람에게 「폴더가 없습니다」라고
+  // 말하게 되고, 받기가 그 폴더로 갈 수 있다는 사실(`decideFetchTargetPlan` 의 `here`)도 가려진다.
+  assert.deepEqual(
+    decideSiteChoice({ picked: "alpha", binding: null, siteFolderOpen: false, folderOpen: true, current: "beta" }),
+    { kind: "switched" },
+  );
+  assert.deepEqual(
+    decideSiteChoice({ picked: "alpha", binding: null, siteFolderOpen: false, folderOpen: true, current: "alpha" }),
+    { kind: "unchanged" },
+  );
+});
+
+test("소스 폴더가 열려 있으면 입양이 이긴다 — 모순 입력이 입양을 삼키지 않는다", () => {
+  // 「소스 폴더면 폴더다」를 타입이 못 지킨다. 판정의 **순서**가 그 방어선이라, 뒤집히면 소스
+  // 폴더를 열어 둔 사람이 폴더를 다시 고르게 된다.
+  assert.deepEqual(
+    decideSiteChoice({ picked: "alpha", binding: null, siteFolderOpen: true, folderOpen: false, current: "beta" }),
+    { kind: "adopted" },
+  );
+});
+
+test("no-folder 는 **적히는** 갈래다 — 화면이 「안 바뀌었다」고 말할 자리가 아니다", () => {
+  // `elsewhere` 와 갈리는 지점. 저쪽은 `none` 이라 취소하면 원래 사이트가 남지만, 이쪽은 이미
+  // 창에 적힌 뒤 화면이 뜬다 — 취소해도 그 사이트는 남는다. 두 화면의 문면이 갈리는 근거다.
+  assert.equal(decideTenantScope({ siteFolderOpen: false, binding: null, chosen: "alpha" }), "global");
 });
 
 // ── 「받을 것이 없다」의 두 사유 ────────────────────────────────────────────

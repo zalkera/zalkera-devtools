@@ -3999,6 +3999,9 @@ async function chooseSite(): Promise<void> {
       picked: code,
       binding,
       siteFolderOpen: siteDir() !== null,
+      // ⚠ **`siteDir()` 로 갈음할 수 없다.** 그것은 「소스 폴더인가」라 소스가 아닌 폴더를 연
+      //    창을 「폴더가 없다」쪽으로 접는다 — 그 사람은 이미 자리에 서 있다.
+      folderOpen: workspaceDir() !== undefined,
       current,
     });
     await refreshSidebar();
@@ -4024,8 +4027,16 @@ async function chooseSite(): Promise<void> {
       }
       return;
     }
+    if (choice.kind === "no-folder") {
+      // **고른 사이트는 이미 적혔다**(`decideTenantScope` 의 `global`). 그러니 여기서 할 말은
+      // 「무엇으로 정했나」가 아니라 **「어디서 하나」**다 — 그 물음을 화면이 받는다.
+      log(`${code} 작업을 어느 폴더에서 할지 고르는 화면을 냅니다 — 이 창에는 열린 폴더가 없습니다.`);
+      await offerSiteFolder(code, {kind: "no-folder"});
+      return;
+    }
     // `elsewhere` 는 소속이 있을 때만 나온다 — 빈 문자열로 물러설 자리가 아니다.
-    await offerElsewhere(code, binding ?? "");
+    log(`이 폴더는 ${binding} 사이트에 연결돼 있어 ${code} 작업은 다른 폴더에서 합니다.`);
+    await offerSiteFolder(code, {kind: "elsewhere", binding: binding ?? ""});
   } catch (error) {
     if (isCancelled(error)) return;
     throw error;
@@ -4033,18 +4044,37 @@ async function chooseSite(): Promise<void> {
 }
 
 /**
- * 고른 사이트가 **이 폴더의 것이 아닐 때** 무엇을 할지 고르게 한다.
+ * 이 화면이 **어느 상황에서 섰는가.** 제목의 근거가 갈리므로 갈래로 받는다.
  *
- * ⚠ **이 창의 사이트는 바뀌지 않았다**(`decideTenantScope` 가 `none` 이라 아무것도 안 적혔다).
- *   그러니 「바꿨습니다」로 말하면 안 된다 — 화면과 실제가 갈린다.
+ * ⚠ **지은 제목을 넘기지 않는다.** 문자열로 받으면 소독 보장이 호출부로 흩어지고, 알림 소독
+ *   검사기는 매개변수를 선언표로 역추적할 수 없어 **그 자리에서 눈을 감는다**(실측 — 이 화면의
+ *   `title` 이 허용 목록 밖으로 잡혔다). 문면은 정본(`say`)이 짓고 이 파일이 그대로 건다.
+ */
+type SiteFolderPrompt =
+  /** 열린 폴더가 **남의 사이트** 것이다. `binding` 은 그 소속이다. */
+  | {kind: "elsewhere"; binding: string}
+  /** **열린 폴더가 없다.** 가리킬 폴더가 없으므로 제목이 폴더를 말하지 않는다. */
+  | {kind: "no-folder"};
+
+/**
+ * 고른 사이트의 작업을 **어느 폴더에서 할지** 고르게 한다. 부르는 자리가 둘이다.
+ *
+ * ⑴ `elsewhere` — 열린 폴더가 **남의 사이트** 것이다. 이 창은 그대로 두고 다른 자리를 낸다.
+ * ⑵ `no-folder` — **열린 폴더가 없다.** 자리를 아직 안 정한 것이라 같은 길이 그대로 쓰인다.
+ *
+ * ⚠ **제목을 여기서 짓지 않는다.** 둘은 근거가 다르다 — ⑴ 은 「이 폴더는 B 에 연결돼 있습니다」로
+ *   서고, ⑵ 에는 가리킬 폴더가 없다. 한 문장으로 덮으면 둘 중 하나가 거짓이 된다.
+ *
+ * ⚠ **「적히는 것」도 둘이 다르다.** ⑴ 은 `decideTenantScope` 가 `none` 이라 **아무것도 안 적히고**,
+ *   ⑵ 는 창의 사이트가 `global` 로 **적힌 뒤** 여기 온다. 그래서 ⑴ 에서는 「바꿨습니다」가 거짓이고,
+ *   ⑵ 에서는 취소해도 그 사이트가 남는다 — 어느 쪽이든 이 화면이 **적었다고 말하지 않는** 이유다.
  *
  * ⚠ **알림이 아니라 고르는 화면이다.** 알림은 단추 두셋이 한계이고 저절로 사라진다 — 여기서
  *   내야 할 길은 그보다 많고, 사라지면 사람은 자기가 고른 것이 무시당했다고 읽는다. Esc 가 곧
- *   취소이고, 그때 아무것도 안 적히는 것은 위 `none` 판정이 이미 담보한다.
+ *   취소이고, ⑴ 에서 그때 아무것도 안 적히는 것은 위 `none` 판정이 이미 담보한다.
  */
-async function offerElsewhere(picked: string, binding: string): Promise<void> {
-  log(`이 폴더는 ${binding} 사이트에 연결돼 있어 ${picked} 작업은 다른 폴더에서 합니다.`);
-  // 고른 사이트를 **여기서 잡는다.** 이 창의 유효 사이트는 아직 이 폴더의 것이라, 캡처 없이
+async function offerSiteFolder(picked: string, prompt: SiteFolderPrompt): Promise<void> {
+  // 고른 사이트를 **여기서 잡는다.** ⑴ 에서 이 창의 유효 사이트는 아직 이 폴더의 것이라, 캡처 없이
   // 부르면 받기가 엉뚱한 사이트의 소스를 내려받는다.
   const pinned = captureTenant(picked);
   const confirmedDir = confirmedFolderFor(picked);
@@ -4062,7 +4092,13 @@ async function offerElsewhere(picked: string, binding: string): Promise<void> {
       quick.onDidAccept(() => resolve(quick.selectedItems[0]?.option));
       quick.onDidHide(() => resolve(undefined));
     });
-    quick.title = say.elsewhereTitle(picked, binding);
+    // ⚠ **삼항으로 합치지 않는다.** 소독 검사는 `say.*(…)` 가 **대입 자리에 직접** 서 있을 때만
+    //    보고, 조건식으로 감싸면 허용 목록 밖으로 떨어진다. 갈래마다 한 대입이 그 그물의 조건이다.
+    if (prompt.kind === "elsewhere") {
+      quick.title = say.elsewhereTitle(picked, prompt.binding);
+    } else {
+      quick.title = say.noFolderTitle(picked);
+    }
     quick.ignoreFocusOut = true;
     quick.placeholder = "무엇을 할지 고르세요";
     // ⚠ **기다리지 않고 그린다.** 조회를 앞세우면 흔한 칸에서도 빈 목록을 보게 되는데, 그렇게
