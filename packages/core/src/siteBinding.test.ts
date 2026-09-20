@@ -306,6 +306,10 @@ test("형제 판정과 **칸마다** 같은 결론이다 — 「같은 순서」
       assert.deepEqual(picked, { kind: "open-unlinked" }, where);
     } else {
       // `bind` — 적어도 된다. 소속이 이미 그 사이트면 `open`, 아무것도 없으면 처음 주는 동의다.
+      // ⚠ **빈 문자열 tenant 칸이 표에 서는 날 이 술어에 `link.tenant !== ""` 를 더해야 한다** —
+      //   형제 판정은 그것을 「안 적었다」로 보므로(`decideImportBinding`), 빼 둔 채 그 칸을 더하면
+      //   시험이 **틀리게 운다**(심의 지적). 지금은 표에 그 값이 없다는 것을 **타입이 증명한다** —
+      //   여기서 비교를 적으면 「겹치지 않는 비교」로 typecheck 가 막는다(실측).
       const bound = mark !== null || link.kind === "tenant";
       assert.deepEqual(picked, bound ? { kind: "open" } : { kind: "link-consent" }, where);
     }

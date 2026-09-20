@@ -4398,8 +4398,9 @@ async function openPickedLocalFolder(
   // ⚠ **동의를 받고도 못 썼으면 열지 않는다.** 위 취소 가드의 근거(「연결 없이 열면 소속 없는
   //    폴더 + 잘못된 유효 사이트를 우리가 만들어 준다」)는 「동의했는데 실패했다」에도 그대로
   //    적용된다. 주석에 쓴 이유를 취소에만 걸어 두면 그 근거가 반쪽이 된다.
-  //    못 쓰는 `.zalkera`·쓰기가 막힌 `settings.json` 에서 실제로 밟힌다. ⚠ **JSONC 는 이제 이
-  //    문에 안 온다** — 위 `open-unlinked` 가 먼저 받는다(그 전에는 여기까지 흘러왔다).
+  //    못 쓰는 `.zalkera`·쓰기가 막힌 `settings.json` 에서 실제로 밟힌다. ⚠ **JSONC 때문에 이 문이
+  //    닫히는 일은 이제 없다** — 소속을 모르는 칸은 위 `open-unlinked` 가 먼저 받는다. 표식이 맞는
+  //    폴더에 JSONC 링크가 붙은 경우는 `open` 으로 여기 «오지만», 표식이 있으니 이 가드를 지난다.
   if (folderBinding(readSourceMarkAt(dir), workspaceLinkAt(dir)) === null) {
     void vscode.window.showWarningMessage(say.pickedFolderNotLinked(picked));
     return;

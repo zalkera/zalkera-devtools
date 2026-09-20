@@ -243,6 +243,14 @@ QuickPick 에서 고른 것을 **보이는 글자로 되찾는** 코드다. 그 
   `settings.json`** 은 읽기만 「못 읽음」이 되고 쓰기 쪽은 읽어서 덮을 수 있다. 오늘은 `open-unlinked`
   의 `return` 과 `decideImportBinding` 의 `unknown` 이 그 앞을 막는다(배선 핀이 그 `return` 을 문다).
 
+## 모달 `detail` 의 별표가 글자로 보일 수 있다
+
+`MessageOptions.detail` 은 평문이고 모달 대화상자는 마크다운을 안 그린다 — `**…**` 가 별표째 보일
+개연성이 있다(VS Code 런타임 **미실측**). 지금 그 형태가 **세 자리**다(`tenantScope.ts` 의 모달 문면
+둘 · `extension.ts` 의 비-모달 하나). 한 자리만 고치면 문면이 갈리므로 **실물로 한 번 보고 셋을 함께**
+판정한다.
+**되짚을 조건**: 다음에 vsix 를 실물로 눌러 보는 회차에서 모달을 한 번 띄워 보면 끝난다.
+
 ## 알림 소독 검사에 남은 구멍 (닫은 것 밖)
 
 `+=` 같은 복합 대입 · `Object.assign` · 요소 접근(`q["title"]`) · 문자열 키 · 대화상자 `title` 은
