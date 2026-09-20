@@ -482,8 +482,8 @@ const WIRES = [
         //    자기가 왜 떴는지를 거짓으로 말한다.
         "packages/vscode/src/extension.ts",
         "quick.title = say.elsewhereTitle(picked, prompt.binding);",
-        "형제 문면으로 새면 폴더가 없는 창에 「이 폴더는 ○○ 에 연결돼 있습니다」가 뜨거나, " +
-            "소속이 다른 폴더에 그 사실을 안 말하게 된다",
+        "형제 문면으로 새면 소속이 다른 폴더에서 **그 사실을 안 말하게 된다** — 그 한 줄이 " +
+            "이 화면이 왜 떴는지를 말하는 유일한 자리다(폴더 없는 창 쪽은 바로 아래 핀이 진다)",
     ],
     [
         "packages/vscode/src/extension.ts",
