@@ -270,9 +270,18 @@ test("decideSiteChoice 와 decideTenantScope 가 **전 칸에서** 어긋나지 
         const choice = decideSiteChoice({ picked: "alpha", binding, siteFolderOpen, folderOpen, current });
         const scope = decideTenantScope({ siteFolderOpen, binding, chosen: "alpha" });
         const where = `open=${siteFolderOpen} folder=${folderOpen} binding=${binding} current=${current}`;
+        // ⚠ **「적힌다」로 뭉개지 않는다.** `!== "none"` 만 보면 **어디에** 적히는지가 새어,
+        //   폴더 없는 창의 값이 워크스페이스로 가는 변이를 못 본다 — 그 창에는 워크스페이스가
+        //   없으므로 그 값은 **아무 데도 안 적히는 것과 같다**(화면은 정했다고 말한다).
         if (choice.kind === "elsewhere") {
           // 아무것도 안 적는 갈래끼리 맞아야 한다.
           assert.equal(scope, "none", where);
+        } else if (choice.kind === "no-folder") {
+          // 폴더가 없으니 적힐 곳은 창 전역뿐이다. 취소해도 남는다는 말의 근거가 이 줄이다.
+          assert.equal(scope, "global", where);
+        } else if (choice.kind === "adopted") {
+          // 입양은 **그 폴더**가 사이트를 갖는 것이다 — 전역으로 새면 남의 폴더까지 따라온다.
+          assert.equal(scope, "workspace", where);
         } else {
           // 무언가 적히는 갈래에서 「아무것도 안 적힌다」가 나오면 화면이 거짓말을 한다.
           assert.notEqual(scope, "none", where);
@@ -323,12 +332,6 @@ test("소스 폴더가 열려 있으면 입양이 이긴다 — 모순 입력이
     decideSiteChoice({ picked: "alpha", binding: null, siteFolderOpen: true, folderOpen: false, current: "beta" }),
     { kind: "adopted" },
   );
-});
-
-test("no-folder 는 **적히는** 갈래다 — 화면이 「안 바뀌었다」고 말할 자리가 아니다", () => {
-  // `elsewhere` 와 갈리는 지점. 저쪽은 `none` 이라 취소하면 원래 사이트가 남지만, 이쪽은 이미
-  // 창에 적힌 뒤 화면이 뜬다 — 취소해도 그 사이트는 남는다. 두 화면의 문면이 갈리는 근거다.
-  assert.equal(decideTenantScope({ siteFolderOpen: false, binding: null, chosen: "alpha" }), "global");
 });
 
 // ── 「받을 것이 없다」의 두 사유 ────────────────────────────────────────────

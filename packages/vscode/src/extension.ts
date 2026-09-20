@@ -4092,8 +4092,16 @@ async function offerSiteFolder(picked: string, prompt: SiteFolderPrompt): Promis
       quick.onDidAccept(() => resolve(quick.selectedItems[0]?.option));
       quick.onDidHide(() => resolve(undefined));
     });
-    // ⚠ **삼항으로 합치지 않는다.** 소독 검사는 `say.*(…)` 가 **대입 자리에 직접** 서 있을 때만
-    //    보고, 조건식으로 감싸면 허용 목록 밖으로 떨어진다. 갈래마다 한 대입이 그 그물의 조건이다.
+    // ⚠ **갈래마다 한 대입으로 둔다 — 그물이 무는 것이 그 «한 줄» 이다.** 이 두 줄을 지키는 것은
+    //    배선 검사(`check-wiring`)이고, 그것은 아래 두 대입을 **문면 그대로** 센다. 삼항으로
+    //    합치면 그 문면이 사라져 배선이 red 가 된다(실측).
+    //
+    //    ⚠ **그래서 여기에 그 줄을 인용하지 않는다.** 그 검사기는 원시 파일을 세므로 주석 안의
+    //    사본까지 한 자리로 세어, 인용한 순간 「2자리다(기대 1)」로 막힌다(실측 — 이 주석이 그랬다).
+    //
+    //    ⚠ **알림 소독 검사는 여기서 삼항을 «안» 막는다** — `inspect()` 가 조건식을 타고 들어가
+    //    양쪽 가지를 본다(실측: 삼항으로 합쳐도 `check:notice` 초록). 그 검사기가 무는 것은
+    //    **제목을 문자열 매개변수로 받는 형태**다(그렇게 짰다가 잡혔다 — 이 함수가 갈래를 받는 이유).
     if (prompt.kind === "elsewhere") {
       quick.title = say.elsewhereTitle(picked, prompt.binding);
     } else {
@@ -4244,7 +4252,9 @@ function describeOption(option: ElsewhereOption): vscode.QuickPickItem {
     case "fetch":
       return {
         label: "$(cloud-download) 소스 다운로드",
-        detail: "새 빈 폴더에 받습니다 — 지금 폴더는 그대로 둡니다",
+        // ⚠ **「지금 폴더」를 말하지 않는다.** 이 화면은 **열린 폴더가 없는 창**에도 선다 —
+        //    거기서는 그 말의 지시대상이 없다. 지키려는 요점(아무것도 안 덮는다)은 그대로 적는다.
+        detail: "새 빈 폴더에 받습니다 — 있는 파일은 덮지 않습니다",
       };
     case "pick-folder":
       return {
