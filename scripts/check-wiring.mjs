@@ -707,6 +707,23 @@ const WIRES = [
             "폴더가 빈 폴더로 세어져 그 자리에 오므로, 사람은 소속이 바뀌는 줄 모르고 동의한다",
     ],
     [
+        // ⚠ **이 세 줄이 「안 적는다」의 전부다**(심의 실측). `return;` 한 줄만 지우면 아래
+        //    `linkFolderToTenant` 로 흘러 남의 소속을 덮는데, 호출문이 그대로라 **횟수 앵커가
+        //    못 본다** — 종전 커밋 메시지가 「횟수 앵커가 문다」고 적었고 그것이 거짓이었다.
+        "packages/vscode/src/extension.ts",
+        "    await openSiteFolder(dir);\n    return;\n  }\n  if (plan.kind === \"refuse\") {",
+        "설정을 못 읽은 폴더가 아래로 흘러 연결을 적는다 — JSONC 는 쓰기 쪽이 막지만 64KB 넘는 " +
+            "`settings.json` 은 읽기만 상한에 걸리고 쓰기 쪽은 읽어서 **덮는다**",
+    ],
+    [
+        // ⚠ **동의 게이트 셋** — 모달을 띄우고 답을 안 보면 띄운 값이 0이 된다. 세 자리가 같은
+        //    형태를 쓴다(직접 고르기의 처음 연결 · 설정 못 읽음 · 재연결).
+        "packages/vscode/src/extension.ts",
+        "if (answer !== ask.action) return;",
+        "모달을 띄우고 답을 안 보면 사람이 취소한 것을 한 것으로 읽는다",
+        3,
+    ],
+    [
         "packages/vscode/src/extension.ts",
         "decidePickedFolder(readSourceMarkAt(dir), workspaceLinkState(dir), picked)",
         "3상 판독을 안 실으면 「못 읽었다」가 「없다」로 접혀, 소속이 적힌 폴더에 「처음 연결합니다」라고 " +

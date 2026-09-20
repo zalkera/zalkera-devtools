@@ -252,21 +252,64 @@ test("못 읽었어도 **표식이 있으면 표식이 이긴다** — 모름이
   });
 });
 
-test("**소속을 바꾸는 갈래가 없다** — 재연결은 「사이트에 연결」 하나로 남는다", () => {
-  // 이 함수가 소속 있는 폴더를 열어 주기 시작하면 사이트 선택이 재연결 표면이 된다.
-  // ⚠ 전수다 — 표식 3상 × 링크 4상. 갈래가 늘면 여기서 먼저 걸린다.
-  const kinds = new Set<string>();
-  for (const mark of [null, markOf("alpha"), markOf("beta")]) {
-    for (const link of [
-      { kind: "absent" } as const,
-      { kind: "unreadable" } as const,
-      { kind: "tenant", tenant: "alpha" } as const,
-      { kind: "tenant", tenant: "beta" } as const,
-    ]) {
-      kinds.add(decidePickedFolder(mark, link, "alpha").kind);
+/** 표식 3상 × 링크 4상. 두 시험이 같은 칸을 쓴다. */
+const PICKED_CELLS = [null, markOf("alpha"), markOf("beta")].flatMap((mark) =>
+  (
+    [
+      { kind: "absent" },
+      { kind: "unreadable" },
+      { kind: "tenant", tenant: "alpha" },
+      { kind: "tenant", tenant: "beta" },
+    ] as const
+  ).map((link) => ({ mark, link })),
+);
+
+test("**칸마다 무엇이 나오는지** 전수로 못 박는다 — kind 집합만 보면 칸이 바뀌어도 초록이다", () => {
+  // 🔴 종전 시험은 `new Set(...)` 의 **집합**만 봐서, 표식이 링크에 지도록 뒤집어도 네 kind 가
+  //    다 나오면 통과했다(심의 실측: 표식 alpha·링크 beta 가 `refuse beta` 로 바뀌어도 1017 초록).
+  const expected = [
+    // 표식 없음 — 링크가 정한다.
+    { kind: "link-consent" },
+    { kind: "open-unlinked" },
+    { kind: "open" },
+    { kind: "refuse", bound: "beta" },
+    // 표식 alpha — **표식이 이긴다.** 못 읽는 링크도, 남의 링크도 이것을 못 뒤집는다.
+    { kind: "open" },
+    { kind: "open" },
+    { kind: "open" },
+    { kind: "open" },
+    // 표식 beta — 역시 표식이 이긴다.
+    { kind: "refuse", bound: "beta" },
+    { kind: "refuse", bound: "beta" },
+    { kind: "refuse", bound: "beta" },
+    { kind: "refuse", bound: "beta" },
+  ];
+  PICKED_CELLS.forEach(({ mark, link }, at) => {
+    assert.deepEqual(
+      decidePickedFolder(mark, link, "alpha"),
+      expected[at],
+      `mark=${mark?.tenant ?? "null"} link=${JSON.stringify(link)}`,
+    );
+  });
+});
+
+test("형제 판정과 **칸마다** 같은 결론이다 — 「같은 순서」를 말로만 적어 두지 않는다", () => {
+  // KDoc 이 「형제 `decideImportBinding` 과 같은 순서로 본다」고 약속한다. 한쪽만 순서가 바뀌면
+  // 여기서 선다 — 두 판정은 동사가 달라 kind 이름이 다르지만 **어느 칸에서 무엇을 아느냐**는 같다.
+  for (const { mark, link } of PICKED_CELLS) {
+    const picked = decidePickedFolder(mark, link, "alpha");
+    const imported = decideImportBinding(mark, link, "alpha");
+    const where = `mark=${mark?.tenant ?? "null"} link=${JSON.stringify(link)}`;
+    if (imported.kind === "keep") {
+      assert.deepEqual(picked, { kind: "refuse", bound: imported.bound }, where);
+    } else if (imported.kind === "unknown") {
+      assert.deepEqual(picked, { kind: "open-unlinked" }, where);
+    } else {
+      // `bind` — 적어도 된다. 소속이 이미 그 사이트면 `open`, 아무것도 없으면 처음 주는 동의다.
+      const bound = mark !== null || link.kind === "tenant";
+      assert.deepEqual(picked, bound ? { kind: "open" } : { kind: "link-consent" }, where);
     }
   }
-  assert.deepEqual([...kinds].sort(), ["link-consent", "open", "open-unlinked", "refuse"]);
 });
 
 // ── 받을 자리의 첫 제안 ────────────────────────────────────────────────────

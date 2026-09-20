@@ -4342,9 +4342,26 @@ async function openPickedLocalFolder(
   //    소속이 적힌 폴더가 「소속 없음」으로 보이던 자리다(보안 심의). 판정이 3상을 직접 본다.
   const plan = decidePickedFolder(readSourceMarkAt(dir), workspaceLinkState(dir), picked);
   if (plan.kind === "open-unlinked") {
-    // **아무것도 안 적고 연다.** 레지스트리에도 등재하지 않는다 — 우리가 모르는 것을 「그 사이트
-    // 폴더」로 기억해 두면 다음 화면이 그 거짓을 그대로 제안한다.
-    void vscode.window.showWarningMessage(say.pickedFolderLinkUnreadable(picked));
+    // ⚠ **모달이다 — 비-모달은 이 갈래에서 안 남는다**(심의 지적). 바로 아래 `openSiteFolder` 는
+    //    미리보기도 미저장 편집기도 없으면 **같은 창**을 다시 띄우는데, 그때 확장 호스트가 내려가
+    //    토스트가 사라진다. 형제 갈래와 견주어도 이 자리만 달랐다 — `refuse` 는 **안 열고** 말하고
+    //    `link-consent` 는 모달을 먼저 띄운다. 열기 **전에** 읽게 하고 물러설 길도 준다.
+    const ask = say.pickedFolderLinkUnreadable(picked);
+    const answer = await vscode.window.showWarningMessage(
+      ask.message,
+      {modal: true, detail: ask.detail},
+      ask.action,
+    );
+    if (answer !== ask.action) return;
+    // **아무것도 안 적고 연다.** 여기서 레지스트리에 등재하지도 않는다 — 등재해도
+    // `confirmedFolderFor` 가 우리 판독기로 재확증하므로 못 읽는 폴더는 **죽은 항목**이 될 뿐이다.
+    // ⚠ **「영원히 미등재」가 아니다**: 키가 적힌 JSONC 라면 도착한 창의 `rememberOpenFolder()` 가
+    //    VS Code 판독값으로 곧 등재한다 — 아는 창이 적는 것이라 옳다. 여기서 안 적을 뿐이다.
+    //
+    // ⚠ **이 `return` 이 「안 적는다」의 전부다.** 지우면 아래 `linkFolderToTenant` 로 흘러가
+    //    남의 소속을 덮는다 — JSONC 는 쓰기 쪽(`mergeTenantSetting`)이 막지만 **64KB 넘는
+    //    `settings.json`** 은 읽기만 상한에 걸리고 쓰기 쪽은 읽어서 덮는다(심의 실측). 배선 핀이
+    //    이 세 줄을 한 덩이로 문다 — 종전 커밋 메시지가 「횟수 앵커가 문다」고 적었는데 거짓이었다.
     await openSiteFolder(dir);
     return;
   }
@@ -4381,7 +4398,8 @@ async function openPickedLocalFolder(
   // ⚠ **동의를 받고도 못 썼으면 열지 않는다.** 위 취소 가드의 근거(「연결 없이 열면 소속 없는
   //    폴더 + 잘못된 유효 사이트를 우리가 만들어 준다」)는 「동의했는데 실패했다」에도 그대로
   //    적용된다. 주석에 쓴 이유를 취소에만 걸어 두면 그 근거가 반쪽이 된다.
-  //    JSONC 주석이 섞인 `settings.json`·못 쓰는 `.zalkera` 에서 실제로 밟힌다.
+  //    못 쓰는 `.zalkera`·쓰기가 막힌 `settings.json` 에서 실제로 밟힌다. ⚠ **JSONC 는 이제 이
+  //    문에 안 온다** — 위 `open-unlinked` 가 먼저 받는다(그 전에는 여기까지 흘러왔다).
   if (folderBinding(readSourceMarkAt(dir), workspaceLinkAt(dir)) === null) {
     void vscode.window.showWarningMessage(say.pickedFolderNotLinked(picked));
     return;

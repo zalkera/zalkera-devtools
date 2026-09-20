@@ -80,6 +80,48 @@ const NOTIFY = new Set(["showInformationMessage", "showWarningMessage", "showErr
  */
 const DIALOG = new Set(["showOpenDialog", "showSaveDialog"]);
 
+/**
+ * **표기가 달라도 같은 이름이다.** `x.title` 과 `x["title"]`, `{title: …}` 와 `{"title": …}` 는
+ * 같은 칸을 채운다 — `getText()` 로 읽으면 뒤엣것이 따옴표째 와서 집합 조회가 빗나간다.
+ *
+ * ⚠ **열거는 반드시 새는 형태를 남긴다**(이 검사기가 연산자 축에서 배운 것). 이름 층위에서 그것이
+ *   되풀이됐다 — `quick["title"] = …` 가 전건 초록이었다(심의 실측). 형제 [notifyName] 은 이미
+ *   요소 접근을 받는데 이쪽만 안 받던 **한 파일 안의 불일치**다.
+ */
+function textOfName(node) {
+    if (node === undefined || node === null) return null;
+    if (ts.isIdentifier(node) || ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
+        return node.text;
+    }
+    return null;
+}
+
+/** 호출이 [DIALOG] 의 것이면 그 이름. `w.showOpenDialog(…)` · `w["showOpenDialog"](…)` 둘 다. */
+function dialogCallName(callee) {
+    if (ts.isPropertyAccessExpression(callee)) {
+        const name = textOfName(callee.name);
+        return name !== null && DIALOG.has(name) ? name : null;
+    }
+    if (ts.isElementAccessExpression(callee)) {
+        const name = textOfName(callee.argumentExpression);
+        return name !== null && DIALOG.has(name) ? name : null;
+    }
+    return null;
+}
+
+/** 대입 좌변이 [QUICK_TEXT] 칸을 가리키면 그 이름. `x.title` · `x["title"]` 둘 다 받는다. */
+function quickTextTarget(left) {
+    if (ts.isPropertyAccessExpression(left)) {
+        const name = textOfName(left.name);
+        return name !== null && QUICK_TEXT.has(name) ? name : null;
+    }
+    if (ts.isElementAccessExpression(left)) {
+        const name = textOfName(left.argumentExpression);
+        return name !== null && QUICK_TEXT.has(name) ? name : null;
+    }
+    return null;
+}
+
 /** 고르는 화면(QuickPick·InputBox)의 **글자 칸** — 대입으로 들어간다. */
 const QUICK_TEXT = new Set(["title", "placeholder", "prompt"]);
 
@@ -429,16 +471,19 @@ function scan(rel, { allTemplates }) {
         }
 
         // ⑸ OS 대화상자(`showOpenDialog`·`showSaveDialog`)의 `title`.
-        if (
-            ts.isCallExpression(node) &&
-            ts.isPropertyAccessExpression(node.expression) &&
-            DIALOG.has(node.expression.name.getText())
-        ) {
+        // ⚠ **호출 이름도 표기가 둘이다** — 형제 `notifyName` 과 같은 잣대로 읽는다.
+        // ⚠ **인자 객체를 «변수로» 넘기면 못 본다** — 이 검사기는 데이터흐름을 따라가지 않는다
+        //    (⑵ `withProgress` 가 진 것과 같은 한계 · `doc/DEFERRED.md` 에 적어 뒀다).
+        const dialogName = ts.isCallExpression(node) ? dialogCallName(node.expression) : null;
+        if (dialogName !== null) {
             for (const arg of node.arguments) {
                 if (!ts.isObjectLiteralExpression(arg)) continue;
                 for (const pr of arg.properties) {
-                    if (ts.isPropertyAssignment(pr) && pr.name.getText() === "title") {
-                        inspect(pr.initializer, rel, `대화상자 ${node.expression.name.getText()} title`);
+                    if (!ts.isPropertyAssignment(pr)) continue;
+                    // `openLabel`·`saveLabel`·`filters` 도 사람이 읽는 글자지만 오늘은 전부
+                    // 리터럴이다. 값이 서는 날 여기 더한다.
+                    if (textOfName(pr.name) === "title") {
+                        inspect(pr.initializer, rel, `대화상자 ${dialogName} title`);
                     }
                 }
             }
@@ -490,11 +535,9 @@ function scan(rel, { allTemplates }) {
         //    열거는 반드시 새는 형태를 남기고, TypeScript 의 대입 연산자는 이 범위가 전부다.
         const isAssignOp = (kind) =>
             kind >= ts.SyntaxKind.FirstAssignment && kind <= ts.SyntaxKind.LastAssignment;
-        if (ts.isBinaryExpression(node) &&
-            isAssignOp(node.operatorToken.kind) &&
-            ts.isPropertyAccessExpression(node.left) &&
-            QUICK_TEXT.has(node.left.name.getText())) {
-            inspect(node.right, rel, `고르는 화면 ${node.left.name.getText()}`);
+        if (ts.isBinaryExpression(node) && isAssignOp(node.operatorToken.kind)) {
+            const target = quickTextTarget(node.left);
+            if (target !== null) inspect(node.right, rel, `고르는 화면 ${target}`);
         }
 
         // ⚠ **대입문을 안 거치고 같은 칸을 채우는 길**(심의 실측 — 이것도 전건 초록이었다).
@@ -508,8 +551,10 @@ function scan(rel, { allTemplates }) {
             for (const arg of node.arguments) {
                 if (!ts.isObjectLiteralExpression(arg)) continue;
                 for (const pr of arg.properties) {
-                    if (ts.isPropertyAssignment(pr) && QUICK_TEXT.has(pr.name.getText())) {
-                        inspect(pr.initializer, rel, `고르는 화면 ${pr.name.getText()}(Object.assign)`);
+                    if (!ts.isPropertyAssignment(pr)) continue;
+                    const name = textOfName(pr.name);
+                    if (name !== null && QUICK_TEXT.has(name)) {
+                        inspect(pr.initializer, rel, `고르는 화면 ${name}(Object.assign)`);
                     }
                 }
             }

@@ -139,8 +139,14 @@ export const say = {
      * ⚠ **「연결했습니다」로도 「막았습니다」로도 말하지 않는다.** 둘 다 거짓이다 — 아무것도 안
      *   적었고, 열기는 열었다.
      */
-    pickedFolderLinkUnreadable(picked: string): string {
-        return `고르신 폴더의 설정 파일을 읽지 못해 「${shown(picked)}」 에 연결하지 않고 엽니다 — 창이 열리면 사이드바에서 사이트를 확인해 주세요.`;
+    pickedFolderLinkUnreadable(picked: string): {message: string; detail: string; action: string} {
+        return {
+            message: "고르신 폴더의 설정 파일을 읽지 못했습니다.",
+            detail:
+                `「${shown(picked)}」 에 **연결하지 않고** 엽니다 — 읽지 못한 것을 저희 값으로 덮지 않습니다. ` +
+                "창이 열리면 사이드바에서 어느 사이트인지 확인해 주세요.",
+            action: "연결하지 않고 열기",
+        };
     },
     /** 「폴더 직접 고르기」의 OS 대화상자 제목. 네이티브 창이라 서식은 안 먹지만 값은 소독한다. */
     pickFolderDialogTitle(picked: string): string {
@@ -203,7 +209,8 @@ export const say = {
         binding?: string | null,
     ): string {
         // ⚠ **지역 변수로 조립하지 않는다.** 꼬리를 변수에 담아 두 갈래가 나눠 쓰면 소독 검사가
-        //    그 식별자를 역추적하지 못해 **그 자리에서 눈을 감는다**(실측 — 그렇게 짰다가 잡혔다).
+        //    그 식별자를 역추적하지 못해 **허용 목록 밖으로 반려한다**(실측 — 그렇게 짰다가 막혔다.
+        //    종전 주석은 「눈을 감는다」고 적었는데, 감았다면 막히지 않았다).
         //    갈래마다 온전한 문장을 적는다. 느슨한 비교다 — 안 넘긴 자리(`undefined`)도 「없다」다.
         if (binding == null || binding === String(tenant)) {
             return `지금 열어 두신 ${ours(path)} 에 「${shown(tenant)}」 버전 ${countJosa(revisionNo, "을/를")} 풉니다.`;

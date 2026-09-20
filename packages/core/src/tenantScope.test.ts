@@ -453,3 +453,28 @@ test("🔴 git 한 줄 — 브랜치 이름의 개행이 확인 창의 앞줄을
     strictEqual(detail.match(/그대로 두는 것:/g)?.length, 2, "위조 줄이 앞줄과 같은 줄머리로 섰다");
     ok(!/\n그대로 두는 것: 없습니다/.test(detail), "브랜치 이름의 개행이 살아남았다");
 });
+
+// ── 받을 자리가 지금 열어 둔 폴더일 때 ──────────────────────────────────────
+
+test("소속이 다르면 **소속이 바뀐다는 사실부터** 말한다 — 그 문장이 경로 앞이다", () => {
+    // 🔴 이 문장에 그물이 없어 변이 셋이 전건 초록이었다(심의 실측): 비교 뒤집기 · 늘 침묵 ·
+    //    문장 순서 뒤집기. 이 트랜치의 요점이 바로 이 문장이다.
+    const t = captureTenant("bix");
+    const line = say.fetchTargetIntoOpen(t, 5, "/w/empty", "beta");
+    // **맨 앞**이어야 한다 — 비-모달 알림은 한 줄로 잘리고 경로 길이는 사람 폴더 깊이가 정한다.
+    match(line, /^받으면 이 폴더가 「beta」 에서 「bix」 로 바뀝니다\./);
+    ok(line.indexOf("바뀝니다") < line.indexOf("/w/empty"), `경로가 요점보다 앞이다: ${line}`);
+});
+
+test("소속이 없거나 같으면 **침묵한다** — 안 바뀌는 것을 바뀐다고 말하지 않는다", () => {
+    const t = captureTenant("bix");
+    const quiet = say.fetchTargetIntoOpen(t, 5, "/w/empty", null);
+    for (const binding of [null, undefined, "bix"]) {
+        const line = say.fetchTargetIntoOpen(t, 5, "/w/empty", binding);
+        ok(!/바뀝니다/.test(line), `binding=${String(binding)} 에서 없는 변화를 말했다: ${line}`);
+        // 양성 짝은 위 시험이다 — 여기서는 **종전 문장 그대로**인 것까지 본다.
+        strictEqual(line, quiet, `binding=${String(binding)} 이 다른 문장을 냈다`);
+    }
+    // 인자를 아예 안 넘긴 자리(종전 호출부)도 같은 문장이어야 한다.
+    strictEqual(say.fetchTargetIntoOpen(t, 5, "/w/empty"), quiet);
+});
