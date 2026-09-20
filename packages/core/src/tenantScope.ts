@@ -133,6 +133,19 @@ export const say = {
     noReadySourceYet(picked: string): string {
         return `「${shown(picked)}」 의 판이 아직 만들어지는 중이거나 실패했습니다 — 「버전 이력」에서 확인하실 수 있습니다.`;
     },
+    /**
+     * 고른 폴더의 설정을 **못 읽어** 소속을 모른다. 연결하지 않고 열었다는 사실이 요점이다.
+     *
+     * ⚠ **「연결했습니다」로도 「막았습니다」로도 말하지 않는다.** 둘 다 거짓이다 — 아무것도 안
+     *   적었고, 열기는 열었다.
+     */
+    pickedFolderLinkUnreadable(picked: string): string {
+        return `고르신 폴더의 설정 파일을 읽지 못해 「${shown(picked)}」 에 연결하지 않고 엽니다 — 창이 열리면 사이드바에서 사이트를 확인해 주세요.`;
+    },
+    /** 「폴더 직접 고르기」의 OS 대화상자 제목. 네이티브 창이라 서식은 안 먹지만 값은 소독한다. */
+    pickFolderDialogTitle(picked: string): string {
+        return `「${shown(picked)}」 의 소스 폴더 고르기`;
+    },
     /** 사람이 직접 고른 폴더가 남의 사이트 소스였다. **열지 않았다**는 사실이 요점이다. */
     pickedFolderBoundElsewhere(bound: string, picked: string): string {
         return `고르신 폴더는 「${shown(bound)}」 의 소스입니다 — 「${shown(picked)}」 폴더가 아니라서 열지 않았습니다.`;
@@ -168,12 +181,34 @@ export const say = {
     fetchTargetTitle(tenant: CapturedTenant, revisionNo: number): string {
         return `「${shown(tenant)}」 버전 ${countJosa(revisionNo, "을/를")} 받을 새 빈 폴더를 고르세요 — 지금 폴더는 그대로 둡니다`;
     },
-        /**
-     * 받을 자리가 **지금 열어 둔 그 폴더**일 때. [fetchTargetHere] 와 갈라 두는 이유는 그쪽 문장이
-     * 「지금 폴더는 그대로 둡니다」라고 약속하기 때문이다 — 대상이 그 폴더 자신이면 자기모순이다.
+    /**
+     * 받을 자리가 **지금 열어 둔 그 폴더**일 때의 동의 문장. [fetchTargetHere] 와 갈라 두는 이유는
+     * 그쪽 문장이 「지금 폴더는 그대로 둡니다」로 약속하기 때문이다 — 대상이 그 폴더 자신이면
+     * 자기모순이다.
+     *
+     * ⚠ **그 폴더에 다른 소속이 적혀 있으면 «그 사실부터» 말한다.** 이 갈래는 빈 폴더에만 서는데
+     *   (`decideFetchTargetPlan` 의 `here`), 「비었다」의 잣대가 `.vscode` 를 무시하므로 **링크만
+     *   적어 둔 폴더**가 여기 온다 — 받고 나면 그 폴더의 소속이 고른 사이트로 바뀐다. 덮이는
+     *   파일은 없지만(비어 있으면 받고, 아니면 그 전에 던진다) 소속은 바뀐다.
+     *
+     * ⚠ **요점이 경로 앞이다.** 비-모달 알림은 한 줄로 잘리고 경로 길이는 사람 폴더 깊이가
+     *   정한다 — 뒤에 두면 잘려 사라진다(형제 `fetchTargetHere` 와 같은 이유).
+     *
+     * @param binding 그 폴더에 지금 적힌 소속. 없거나 고른 사이트와 같으면 아무 말도 안 한다.
      */
-    fetchTargetIntoOpen(tenant: CapturedTenant, revisionNo: number, path: string): string {
-        return `지금 열어 두신 ${ours(path)} 에 「${shown(tenant)}」 버전 ${countJosa(revisionNo, "을/를")} 풉니다.`;
+    fetchTargetIntoOpen(
+        tenant: CapturedTenant,
+        revisionNo: number,
+        path: string,
+        binding?: string | null,
+    ): string {
+        // ⚠ **지역 변수로 조립하지 않는다.** 꼬리를 변수에 담아 두 갈래가 나눠 쓰면 소독 검사가
+        //    그 식별자를 역추적하지 못해 **그 자리에서 눈을 감는다**(실측 — 그렇게 짰다가 잡혔다).
+        //    갈래마다 온전한 문장을 적는다. 느슨한 비교다 — 안 넘긴 자리(`undefined`)도 「없다」다.
+        if (binding == null || binding === String(tenant)) {
+            return `지금 열어 두신 ${ours(path)} 에 「${shown(tenant)}」 버전 ${countJosa(revisionNo, "을/를")} 풉니다.`;
+        }
+        return `받으면 이 폴더가 「${shown(binding)}」 에서 「${shown(tenant)}」 로 바뀝니다. 지금 열어 두신 ${ours(path)} 에 버전 ${countJosa(revisionNo, "을/를")} 풉니다.`;
     },
     fetchTargetHere(tenant: CapturedTenant, revisionNo: number, path: string): string {
         // ⚠ **안심 문구가 경로 앞이다.** 비-모달 알림은 한 줄로 잘리는데, 경로는 길이가

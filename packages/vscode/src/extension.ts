@@ -1344,7 +1344,9 @@ async function chooseFetchTarget(
     const answer = await vscode.window.showInformationMessage(
       // ⚠ `fetchTargetHere` 를 쓰지 않는다 — 그 문장은 「지금 폴더는 그대로 둡니다」로 시작하는데
       //    여기서는 그 폴더가 곧 대상이다. 동의를 구하는 문장이 자기모순이면 동의가 아니다.
-      ours(say.fetchTargetIntoOpen(tenant, revisionNo, plan.dir)),
+      // ⚠ **소속을 «라이브로» 읽는다.** `plan.dir` 은 곧 지금 열린 폴더라(`here` 갈래) 이 창의
+      //    소속이 그 폴더의 소속이다. 안 실으면 「받으면 소속이 바뀝니다」를 말할 재료가 없다.
+      ours(say.fetchTargetIntoOpen(tenant, revisionNo, plan.dir, currentFolderBinding())),
       HERE,
       "다른 폴더 고르기…",
     );
@@ -4331,15 +4333,21 @@ async function openPickedLocalFolder(
     canSelectFolders: true,
     canSelectFiles: false,
     openLabel: "이 폴더 열기",
-    title: `「${picked}」 의 소스 폴더 고르기`,
+    title: say.pickFolderDialogTitle(picked),
   });
   const dir = chosen?.[0]?.fsPath;
   if (dir === undefined) return;
 
-  const plan = decidePickedFolder(
-    folderBinding(readSourceMarkAt(dir), workspaceLinkAt(dir)),
-    picked,
-  );
+  // ⚠ **`folderBinding` 으로 좁혀 넘기지 않는다.** 그 함수는 「못 읽음」을 `null` 로 접어,
+  //    소속이 적힌 폴더가 「소속 없음」으로 보이던 자리다(보안 심의). 판정이 3상을 직접 본다.
+  const plan = decidePickedFolder(readSourceMarkAt(dir), workspaceLinkState(dir), picked);
+  if (plan.kind === "open-unlinked") {
+    // **아무것도 안 적고 연다.** 레지스트리에도 등재하지 않는다 — 우리가 모르는 것을 「그 사이트
+    // 폴더」로 기억해 두면 다음 화면이 그 거짓을 그대로 제안한다.
+    void vscode.window.showWarningMessage(say.pickedFolderLinkUnreadable(picked));
+    await openSiteFolder(dir);
+    return;
+  }
   if (plan.kind === "refuse") {
     void vscode.window.showWarningMessage(
       say.pickedFolderBoundElsewhere(plan.bound, picked),

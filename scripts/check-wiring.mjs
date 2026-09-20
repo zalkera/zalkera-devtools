@@ -667,10 +667,13 @@ const WIRES = [
     [
         // ⚠ **횟수다.** 「작업 폴더 변경」 두 갈래가 각각 이 문을 지나야 한다 — 직접
         //    `vscode.openFolder` 를 부르면 미리보기가 도는 창을 무경고로 뺏는다.
+        //    5 → 6: 「폴더 직접 고르기」에 **소속을 못 읽은 채 여는** 갈래가 생겼다
+        //    (`decidePickedFolder` 의 `open-unlinked`) — 아무것도 안 적고 열기만 하는 자리라
+        //    이 문을 더 지나야 한다.
         "packages/vscode/src/extension.ts",
         "await openSiteFolder(",
         "폴더를 여는 길이 미리보기·미저장 편집 보호를 건너뛴다 — 파일 → 폴더 열기에 없는 그 보호가 이 문의 값어치 절반이다",
-        5,
+        6,
     ],
     [
         "packages/vscode/src/extension.ts",

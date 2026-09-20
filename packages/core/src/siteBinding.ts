@@ -294,16 +294,44 @@ export type PickedFolderPlan =
     /** 소속이 없다 — 동의를 받고 소속을 **처음** 준 뒤 연다. */
     | {kind: "link-consent"}
     /** 다른 사이트의 소스다 — **열지 않는다.** */
-    | {kind: "refuse"; bound: string};
+    | {kind: "refuse"; bound: string}
+    /**
+     * 설정을 **못 읽어** 소속을 모른다 — 아무것도 안 적고 **열기만** 한다.
+     *
+     * ⚠ **`link-consent` 로 접으면 안 된다.** 그러면 「처음 연결합니다」라고 말한 뒤 표식을 쓰는데,
+     *   그 폴더에 이미 다른 소속이 적혀 있을 수 있다 — 표식이 링크를 이기므로 **두 판독이 갈린
+     *   채** 열린다(우리는 x, VS Code 는 y). 재연결 동의 없이 소속이 바뀐 셈이다.
+     *
+     * ⚠ **`refuse` 로 접어서도 안 된다.** 「못 읽었다」의 가장 흔한 사유는 주석이 든
+     *   `settings.json`(JSONC — VS Code 가 정상으로 취급하는 형식)이고, 그 파일에 우리 키가
+     *   **없어도** 못 읽음이 된다. 막으면 정상 폴더를 대거 막는다 — 「모르는 것으로는 막지
+     *   않는다」가 이 레포의 이행 원칙이다.
+     *
+     * 안 적고 열면 VS Code 자신의 판독기가 그 링크를 읽어 창의 사이트를 정한다 — 우리가 못 읽는
+     * 것이지 그 설정이 없는 것이 아니다.
+     */
+    | {kind: "open-unlinked"};
 
 /**
  * ⚠ **이 동사는 재연결이 아니다.** `link-consent` 는 소속이 **없는** 폴더에 소속을 처음 주는 것이고,
  *   소속이 있는 폴더는 [PickedFolderPlan] `refuse` 로 거절한다. 소속을 **바꾸는** 것은 「사이트에
  *   연결」 하나로 남는다 — 가장 위험한 동사를 가장 흔한 흐름의 한 클릭 거리에 두지 않는다.
+ *
+ * ⚠ **판독은 한 벌이고 3상이다 — 형제 [decideImportBinding] 과 같은 순서로 본다.** 표식이 먼저,
+ *   그다음 「못 읽음」, 그다음 링크 값. 「못 읽음」을 `null` 로 좁혀 받던 종전 계약에서는 그 칸이
+ *   `link-consent` 로 떨어졌다(보안 심의).
  */
-export function decidePickedFolder(binding: string | null, chosen: string): PickedFolderPlan {
-    if (binding === null) return {kind: "link-consent"};
-    return binding === chosen ? {kind: "open"} : {kind: "refuse", bound: binding};
+export function decidePickedFolder(
+    mark: SourceMark | null,
+    link: WorkspaceLink,
+    chosen: string,
+): PickedFolderPlan {
+    if (mark !== null) return mark.tenant === chosen ? {kind: "open"} : {kind: "refuse", bound: mark.tenant};
+    if (link.kind === "unreadable") return {kind: "open-unlinked"};
+    if (link.kind === "tenant" && link.tenant !== "") {
+        return link.tenant === chosen ? {kind: "open"} : {kind: "refuse", bound: link.tenant};
+    }
+    return {kind: "link-consent"};
 }
 
 /** 「작업 폴더 변경」이 무엇을 보여 줄 것인가. */

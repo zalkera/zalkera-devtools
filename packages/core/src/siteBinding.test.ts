@@ -208,24 +208,65 @@ test("어느 조합에서도 선택지가 비지 않는다 — 막다른 길을 
 
 // ── 직접 고른 폴더 ─────────────────────────────────────────────────────────
 
+/** 표식 고정값 — 형제 시험(`decideImportBinding`)과 같은 형상이다. */
+const markOf = (tenant: string): SourceMark => ({
+  format: 2,
+  origin: "linked",
+  tenant,
+  linkedAt: "2026-01-01T00:00:00.000Z",
+});
+
 test("남의 사이트 소스는 **열지 않는다** — 재활용 경로를 내주지 않는 것과 같은 잣대", () => {
-  assert.deepEqual(decidePickedFolder("beta", "alpha"), { kind: "refuse", bound: "beta" });
+  assert.deepEqual(decidePickedFolder(markOf("beta"), { kind: "absent" }, "alpha"), {
+    kind: "refuse",
+    bound: "beta",
+  });
+  // 표식이 없어도 **읽은 링크**가 남의 것이면 같다.
+  assert.deepEqual(decidePickedFolder(null, { kind: "tenant", tenant: "beta" }, "alpha"), {
+    kind: "refuse",
+    bound: "beta",
+  });
 });
 
 test("소속 없는 폴더는 동의를 받고 소속을 처음 준다 — 재연결이 아니다", () => {
-  assert.deepEqual(decidePickedFolder(null, "alpha"), { kind: "link-consent" });
+  assert.deepEqual(decidePickedFolder(null, { kind: "absent" }, "alpha"), { kind: "link-consent" });
 });
 
 test("그 사이트의 소스면 동의 없이 연다 — 복원이다", () => {
-  assert.deepEqual(decidePickedFolder("alpha", "alpha"), { kind: "open" });
+  assert.deepEqual(decidePickedFolder(markOf("alpha"), { kind: "absent" }, "alpha"), { kind: "open" });
+});
+
+test("설정을 **못 읽으면** 아무것도 안 적고 열기만 한다 — 「없다」로도 「남의 것」으로도 접지 않는다", () => {
+  // 🔴 종전에는 이 칸이 `link-consent` 였다: 「처음 연결합니다」라고 말한 뒤 표식을 썼고, 그
+  //    폴더에 이미 다른 소속이 적혀 있으면 **두 판독이 갈린 채** 열렸다(우리는 alpha, VS Code 는 beta).
+  assert.deepEqual(decidePickedFolder(null, { kind: "unreadable" }, "alpha"), { kind: "open-unlinked" });
+});
+
+test("못 읽었어도 **표식이 있으면 표식이 이긴다** — 모름이 아는 것을 덮지 않는다", () => {
+  // 표식은 우리가 쓴 파일이라 못 읽는 링크보다 확실하다. 이 순서가 뒤집히면 정상 폴더가
+  // 「모름」으로 떨어져 연결이 풀린다.
+  assert.deepEqual(decidePickedFolder(markOf("alpha"), { kind: "unreadable" }, "alpha"), { kind: "open" });
+  assert.deepEqual(decidePickedFolder(markOf("beta"), { kind: "unreadable" }, "alpha"), {
+    kind: "refuse",
+    bound: "beta",
+  });
 });
 
 test("**소속을 바꾸는 갈래가 없다** — 재연결은 「사이트에 연결」 하나로 남는다", () => {
   // 이 함수가 소속 있는 폴더를 열어 주기 시작하면 사이트 선택이 재연결 표면이 된다.
-  const kinds = new Set(
-    [null, "alpha", "beta"].map((b) => decidePickedFolder(b, "alpha").kind),
-  );
-  assert.deepEqual([...kinds].sort(), ["link-consent", "open", "refuse"]);
+  // ⚠ 전수다 — 표식 3상 × 링크 4상. 갈래가 늘면 여기서 먼저 걸린다.
+  const kinds = new Set<string>();
+  for (const mark of [null, markOf("alpha"), markOf("beta")]) {
+    for (const link of [
+      { kind: "absent" } as const,
+      { kind: "unreadable" } as const,
+      { kind: "tenant", tenant: "alpha" } as const,
+      { kind: "tenant", tenant: "beta" } as const,
+    ]) {
+      kinds.add(decidePickedFolder(mark, link, "alpha").kind);
+    }
+  }
+  assert.deepEqual([...kinds].sort(), ["link-consent", "open", "open-unlinked", "refuse"]);
 });
 
 // ── 받을 자리의 첫 제안 ────────────────────────────────────────────────────
