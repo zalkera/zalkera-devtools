@@ -438,6 +438,33 @@ const WIRES = [
         "elsewhereOptions({ confirmedDir, fetchable: \"unknown\" })",
         "선택지를 손으로 짜면 판 없는 사이트에 「누르면 실패하는 받기」가 되살아난다",
     ],
+    // ⚠ **폴더 없는 창의 네 자리 — 변이 실측으로 셋이 무그물이었다.** 판정(`decideSiteChoice`)은
+    //    core 시험이 무는데, **확장이 그 판정에 재료를 싣고 결과를 화면으로 잇는가**는 순수
+    //    시험이 한 칸도 못 본다. 실측: 폴더 유무를 `true` 로 고정 · 갈래를 `if (false)` 로 차단 ·
+    //    제목을 형제 문면으로 바꿔치기 — 셋 다 typecheck·시험·검사기 전건 초록이었다.
+    [
+        "packages/vscode/src/extension.ts",
+        "folderOpen: workspaceDir() !== undefined,",
+        "폴더 유무를 안 실으면 판정이 그 칸을 못 본다 — 빈 창이 다시 「사이트: ○○」 알림 하나로 끝나고, " +
+            "상수로 고정하면 **폴더가 없는데 있다고** 판정해 그 화면이 영영 안 선다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "if (choice.kind === \"no-folder\") {",
+        "갈래를 안 받으면 판정이 옳게 나와도 화면이 안 선다 — 조건만 막아도(도달 불가) 시험은 전건 초록이다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "await offerSiteFolder(code, {kind: \"no-folder\"});",
+        "갈래를 형제 것(`elsewhere`)으로 바꿔치기하면 **없는 폴더를 가리키는 제목**이 뜬다 — " +
+            "조건 핀만으로는 이 바꿔치기를 못 본다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "quick.title = say.noFolderTitle(picked);",
+        "제목이 형제 문면으로 새면 「이 폴더는 ○○ 에 연결돼 있습니다」라고 **없는 폴더를 말한다**. " +
+            "여기를 지역 문자열로 바꾸면 알림 소독 검사도 함께 눈을 감는다",
+    ],
     [
         // ⚠ **첫 그리기만 고정하면 절반이다.** 화면을 안 막게 바꾼 뒤로 「받기를 뺀다」는 일은
         //    전적으로 이 조회와 다시 그리는 줄이 한다 — 그 둘이 리팩터링에서 떨어지면 첫 배선은
