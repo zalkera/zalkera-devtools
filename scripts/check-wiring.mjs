@@ -681,6 +681,22 @@ const WIRES = [
         "발행 확인이 소속을 안 봐 늘 일상 갈래가 되고(반사가 삼킨다) 「이 폴더」의 지시대상도 잃는다. " +
             "넷째 인자가 빠지면 **무표식 폴더가 조용히 무보호인 채로 올라간다** — 사람은 보호를 전제하는데",
     ],
+    // ⚠ **이 둘은 변이 실측으로 무그물이었다** — 판정은 core 시험이 무는데 「확장이 그 판정에
+    //    무엇을 실어 보내는가」는 순수 시험이 못 본다. 소속을 `null` 로 고정 · 링크 판독을 늘
+    //    `absent` 로 고정 — 둘 다 typecheck·시험·검사기 전건 초록이었다.
+    [
+        "packages/vscode/src/extension.ts",
+        "say.fetchTargetIntoOpen(tenant, revisionNo, plan.dir, currentFolderBinding())",
+        "소속을 안 실으면 「받으면 이 폴더가 x 에서 y 로 바뀝니다」를 말할 재료가 없다 — 링크만 적어 둔 " +
+            "폴더가 빈 폴더로 세어져 그 자리에 오므로, 사람은 소속이 바뀌는 줄 모르고 동의한다",
+    ],
+    [
+        "packages/vscode/src/extension.ts",
+        "decidePickedFolder(readSourceMarkAt(dir), workspaceLinkState(dir), picked)",
+        "3상 판독을 안 실으면 「못 읽었다」가 「없다」로 접혀, 소속이 적힌 폴더에 「처음 연결합니다」라고 " +
+            "말한 뒤 표식을 쓴다 — 우리 표식과 VS Code 가 읽는 링크가 갈린 채 열린다. `folderBinding(…)` 으로 " +
+            "좁혀 넘기던 형태가 정확히 그 결함이었다",
+    ],
     [
         // ⚠ **맨몸 `executeCommand` 로 돌아가면 고른 사이트가 그 자리에서 버려진다.** 형제 `fetch`
         //    갈래는 `openSite(pinned)` 로 들고 가는데 zip 갈래만 안 들고 가던 것이 이 결함이었다.
