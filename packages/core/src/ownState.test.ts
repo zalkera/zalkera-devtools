@@ -72,4 +72,8 @@ test("거절 문면의 「있는 것」은 앞 넷과 나머지 수를 말한다
     strictEqual(occupiedLine(["a", "b", "c", "d", "e", "f"]), "있는 것: a · b · c · d 외 2개");
     // 긴 이름 하나가 알림 상한을 먹어 다음 할 일이 잘리지 않게 이름마다 자른다
     strictEqual(occupiedLine(["x".repeat(255)]), `있는 것: ${"x".repeat(40)}…`);
+    // 짝 글자를 반으로 가르지 않는다
+    const emoji = "a" + "😀".repeat(50);
+    ok(!/[\ud800-\udfff](?![\udc00-\udfff])/u.test(occupiedLine([emoji]).replace(/[\u{10000}-\u{10FFFF}]/gu, "")), "짝 글자가 반쪽으로 남았다");
+    strictEqual([...occupiedLine([emoji])].length, "있는 것: ".length + 40 + 1);
 });

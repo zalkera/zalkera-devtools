@@ -74,7 +74,11 @@ export async function clearStaleOwnState(
  */
 export function occupiedLine(existing: readonly string[]): string {
     // 이름마다 길이를 자른다 — 긴 이름 하나가 알림 상한을 먹으면 뒤따르는 «다음 할 일»이 잘려 나간다(심의 실측).
-    const clip = (name: string): string => (name.length > 40 ? `${name.slice(0, 40)}…` : name);
+    // 글자(코드 포인트) 단위로 자른다 — UTF-16 단위로 자르면 이모지 같은 짝 글자가 반쪽으로 남는다.
+    const clip = (name: string): string => {
+        const chars = [...name];
+        return chars.length > 40 ? `${chars.slice(0, 40).join("")}…` : name;
+    };
     const shown = existing.slice(0, 4).map(clip).join(" · ");
     const rest = existing.length - Math.min(existing.length, 4);
     return `있는 것: ${shown}${rest > 0 ? ` 외 ${rest}개` : ""}`;

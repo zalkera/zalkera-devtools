@@ -105,6 +105,9 @@ test(".zalkera 가 심링크거나 그 안이 심링크면 무시하지 않는�
     const linkDir = await scratch();
     await symlink(victim, join(linkDir, ".zalkera"));
     strictEqual(await isReceivable(linkDir), false, ".zalkera 심링크가 통과했다");
+    // 거절 문면도 심링크 너머를 펴지 않는다 — 폴더 밖 이름이 알림에 실리지 않게
+    await writeFile(join(victim, "secret.txt"), "x");
+    strictEqual((await meaningfulEntries(linkDir)).join(), ".zalkera");
     const inner = await scratch();
     await mkdir(join(inner, ".zalkera"));
     await symlink(join(victim, "x"), join(inner, ".zalkera", "source.json"));
