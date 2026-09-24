@@ -2,7 +2,7 @@ import { ok, strictEqual } from "node:assert/strict";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
-import { isReceivable, meaningfulEntries } from "./emptyDir.ts";
+import { isReceivable, meaningfulEntries, removeAdded, snapshotEntries } from "./emptyDir.ts";
 import { tempDir } from "./testing/tempDir.ts";
 
 const scratch = () => tempDir("zalkera-empty-");
@@ -63,4 +63,83 @@ test("무시 이름이라도 **심링크**면 무시하지 않는다", async () 
     await writeFile(join(clean, ".vscode", "settings.json"), "{}");
     await writeFile(join(clean, ".DS_Store"), "x");
     strictEqual(await isReceivable(clean), true, "정상 편집기 파일을 막았다");
+});
+
+// ── 우리 표식뿐인 폴더 (2026-09-24 실사용 신고) ────────────────────────────────
+
+test("우리 소속 표식(.zalkera/source.json)뿐인 폴더는 빈 폴더다 — 도구가 쓴 파일로 도구가 막히지 않는다", async () => {
+    const dir = await scratch();
+    await mkdir(join(dir, ".zalkera"));
+    await writeFile(join(dir, ".zalkera", "source.json"), '{"format":2,"origin":"linked","tenant":"a","linkedAt":"t"}');
+    await mkdir(join(dir, ".vscode"));
+    await writeFile(join(dir, ".vscode", "settings.json"), '{"zalkera.tenant":"a"}');
+    ok(await isReceivable(dir), "표식+링크만 있는 폴더가 막혔다");
+    // CLI 장부도 우리 것이다
+    await writeFile(join(dir, ".zalkera", "sync.json"), "{}");
+    ok(await isReceivable(dir), "장부까지 있어도 우리 파일뿐이다");
+    // 빈 .zalkera 도 우리 것이다
+    const bare = await scratch();
+    await mkdir(join(bare, ".zalkera"));
+    ok(await isReceivable(bare));
+});
+
+test(".zalkera 안에 우리 것이 아닌 항목이 하나라도 있으면 막는다 — 배송 파일·손으로 푼 흔적", async () => {
+    for (const foreign of ["pack.json", "provenance.json", "ASSETS-LICENSE.md", "notes.txt"]) {
+        const dir = await scratch();
+        await mkdir(join(dir, ".zalkera"));
+        await writeFile(join(dir, ".zalkera", "source.json"), "{}");
+        await writeFile(join(dir, ".zalkera", foreign), "x");
+        strictEqual(await isReceivable(dir), false, `.zalkera/${foreign} 이 있는데 빈 폴더로 봤다`);
+        strictEqual((await meaningfulEntries(dir)).join(), ".zalkera");
+    }
+    // 하위 폴더도 우리 것이 아니다(`.zalkera/saved/` 같은 자리)
+    const nested = await scratch();
+    await mkdir(join(nested, ".zalkera", "saved"), { recursive: true });
+    strictEqual(await isReceivable(nested), false);
+});
+
+test(".zalkera 가 심링크거나 그 안이 심링크면 무시하지 않는다", async () => {
+    const { symlink } = await import("node:fs/promises");
+    const victim = await tempDir("victim-");
+    const linkDir = await scratch();
+    await symlink(victim, join(linkDir, ".zalkera"));
+    strictEqual(await isReceivable(linkDir), false, ".zalkera 심링크가 통과했다");
+    const inner = await scratch();
+    await mkdir(join(inner, ".zalkera"));
+    await symlink(join(victim, "x"), join(inner, ".zalkera", "source.json"));
+    strictEqual(await isReceivable(inner), false, ".zalkera/source.json 심링크가 통과했다");
+});
+
+test("되감기는 통과시킨 폴더 «안쪽»에서 생긴 것만 지운다 — 표식은 남고 tar 가 쓴 것은 사라진다", async () => {
+    const dir = await scratch();
+    await mkdir(join(dir, ".zalkera"));
+    await writeFile(join(dir, ".zalkera", "source.json"), "{}");
+    const before = await snapshotEntries(dir);
+    // 실패한 해제가 남겼을 법한 것: 서버 tar 의 .zalkera/provenance.json · 소스 일부
+    await writeFile(join(dir, ".zalkera", "provenance.json"), "{}");
+    await mkdir(join(dir, "src"));
+    await writeFile(join(dir, "src", "a.ts"), "x");
+    await removeAdded(dir, before);
+    const { readdir } = await import("node:fs/promises");
+    strictEqual((await readdir(dir)).join(), ".zalkera");
+    strictEqual((await readdir(join(dir, ".zalkera"))).join(), "source.json", "안쪽 되감기가 안 됐다 — 다음 시도가 다시 막힌다");
+    ok(await isReceivable(dir), "되감은 뒤에도 다시 받을 수 있어야 한다");
+});
+
+test("자기 상태 파일 목록은 zip 배제 목록의 부분집합이다 — 표식이 정본에 실리면 안 되는 그 파일들이다", async () => {
+    const { OWN_STATE_FILES } = await import("./emptyDir.ts");
+    const { isExcludedEntry } = await import("./zip.ts");
+    for (const p of OWN_STATE_FILES) ok(isExcludedEntry(p), `${p} 는 zip 에 실리는데 빈 폴더 판정은 무시한다`);
+});
+
+test(".zalkera 안의 OS 부스러기는 막지 않는다 — 탐색기가 열어 본 것만으로 다시 잠기지 않게", async () => {
+    const dir = await scratch();
+    await mkdir(join(dir, ".zalkera"));
+    await writeFile(join(dir, ".zalkera", "source.json"), "{}");
+    await writeFile(join(dir, ".zalkera", ".DS_Store"), "x");
+    ok(await isReceivable(dir), ".zalkera/.DS_Store 하나로 막혔다");
+    // 양성 짝 — 부스러기 이름이라도 폴더면 우리 것이 아니다
+    const odd = await scratch();
+    await mkdir(join(odd, ".zalkera", "Thumbs.db"), { recursive: true });
+    strictEqual(await isReceivable(odd), false);
 });

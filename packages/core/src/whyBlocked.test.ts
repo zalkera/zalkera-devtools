@@ -158,3 +158,11 @@ test("소속을 정하는 자리는 **어떤 상태에서도** 사이트 미선�
     }
   }
 });
+
+test("소스 없는 창의 「zip 으로 교체」는 zip 을 푸는 문으로 데려간다 — zip 을 든 사람을 서버 받기로만 보내지 않는다", () => {
+  const blocked = decideBlocked("zalkera.site.updateZip", PICKED);
+  assert.equal(blocked?.action?.command, "zalkera.site.importZip");
+  assert.equal(blocked?.alternative?.command, "zalkera.site.open", "소스 다운로드 갈래가 사라졌다");
+  // 양성 짝 — 형제 「서버 판으로 교체」는 서버 받기로 데려간다
+  assert.equal(decideBlocked("zalkera.site.updateFromServer", PICKED)?.action?.command, "zalkera.site.open");
+});

@@ -255,7 +255,7 @@ export async function extractZip(zip: Buffer, targetDir: string, plan?: ImportPl
         const path = join(parent, segments[segments.length - 1] ?? "");
         await assertNotSymlink(path, name);
         // ⚠ **`wx` — 이미 있는 파일 위에 쓰지 않는다.** 「빈 폴더」 판정은 `.vscode` 같은
-        //    편집기 산물을 일부러 통과시키고(`emptyDir.ts`), 도움말도 「있어도 괜찮습니다」라고
+        //    편집기 산물과 우리 상태 파일을 일부러 통과시키고(`emptyDir.ts`), 도움말도 「있어도 괜찮습니다」라고
         //    말한다. 그런데 받는 아카이브가 같은 경로를 담고 있으면 **고객 파일이 소리 없이
         //    교체된다** — 그리고 롤백은 그 파일을 기준선으로 봐서 못 되감는다.
         //    「지금 폴더는 바뀌지 않습니다」라고 화면이 약속하는 자리다.

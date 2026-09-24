@@ -116,7 +116,15 @@ export {
   type Provenance,
   type UpdateVerdict,
 } from "./provenance.ts";
-export { isReceivable, meaningfulEntries, removeAdded, snapshotEntries } from "./emptyDir.ts";
+export {
+    isReceivable,
+    meaningfulEntries,
+    OWN_STATE_FILES,
+    removeAdded,
+    snapshotEntries,
+    type Snapshot,
+} from "./emptyDir.ts";
+export { clearStaleOwnState, occupiedLine } from "./ownState.ts";
 
 export { waitForBuild, type BuildOutcome, type WaitOptions } from "./build.ts";
 

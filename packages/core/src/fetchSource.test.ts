@@ -226,3 +226,117 @@ test("받기 — 뺄 것이 없으면 「빼고 풀었습니다」를 말하지 
     } as never);
     ok(!seen.some((m) => /빼고 풀었습니다/.test(m)), `뺀 것이 없는데 말했다: ${seen.join(" | ")}`);
 });
+
+// ── 우리 표식뿐인 폴더 (2026-09-24 실사용 신고 · 교착) ─────────────────────────
+
+test("표식(.zalkera/source.json)뿐인 폴더에는 받는다 — 「사이트에 연결」이 남긴 폴더가 막히지 않는다", async () => {
+    const target = await tempDir("zalkera-src-mark-");
+    await mkdir(join(target, ".zalkera"), { recursive: true });
+    await writeFile(join(target, ".zalkera", "source.json"), '{"format":2,"origin":"linked","tenant":"b","linkedAt":"t"}');
+    await mkdir(join(target, ".vscode"), { recursive: true });
+    await writeFile(join(target, ".vscode", "settings.json"), '{"zalkera.tenant":"a"}');
+    const payload = tarGz([
+        { name: "package.json", body: '{"name":"ok"}' },
+        { name: ".zalkera/pack.json", body: "{}" }, // 배송되는 .zalkera 항목
+        { name: ".zalkera/provenance.json", body: "{}" }, // 정본에 안 실리는 항목 — 빠져야 한다
+    ]);
+    const result = await fetchSiteSource({ api: api(payload), targetDir: target, fetchImpl: serve(payload) });
+    strictEqual(result.revisionNo, 7);
+    const left = (await readdir(target)).sort();
+    ok(left.includes("package.json"), `안 풀렸다: ${left.join(", ")}`);
+    ok(left.includes(".vscode"), "고객 편집기 폴더가 사라졌다");
+    const inner = (await readdir(join(target, ".zalkera"))).sort();
+    // 🔴 **옛 표식은 남지 않는다** — 남으면 다른 사이트(b)를 말하는 표식이 링크보다 먼저라 폴더가 b 소속으로
+    //    읽히고, 판을 주장하는 표식이면 다음 발행이 거짓 「남이 올린 판」 동의를 띄운다. 새 표식은 부르는 쪽이
+    //    받은 판으로 쓴다 — 그 쓰기가 실패해도 「표식 없음 → 링크가 소속」으로 떨어진다.
+    ok(!inner.includes("source.json"), "옛 표식이 남았다 — 새 내용에 대해 옛 소속·옛 판을 말한다");
+    ok(inner.includes("pack.json"), "배송 항목이 안 풀렸다");
+    ok(!inner.includes("provenance.json"), "정본에 안 실리는 항목이 디스크에 놓였다");
+});
+
+test("표식뿐인 폴더에서 해제가 실패하면 «표식만» 남는다 — 다음 시도가 다시 막히지 않는다", async () => {
+    const target = await tempDir("zalkera-src-mark-fail-");
+    await mkdir(join(target, ".zalkera"), { recursive: true });
+    await writeFile(join(target, ".zalkera", "source.json"), "{}");
+    const payload = tarGz([
+        { name: ".zalkera/pack.json", body: "{}" }, // 먼저 쓰인다 — 안쪽 되감기가 없으면 남는다
+        { name: "good.txt", body: "먼저 쓰이는 파일" },
+        { name: "../evil.txt", body: "탈출" },
+    ]);
+    await rejects(
+        () => fetchSiteSource({ api: api(payload), targetDir: target, fetchImpl: serve(payload) }),
+        /폴더 밖|이상한 경로/,
+    );
+    strictEqual((await readdir(target)).join(), ".zalkera", "반쪽 해제가 남았다");
+    strictEqual((await readdir(join(target, ".zalkera"))).join(), "source.json", "tar 가 쓴 .zalkera/pack.json 이 남았다");
+    const { isReceivable } = await import("./emptyDir.ts");
+    ok(await isReceivable(target), "되감은 폴더가 다시 「비어 있지 않음」이다 — 교착이 실패 한 번으로 되살아난다");
+});
+
+test("소스가 든 폴더면 «무엇이 있는지»와 다음 동사 «둘»을 말한다 — 네트워크 전에", async () => {
+    const target = await tempDir("zalkera-src-full-");
+    await writeFile(join(target, "package.json"), "{}");
+    await mkdir(join(target, "src"));
+    let called = 0;
+    const counting = { listRevisions: async () => { called++; return []; }, sourceUrl: async () => { called++; throw new Error("x"); } } as never;
+    await rejects(
+        () => fetchSiteSource({ api: counting, revisionNo: 7, targetDir: target }),
+        (e: unknown) => {
+            ok(e instanceof DevtoolsError);
+            match(e.message, /비어 있지 않습니다\(있는 것: (package\.json · src|src · package\.json)\)/);
+            match(e.hint ?? "", /「사이트에 연결」/);
+            match(e.hint ?? "", /「서버 판으로 교체」/);
+            return true;
+        },
+    );
+    strictEqual(called, 0, "폴더 판정 전에 네트워크를 탔다");
+});
+
+test("지난 CLI 장부가 든 폴더에 받으면 장부를 지우고 말한다 — 낡은 장부가 다음 pull 을 막지 않게", async () => {
+    const target = await tempDir("zalkera-src-ledger-");
+    await mkdir(join(target, ".zalkera"), { recursive: true });
+    await writeFile(join(target, ".zalkera", "sync.json"), "{}");
+    const payload = tarGz([{ name: "package.json", body: "{}" }]);
+    const seen: string[] = [];
+    await fetchSiteSource({ api: api(payload), targetDir: target, fetchImpl: serve(payload), onProgress: (m) => seen.push(m) });
+    ok(!(await readdir(join(target, ".zalkera"))).includes("sync.json"), "낡은 장부가 남았다");
+    ok(seen.some((m) => /sync\.json/.test(m)), `조용히 지웠다: ${seen.join(" | ")}`);
+    // 양성 짝 — 장부가 없던 폴더에서는 그 말을 안 한다
+    const clean = await tempDir("zalkera-src-noledger-");
+    const quiet: string[] = [];
+    await fetchSiteSource({ api: api(payload), targetDir: clean, fetchImpl: serve(payload), onProgress: (m) => quiet.push(m) });
+    ok(!quiet.some((m) => /sync\.json/.test(m)), `없는 장부를 지웠다고 말했다: ${quiet.join(" | ")}`);
+});
+
+test("소스가 없는 폴더면 「서버 판으로 교체」·「사이트에 연결」을 권하지 않는다 — 그 둘은 거기서 앞으로 못 간다", async () => {
+    // `.git` 만 있는 폴더(빈 폴더에 git init) · 사람 파일만 있는 폴더 — 둘 다 소스(package.json)가 없다.
+    for (const make of [
+        async (d: string) => mkdir(join(d, ".git")),
+        async (d: string) => writeFile(join(d, "README.md"), "x"),
+    ]) {
+        const target = await tempDir("zalkera-src-nosrc-");
+        await make(target);
+        await rejects(
+            () => fetchSiteSource({ api: api(tarGz([])), revisionNo: 7, targetDir: target }),
+            (e: unknown) => {
+                ok(e instanceof DevtoolsError);
+                match(e.message, /비어 있지 않습니다\(있는 것: /);
+                ok(!/서버 판으로 교체|사이트에 연결/.test(e.hint ?? ""), `막다른 동사를 권했다: ${e.hint}`);
+                match(e.hint ?? "", /빈 폴더를 새로 만들어/);
+                return true;
+            },
+        );
+    }
+});
+
+test("받은 판을 주장하던 옛 표식도 받기 뒤에 남지 않는다 — 손으로 비운 받은 폴더", async () => {
+    const target = await tempDir("zalkera-src-oldfetched-");
+    await mkdir(join(target, ".zalkera"), { recursive: true });
+    await writeFile(
+        join(target, ".zalkera", "source.json"),
+        JSON.stringify({ format: 1, tenant: "a", revisionNo: 3, sha256: "x".repeat(64), fetchedAt: "t" }),
+    );
+    const payload = tarGz([{ name: "package.json", body: "{}" }]);
+    await fetchSiteSource({ api: api(payload), targetDir: target, fetchImpl: serve(payload) });
+    ok(!(await readdir(join(target, ".zalkera"))).includes("source.json"), "판 3 을 주장하는 옛 표식이 남았다");
+});

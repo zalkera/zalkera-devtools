@@ -3,6 +3,8 @@ import { createWriteStream } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { mkdir, mkdtemp, readdir, rm } from "node:fs/promises";
 import { meaningfulEntries, removeAdded, snapshotEntries } from "./emptyDir.ts";
+import { clearStaleOwnState, occupiedLine } from "./ownState.ts";
+import { SYNC_LEDGER_PATH } from "./syncLedger.ts";
 import { folderVersionDigest } from "./folderVersion.ts";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -177,10 +179,18 @@ export async function fetchSiteSource(options: FetchSourceOptions): Promise<Fetc
     if (existing.length > 0) {
         // **덮어쓰지 않는다.** 고객이 고치던 소스를 서버 버전으로 조용히 밀어 버리는 것이 이 도구가 낼 수
         // 있는 가장 큰 손해다. 빈 폴더를 요구하는 편이 불편하지만 되돌릴 수 없는 손실보다 낫다.
+        //
+        // ⚠ **무엇이 있는지 말한다**([occupiedLine]).
+        // ⚠ **다음 동사는 그 폴더에서 실제로 누를 수 있는 것만 말한다.** 「사이트에 연결」·「서버 판으로 교체」는
+        //    사이트 소스(`package.json`)가 든 폴더에서만 앞으로 간다 — 소스가 없는 폴더에 그 둘을 권하면 교체가
+        //    다시 「소스 다운로드」로 보내고 그 받기가 또 여기서 막힌다(설계 검토가 찾은 막다른 길).
+        const hasSource = existing.includes("package.json");
         throw new DevtoolsError(
             "NOT_A_SITE",
-            "받을 폴더가 비어 있지 않습니다.",
-            "빈 폴더를 고르거나, 기존 폴더는 「잘커라: 사이트에 연결」로 이어 주세요.",
+            `받을 폴더가 비어 있지 않습니다(${occupiedLine(existing)}).`,
+            hasSource
+                ? "빈 폴더를 고르세요. 그 폴더의 소스를 그대로 쓰시려면 그 폴더를 열고 「사이트에 연결」, 서버 판으로 바꾸시려면 그 폴더를 열고 「서버 판으로 교체」입니다."
+                : "빈 폴더를 새로 만들어 골라 주세요(있는 파일을 덮어쓰지 않습니다).",
         );
     }
 
@@ -219,6 +229,13 @@ export async function fetchSiteSource(options: FetchSourceOptions): Promise<Fetc
     report(`${fileCount}개 파일을 받았습니다.`);
     const droppedNote = droppedLine(dropped);
     if (droppedNote !== null) report(droppedNote);
+    // ⚠ **옛 표식·장부를 남기지 않는다**(`ownState.ts`) — 「빈 폴더」 판정이 우리 상태 파일만 든 폴더를
+    //    통과시키므로 그것이 새 판에 대해 거짓을 말하게 된다. 새 표식은 부르는 쪽이 받은 판으로 쓴다.
+    //    지운 표식은 곧 다시 쓰이므로 알리지 않는다 — 알리는 것은 사람이 쓰던 CLI 장부뿐이다.
+    const cleared = await clearStaleOwnState(options.targetDir, before, "fetched");
+    if (cleared.includes(SYNC_LEDGER_PATH)) {
+        report(`지난 CLI 장부(${SYNC_LEDGER_PATH})는 이 판과 맞지 않아 지웠습니다.`);
+    }
     return { revisionNo, fileCount, sha256, versionDigest: got.versionDigest };
 }
 

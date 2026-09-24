@@ -162,7 +162,7 @@ const CANON_MODULES = new Set(["@zalkera/devtools-core"]);
 // ⚠ **`say` 가 내는 필드는 여기 다 있어야 한다.** 빠진 이름 하나가 「정본이 지은 문장」을
 //    「소독 안 한 값」으로 오인하게 만든다 — `notSourceNote` 가 실제로 그랬다(모달 detail 관할을
 //    넓히자 드러났다). 늘릴 때는 `tenantScope.ts` 의 반환 형이 근거다.
-const CANON_FIELDS = new Set(["message", "detail", "action", "notSourceNote", "line"]);
+const CANON_FIELDS = new Set(["message", "detail", "action", "notSourceNote", "emptyNote", "line"]);
 /** 정본 판정 함수의 이름 모양. **이름만으로는 부족하다** — [CANON_MODULES] 에서 온 것이어야 한다. */
 const CANON_DECIDER = /^decide[A-Z]/;
 

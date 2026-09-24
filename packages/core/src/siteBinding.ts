@@ -183,7 +183,7 @@ export function decideSiteChoice(input: ChoiceInput): SiteChoice {
  *   아예 없는 창에서도 그대로 선다.
  *
  * ⚠ **「지금 폴더를 안 건드린다」고 적지 말 것 — 한 칸에서 거짓이다**(심의 실측). 열린 폴더가
- *   **빈 폴더**면(`.vscode` 만 있는 폴더도 빈 폴더로 센다 — [meaningfulEntries]) 받기가 **거기로**
+ *   **빈 폴더**면(`.vscode` 와 우리 상태 파일뿐인 `.zalkera` 만 있는 폴더도 빈 폴더로 센다 — [meaningfulEntries]) 받기가 **거기로**
  *   갈 수 있고([decideFetchTargetPlan] 의 `here`), 그때 그 폴더의 소속이 고른 사이트로 바뀐다.
  *   **받기·풀기가 파일을 덮는 일은 없다**(비어 있지 않으면 그 전에 던진다)는 참이지만, 그것과
  *   「안 건드린다」는 다른 말이다 — `pick-folder` 는 고른 폴더에 **우리 파일 둘**(표식 ·

@@ -59,6 +59,8 @@ import {
   extractZip,
   listZipEntries,
   meaningfulEntries,
+  clearStaleOwnState,
+  occupiedLine,
   PROVENANCE_PATH,
   judgeUpdate,
   keepNames,
@@ -1862,8 +1864,8 @@ function suggestSiteSibling(
  * 승격하지 않는다」는 규율과 충돌하지 않는다.
  *
  * ⚠ **소속을 바꾸지 않는다.** 이미 다른 사이트에 붙은 폴더에는 안 쓴다 — 소속을 **바꾸는** 동사는
- *   「사이트에 연결」 하나로 남긴다(`decidePickedFolder` 가 세운 규율). 빈 폴더 강제가 `.vscode` 를
- *   통과시키므로(`emptyDir.ts` 의 IGNORED), 링크만 가진 폴더가 실제로 여기까지 온다.
+ *   「사이트에 연결」 하나로 남긴다(`decidePickedFolder` 가 세운 규율). 빈 폴더 강제가 `.vscode` 와 우리 상태
+ *   파일뿐인 `.zalkera` 를 통과시키므로(`emptyDir.ts`), 링크·표식만 가진 폴더가 실제로 여기까지 온다.
  *
  * ⚠ **표식은 `linked` 다**(판 주장 없음). 받기의 `fetched` 는 판 번호·sha 를 주장하는데 zip 은
  *   그 둘을 모른다 — 모르는 것을 적으면 그 표식이 거짓이 된다.
@@ -2030,13 +2032,15 @@ async function importZipInto(
   targetDir: string,
 ): Promise<{fileCount: number; dropped: string[]}> {
   // ⚠ **빈 폴더 강제는 해제기 밖이다**(형제 `fetchSiteSource` 와 같은 규율) — 있는 파일을
-  //    덮어쓰지 않는다. `meaningfulEntries` 가 편집기·OS 부스러기는 「비어 있음」으로 본다.
+  //    덮어쓰지 않는다. `meaningfulEntries` 가 편집기·OS 부스러기·우리 상태 파일만 든 `.zalkera` 는
+  //    「비어 있음」으로 본다. 무엇이 있는지 이름을 말한다(형제와 같은 문면 조각).
   await mkdir(targetDir, {recursive: true});
-  if ((await meaningfulEntries(targetDir)).length > 0) {
+  const existing = await meaningfulEntries(targetDir);
+  if (existing.length > 0) {
     throw new DevtoolsError(
       "NOT_A_SITE",
-      "고르신 폴더가 비어 있지 않습니다.",
-      "빈 폴더를 골라 주세요(있는 파일을 덮어쓰지 않습니다).",
+      `고르신 폴더가 비어 있지 않습니다(${occupiedLine(existing)}).`,
+      "빈 폴더를 새로 만들어 골라 주세요(있는 파일을 덮어쓰지 않습니다).",
     );
   }
   // ⚠ **반쪽 해제를 남기지 않는다** — 형제 `fetchSource` 와 같은 규율이다.
@@ -2051,6 +2055,12 @@ async function importZipInto(
   } catch (cause) {
     await removeAdded(targetDir, before);
     throw cause;
+  }
+  // ⚠ **판을 주장하는 옛 표식·옛 CLI 장부를 치운다**(core `clearStaleOwnState`) — zip 은 판 번호를 모르므로,
+  //    남겨 두면 옛 표식이 「판 N 을 받았다」고 말한 채 다음 발행이 거짓 「남이 올린 판」 동의를 띄운다.
+  //    판을 주장하지 않는 연결 표식은 남긴다 — 소속은 뒤따르는 연결 판정이 정한다.
+  for (const path of await clearStaleOwnState(targetDir, before, "imported")) {
+    log(`지난 ${path} 를 이 zip 에 맞게 정리했습니다(판 번호 주장을 뺐습니다).`);
   }
   return {fileCount, dropped: plan.dropped};
 }
@@ -4378,11 +4388,18 @@ async function openPickedLocalFolder(
     //    표식 부재로 막지 않는 것과 **없는 사실을 지어내지 않는 것**은 다른 이야기다.
     const ask = say.pickedFolderLinkConfirm(picked);
     const looksLikeSource = existsSync(join(dir, "package.json"));
+    // ⚠ **빈 폴더를 먼저 가른다** — 빈 폴더도 `package.json` 이 없으므로 뒤집으면 「소스 폴더가 맞는지
+    //    확인하세요」가 빈 폴더에 뜬다. 빈 폴더에는 다음 단추(「소스 다운로드」)를 말한다.
+    const receivable = await isReceivable(dir);
     const answer = await vscode.window.showWarningMessage(
       ask.message,
       {
         modal: true,
-        detail: looksLikeSource ? ask.detail : `${ask.detail}\n${ask.notSourceNote}`,
+        detail: receivable
+          ? `${ask.detail}\n${ask.emptyNote}`
+          : looksLikeSource
+            ? ask.detail
+            : `${ask.detail}\n${ask.notSourceNote}`,
       },
       ask.action,
     );

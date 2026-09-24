@@ -704,7 +704,7 @@ const WIRES = [
     [
         "packages/vscode/src/extension.ts",
         "say.fetchTargetIntoOpen(tenant, revisionNo, plan.dir, currentFolderBinding())",
-        "소속을 안 실으면 「받으면 이 폴더가 x 에서 y 로 바뀝니다」를 말할 재료가 없다 — 링크만 적어 둔 " +
+        "소속을 안 실으면 「받으면 이 폴더가 x 에서 y 로 바뀝니다」를 말할 재료가 없다 — 링크·표식만 적어 둔 " +
             "폴더가 빈 폴더로 세어져 그 자리에 오므로, 사람은 소속이 바뀌는 줄 모르고 동의한다",
     ],
     [
@@ -755,6 +755,12 @@ const WIRES = [
         "풀 자리 제안이 사이트를 모르게 되어, 「빈 폴더를 새로 만들어 고르세요」가 되살아난다 — 비개발자가 멈추는 그 자리다",
     ],
     [
+        // 정리 본체는 core 시험(`ownState.test.ts`)이 문다 — 여기는 zip 풀기가 **그것을 부르는가**만 본다.
+        "packages/vscode/src/extension.ts",
+        'await clearStaleOwnState(targetDir, before, "imported")',
+        "빈 폴더 판정이 표식만 든 폴더를 통과시키므로, zip 을 푼 뒤 옛 표식이 「판 N 을 받았다」고 남아 다음 발행에 거짓 「남이 올린 판」 동의가 뜬다",
+    ],
+    [
         // ⚠ **효과를 센다.** 부르는 줄만 고정하면 헬퍼 본체를 무동작으로 바꿔도 초록이다.
         "packages/vscode/src/extension.ts",
         "await bindImportedFolder(target, pinned, bindPlan)",
@@ -762,8 +768,8 @@ const WIRES = [
     ],
     [
         // ⚠ 이 줄이 **소속을 바꾸는 동사를 「사이트에 연결」 하나로 남긴다**는 규율의 집행부다.
-        //    빈 폴더 강제가 `.vscode` 를 통과시키므로(`emptyDir.ts` 의 IGNORED), 링크만 가진
-        //    남의 폴더가 실제로 여기까지 온다.
+        //    빈 폴더 강제가 `.vscode` 와 우리 상태 파일뿐인 `.zalkera` 를 통과시키므로(`emptyDir.ts`),
+        //    링크·표식만 가진 남의 폴더가 실제로 여기까지 온다.
         "packages/vscode/src/extension.ts",
         "const bindPlan =",
         "남의 사이트에 붙어 있던 폴더의 소속을 zip 풀기가 조용히 갈아탄다 — 가장 위험한 동사가 가장 흔한 흐름의 한 클릭 거리에 놓인다",

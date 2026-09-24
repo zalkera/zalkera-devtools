@@ -145,6 +145,18 @@ export function decideBlocked(command: string, ready: Readiness): Blocked | null
                 alternative: {label: "소스 다운로드", command: "zalkera.site.open"},
             };
         }
+        if (need === "site" && ready.site === null && command === "zalkera.site.updateZip") {
+            // ⚠ **zip 을 들고 온 사람을 서버 받기로 보내지 않는다.** 소스가 없는 폴더에서 「zip 으로 교체」를
+            //    누른 사람의 다음 할 일은 그 zip 을 푸는 것이다(「zip 으로 시작」은 이 폴더가 비어 있으면
+            //    여기에 푼다). 종전에는 「소스 다운로드」 하나만 권해 zip 을 가진 사람이 길을 잃었다(실사용 신고).
+            return {
+                message:
+                    "이 창에 사이트 소스가 없습니다 — 「zip 으로 교체」는 소스가 있는 폴더를 갈아 끼웁니다. " +
+                    "가지고 계신 zip 은 「zip 으로 시작」으로 풉니다.",
+                action: {label: "zip 으로 시작", command: "zalkera.site.importZip"},
+                alternative: {label: "소스 다운로드", command: "zalkera.site.open"},
+            };
+        }
         if (need === "site" && ready.site === null) {
             return {
                 message:
