@@ -73,7 +73,9 @@ export async function clearStaleOwnState(
  * 신고 — 숨은 폴더 하나였다). 이름은 디스크 것이라 보여 주는 자리가 소독한다(`errorNotice`).
  */
 export function occupiedLine(existing: readonly string[]): string {
-    const shown = existing.slice(0, 4).join(" · ");
+    // 이름마다 길이를 자른다 — 긴 이름 하나가 알림 상한을 먹으면 뒤따르는 «다음 할 일»이 잘려 나간다(심의 실측).
+    const clip = (name: string): string => (name.length > 40 ? `${name.slice(0, 40)}…` : name);
+    const shown = existing.slice(0, 4).map(clip).join(" · ");
     const rest = existing.length - Math.min(existing.length, 4);
     return `있는 것: ${shown}${rest > 0 ? ` 외 ${rest}개` : ""}`;
 }

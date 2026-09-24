@@ -1795,7 +1795,14 @@ async function chooseImportTarget(
       //    사이트 것인지 알 방법이 없다 — 지금 고른 사이트를 적으면 **그 zip 이 그 사이트 것이라고
       //    우리가 말해 주는 셈**이 된다. 그래서 문면 정본(`say`)에도 두지 않는다: 그 객체의 계약이
       //    「전부 사이트를 말한다」이고 시험이 그것을 전수로 문다.
-      ours(`지금 열어 두신 ${plainNotice(plan.dir, 120)} 에 이 zip 을 풉니다.`),
+      // ⚠ **이 폴더에 이미 소속이 적혀 있으면 그 사실은 말한다** — zip 의 사이트가 아니라 **디스크가 말하는**
+      //    소속이라 위 규율과 안 부딪힌다. 풀어도 그 소속은 그대로다(바꾸는 동사는 「사이트에 연결」 하나).
+      currentFolderBinding() === null
+        ? ours(`지금 열어 두신 ${plainNotice(plan.dir, 120)} 에 이 zip 을 풉니다.`)
+        : ours(
+            `지금 열어 두신 ${plainNotice(plan.dir, 120)} 에 이 zip 을 풉니다. 이 폴더는 ` +
+              `「${plainNotice(currentFolderBinding() ?? "", 64)}」 에 연결돼 있고, 풀어도 그 연결은 그대로입니다.`,
+          ),
       HERE,
       "다른 폴더 고르기…",
     );
@@ -1983,13 +1990,25 @@ async function importZipCommand(pinned?: CapturedTenant): Promise<void> {
     pinned !== undefined && bindPlan !== null && (await bindImportedFolder(target, pinned, bindPlan));
   await refreshSidebar();
 
+  // ⚠ **이미 소속이 적힌 폴더에 「사이트에 연결」을 시키지 않는다.** 표식·링크만 든 빈 폴더(연결만 해 둔 폴더)
+  //    에 풀면 그 폴더는 **이미 사이트에 붙어 있다** — 「붙이면 됩니다」는 할 일 없는 말이고, 고르신 사이트와
+  //    다르면 미리보기·올리기가 **그 폴더의 사이트로** 열린다는 사실을 말해야 한다.
+  const boundTo = folderBinding(readSourceMarkAt(target), linkedTenantOf(workspaceLinkState(target)));
+  const otherPick =
+    pinned !== undefined && boundTo !== null && String(pinned) !== boundTo
+      ? ` 「${plainNotice(String(pinned), 64)}」 로 바꾸시려면 「사이트에 연결」입니다.`
+      : "";
   // ⚠ **푼 곳이 지금 열린 폴더 자신일 수 있다.** 그때 「폴더 열기」는 이미 열려 있는 것을 다시
   //    여는 죽은 단추이고, 「폴더를 열고」라는 안내도 할 일이 없는 말이 된다.
   if (target === workspaceDir()) {
     void vscode.window.showInformationMessage(
       bound && pinned !== undefined
         ? ours(say.importedFor(pinned))
-        : ours("사이트 소스를 이 폴더에 풀었습니다. 「사이트에 연결」로 사이트에 붙이면 미리보기·올리기가 됩니다."),
+        : boundTo !== null
+          ? ours(
+              `사이트 소스를 이 폴더에 풀었습니다. 이 폴더는 「${plainNotice(boundTo, 64)}」 에 연결돼 있어 그 사이트로 미리보기·올리기가 됩니다.${otherPick}`,
+            )
+          : ours("사이트 소스를 이 폴더에 풀었습니다. 「사이트에 연결」로 사이트에 붙이면 미리보기·올리기가 됩니다."),
     );
     return;
   }
@@ -1998,7 +2017,11 @@ async function importZipCommand(pinned?: CapturedTenant): Promise<void> {
   const open = await vscode.window.showInformationMessage(
     bound && pinned !== undefined
       ? ours(say.importedFor(pinned))
-      : ours("사이트 소스를 풀었습니다. 폴더를 열고 「사이트에 연결」로 사이트에 붙이면 미리보기·올리기가 됩니다."),
+      : boundTo !== null
+        ? ours(
+            `사이트 소스를 풀었습니다. 그 폴더는 「${plainNotice(boundTo, 64)}」 에 연결돼 있어, 열면 그 사이트로 미리보기·올리기가 됩니다.${otherPick}`,
+          )
+        : ours("사이트 소스를 풀었습니다. 폴더를 열고 「사이트에 연결」로 사이트에 붙이면 미리보기·올리기가 됩니다."),
     "폴더 열기",
   );
   if (open === "폴더 열기") {
@@ -2060,7 +2083,7 @@ async function importZipInto(
   //    남겨 두면 옛 표식이 「판 N 을 받았다」고 말한 채 다음 발행이 거짓 「남이 올린 판」 동의를 띄운다.
   //    판을 주장하지 않는 연결 표식은 남긴다 — 소속은 뒤따르는 연결 판정이 정한다.
   for (const path of await clearStaleOwnState(targetDir, before, "imported")) {
-    log(`지난 ${path} 를 이 zip 에 맞게 정리했습니다(판 번호 주장을 뺐습니다).`);
+    log(`지난 ${path} 를 이 zip 에 맞게 정리했습니다.`);
   }
   return {fileCount, dropped: plan.dropped};
 }
@@ -4388,9 +4411,9 @@ async function openPickedLocalFolder(
     //    표식 부재로 막지 않는 것과 **없는 사실을 지어내지 않는 것**은 다른 이야기다.
     const ask = say.pickedFolderLinkConfirm(picked);
     const looksLikeSource = existsSync(join(dir, "package.json"));
-    // ⚠ **빈 폴더를 먼저 가른다** — 빈 폴더도 `package.json` 이 없으므로 뒤집으면 「소스 폴더가 맞는지
-    //    확인하세요」가 빈 폴더에 뜬다. 빈 폴더에는 다음 단추(「소스 다운로드」)를 말한다.
-    const receivable = await isReceivable(dir);
+    // ⚠ 빈 폴더에는 다음 단추(「소스 다운로드」)를 말한다. 빈 폴더도 `package.json` 이 없으므로 그 줄을
+    //    「소스 폴더가 맞는지 확인하세요」보다 앞에서 가른다. 소스 폴더는 비어 있을 수 없어 재지 않는다.
+    const receivable = !looksLikeSource && (await isReceivable(dir));
     const answer = await vscode.window.showWarningMessage(
       ask.message,
       {

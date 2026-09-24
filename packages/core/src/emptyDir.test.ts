@@ -90,7 +90,8 @@ test(".zalkera 안에 우리 것이 아닌 항목이 하나라도 있으면 막�
         await writeFile(join(dir, ".zalkera", "source.json"), "{}");
         await writeFile(join(dir, ".zalkera", foreign), "x");
         strictEqual(await isReceivable(dir), false, `.zalkera/${foreign} 이 있는데 빈 폴더로 봤다`);
-        strictEqual((await meaningfulEntries(dir)).join(), ".zalkera");
+        // 걸린 이름을 안쪽까지 편다 — 「있는 것: .zalkera」로는 무엇을 치울지 모른다
+        strictEqual((await meaningfulEntries(dir)).join(), `.zalkera/${foreign}`);
     }
     // 하위 폴더도 우리 것이 아니다(`.zalkera/saved/` 같은 자리)
     const nested = await scratch();
@@ -142,4 +143,29 @@ test(".zalkera 안의 OS 부스러기는 막지 않는다 — 탐색기가 열�
     const odd = await scratch();
     await mkdir(join(odd, ".zalkera", "Thumbs.db"), { recursive: true });
     strictEqual(await isReceivable(odd), false);
+});
+
+test("되감기는 기준선 뒤 우리 폴더가 심링크로 바뀌었으면 안쪽으로 내려가지 않는다 — 폴더 밖을 지우지 않는다", async () => {
+    const { rm: remove, symlink, readdir } = await import("node:fs/promises");
+    const dir = await scratch();
+    await mkdir(join(dir, ".zalkera"));
+    await writeFile(join(dir, ".zalkera", "source.json"), "{}");
+    const before = await snapshotEntries(dir);
+    const victim = await tempDir("victim-");
+    await writeFile(join(victim, "a.txt"), "고객 파일");
+    await remove(join(dir, ".zalkera"), { recursive: true });
+    await symlink(victim, join(dir, ".zalkera"));
+    await removeAdded(dir, before);
+    strictEqual((await readdir(victim)).join(), "a.txt", "되감기가 심링크를 따라가 폴더 밖 파일을 지웠다");
+});
+
+test("되감기는 .vscode 안쪽을 건드리지 않는다 — 받기가 그 안에 쓰지 않으므로 거기 생긴 것은 사람·편집기 것이다", async () => {
+    const { readdir } = await import("node:fs/promises");
+    const dir = await scratch();
+    await mkdir(join(dir, ".vscode"));
+    await writeFile(join(dir, ".vscode", "settings.json"), "{}");
+    const before = await snapshotEntries(dir);
+    await writeFile(join(dir, ".vscode", "launch.json"), "{}");
+    await removeAdded(dir, before);
+    strictEqual((await readdir(join(dir, ".vscode"))).sort().join(), "launch.json,settings.json");
 });

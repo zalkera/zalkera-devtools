@@ -70,4 +70,6 @@ test("CLI 장부는 두 갈래 모두 지운다 · 기준선에 없던 것은 �
 test("거절 문면의 「있는 것」은 앞 넷과 나머지 수를 말한다", () => {
     strictEqual(occupiedLine(["a"]), "있는 것: a");
     strictEqual(occupiedLine(["a", "b", "c", "d", "e", "f"]), "있는 것: a · b · c · d 외 2개");
+    // 긴 이름 하나가 알림 상한을 먹어 다음 할 일이 잘리지 않게 이름마다 자른다
+    strictEqual(occupiedLine(["x".repeat(255)]), `있는 것: ${"x".repeat(40)}…`);
 });

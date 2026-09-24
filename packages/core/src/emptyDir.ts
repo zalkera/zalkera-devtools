@@ -1,4 +1,4 @@
-import { readdir, rm } from "node:fs/promises";
+import { lstat, readdir, rm } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { SOURCE_MARK_PATH } from "./localMark.ts";
 import { SYNC_LEDGER_PATH } from "./syncLedger.ts";
@@ -48,7 +48,7 @@ const IGNORED = new Set([
 
 /**
  * 우리 도구가 폴더에 남기는 **자기 상태 파일** — 소속 표식과 CLI 장부. 둘 다 정본에 안 실린다
- * (`zip.ts` 의 `EXCLUDED_PATHS` 가 같은 상수를 쓴다 — 시험이 그 일치를 문다).
+ * (`zip.ts` 의 `EXCLUDED_PATHS` 가 그 경로를 배제한다 — 이 목록이 배제 목록의 부분집합인지 시험이 문다).
  *
  * ⚠ **손으로 열거하지 않는다.** 경로 상수를 그대로 가져와 쓴다 — 표식 자리가 옮겨지는 날 여기가
  *   조용히 옛 이름을 보게 두지 않는다.
@@ -93,14 +93,37 @@ async function passable(dir: string, e: { name: string; isSymbolicLink(): boolea
     return e.name === OWN_STATE_DIR && e.isDirectory() && (await ownStateOnly(join(dir, e.name)));
 }
 
-/** 무시 대상을 뺀 실제 항목. 비어 있으면 받아도 안전하다. */
+/**
+ * 무시 대상을 뺀 실제 항목. 비어 있으면 받아도 안전하다.
+ *
+ * ⚠ **통과 못 한 `.zalkera` 는 안쪽 이름으로 편다**(`.zalkera/pack.json` 처럼). 거절 문면이 「있는 것: .zalkera」로만
+ *   말하면, 「`.zalkera` 만 있는 폴더는 빈 폴더」라는 도움말과 부딪혀 사람이 무엇을 치울지 모른다(심의 실측 —
+ *   손으로 비운 팩 폴더에는 배송 파일이 남는다). 못 읽거나 실제 폴더가 아니면 이름 그대로 돌려준다.
+ */
 export async function meaningfulEntries(dir: string): Promise<string[]> {
     const entries = await readdir(dir, { withFileTypes: true });
     const out: string[] = [];
     for (const e of entries) {
-        if (!(await passable(dir, e))) out.push(e.name);
+        if (!(await passable(dir, e))) out.push(...(await spelledOut(dir, e)));
     }
     return out;
+}
+
+/** 통과 못 한 우리 폴더의 **걸린 이름들**. 우리 파일은 빼고 적는다 — 그것은 막는 까닭이 아니다. */
+async function spelledOut(dir: string, e: { name: string; isSymbolicLink(): boolean; isDirectory(): boolean }): Promise<string[]> {
+    if (e.name !== OWN_STATE_DIR || e.isSymbolicLink() || !e.isDirectory()) return [e.name];
+    try {
+        const inner = await readdir(join(dir, e.name), { withFileTypes: true });
+        const foreign = inner
+            .filter(
+                (i) =>
+                    !(i.isFile() && !i.isSymbolicLink() && (OWN_STATE_NAMES.has(i.name) || isOwnTmp(i.name) || OS_JUNK.has(i.name))),
+            )
+            .map((i) => `${e.name}/${i.name}`);
+        return foreign.length > 0 ? foreign : [e.name];
+    } catch {
+        return [e.name];
+    }
 }
 
 export async function isReceivable(dir: string): Promise<boolean> {
@@ -115,16 +138,26 @@ export async function isReceivable(dir: string): Promise<boolean> {
  *   롤백이 폴더를 통째로 지우면 **그 초대에 응한 고객의 파일이 사라진다**(실측: 손으로 만든
  *   `.vscode/launch.json` 이 지워졌다). 이 도구가 낼 수 있는 가장 큰 손해가 그것이다.
  *
- * ⚠ **통과시킨 폴더는 «안쪽»까지 기준선에 든다.** `.zalkera` 를 통과시키면 서버 tar 가 그 안에
+ * ⚠ **우리 폴더(`.zalkera`)는 «안쪽»까지 기준선에 든다.** 그것을 통과시키면 서버 tar 가 그 안에
  *   `provenance.json`·`pack.json` 을 쓰는데, 기준선이 한 층이면 되감기가 `.zalkera` 를 「원래 있던
  *   것」으로 보고 그 안에 새로 쓰인 파일을 남긴다 — 다음 시도가 「비어 있지 않음」으로 막히는,
  *   이 판정이 방금 푼 그 자물쇠가 실패 한 번으로 되살아난다(사본 실측).
+ *   `.vscode` 는 안쪽을 안 잰다 — 받기·풀기가 그 안에 쓰지 않으므로(정본 배제) 되감을 것이 없고, 재면 기준선 뒤
+ *   사람·편집기가 만든 파일을 지우게 된다(심의 실측).
+ *
+ * ⚠ 되감기가 지우는 것은 «우리가 쓴 것»이 아니라 **기준선 뒤 생긴 것**이다. 해제 구간에 다른 누가 같은 자리에
+ *   만든 것도 지워질 수 있다 — 그래서 안쪽 기준선은 우리 폴더 하나로 좁힌다.
  */
 export interface Snapshot {
     /** 폴더 바로 아래 이름. */
     names: Set<string>;
-    /** 통과시킨 하위 폴더별 안쪽 이름 — 그 폴더가 실재하는 실제 폴더일 때만. */
+    /** 우리 폴더의 안쪽 이름 — 그 폴더가 실재하는 실제 폴더일 때만. */
     inside: Map<string, Set<string>>;
+    /**
+     * 그 폴더의 신원(장치·inode). 되감기가 안쪽으로 내려가기 **직전에** 같은 실제 폴더인지 다시 본다 — 기준선
+     * 뒤 그 자리가 심링크로 바뀌면 안쪽 삭제가 폴더 밖을 지운다(심의 실측).
+     */
+    identity: Map<string, string>;
 }
 
 export async function snapshotEntries(dir: string): Promise<Snapshot> {
@@ -132,20 +165,30 @@ export async function snapshotEntries(dir: string): Promise<Snapshot> {
     try {
         entries = await readdir(dir, { withFileTypes: true });
     } catch {
-        return { names: new Set(), inside: new Map() }; // 아직 없는 폴더 — 우리가 만들 것이므로 기준선은 비어 있다
+        // 아직 없는 폴더 — 우리가 만들 것이므로 기준선은 비어 있다
+        return { names: new Set(), inside: new Map(), identity: new Map() };
     }
     const names = new Set(entries.map((e) => e.name));
     const inside = new Map<string, Set<string>>();
+    const identity = new Map<string, string>();
     for (const e of entries) {
-        if (!e.isDirectory() || e.isSymbolicLink()) continue;
-        if (!(IGNORED.has(e.name) || e.name === OWN_STATE_DIR)) continue;
+        if (!e.isDirectory() || e.isSymbolicLink() || e.name !== OWN_STATE_DIR) continue;
         try {
+            const id = await realDirIdentity(join(dir, e.name));
+            if (id === null) continue;
             inside.set(e.name, new Set(await readdir(join(dir, e.name))));
+            identity.set(e.name, id);
         } catch {
             // 못 읽으면 안쪽 기준선이 없다 — 그 폴더 안은 되감지 않는다(모르는 것을 지우지 않는다)
         }
     }
-    return { names, inside };
+    return { names, inside, identity };
+}
+
+/** 심링크가 아닌 실제 폴더면 그 신원(`dev:ino`), 아니면 `null`. */
+async function realDirIdentity(path: string): Promise<string | null> {
+    const st = await lstat(path);
+    return st.isDirectory() && !st.isSymbolicLink() ? `${st.dev}:${st.ino}` : null;
 }
 
 /**
@@ -169,6 +212,9 @@ export async function removeAdded(dir: string, before: Snapshot): Promise<void> 
     for (const [name, had] of before.inside) {
         let innerNow: string[];
         try {
+            // ⚠ **같은 실제 폴더일 때만 내려간다**(위 `identity`). 잰 뒤와 지우기 사이에 남는 창은 있다 —
+            //    Node 에는 폴더 핸들 기준 삭제(`unlinkat`)가 없다. 그 창은 해제가 실패한 직후 한 번뿐이다.
+            if ((await realDirIdentity(join(dir, name)).catch(() => null)) !== before.identity.get(name)) continue;
             innerNow = await readdir(join(dir, name));
         } catch {
             continue;
