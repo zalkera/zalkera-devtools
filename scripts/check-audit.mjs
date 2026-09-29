@@ -3,8 +3,9 @@
  * `npm audit` 게이트.
  *
  * ■ 왜 그냥 `npm audit` 이 아닌가
- *   오늘 **9건의 자문이 이미 떠 있고 고칠 방법이 없다.** 전부 우리가 VSIX 에 실어 나르는 `npm` CLI
- *   하나에서 나오는데, `npm@12.0.2` 가 **최신**이고 `npm audit fix` 는 아무것도 못 고친다(실측).
+ *   **고칠 방법이 없는 자문이 늘 몇 건 떠 있다.** 전부 우리가 VSIX 에 실어 나르는 `npm` CLI
+ *   하나에서 나오는데, 그 `npm` 이 **최신**이어도 자기 안에 묶어 싣는 의존이라 `npm audit fix` 는
+ *   아무것도 못 고친다(실측).
  *   그대로 `npm audit` 을 걸면 CI 가 첫날부터 빨갛고, 빨간 게이트는 **아무도 안 본다** — 그러면
  *   새 취약점이 와도 같은 빨강에 묻힌다.
  *
@@ -75,19 +76,11 @@ export function whyUnmeasured(report) {
  * 언제 걷어내나: `npm` 이 새 판을 내면 이 목록을 다시 재라. 줄이 사라지면 지워라.
  */
 const ACCEPTED = new Map([
-    [1130591, "brace-expansion DoS — npm 전이"],
-    [1130734, "brace-expansion DoS(우회) — npm 전이"],
-    [1130722, "ip-address 선행 0 옥텟 — npm 전이"],
-    [1130723, "ip-address CIDR 접미 — npm 전이"],
-    [1130724, "ip-address IPv4-mapped 오분류 — npm 전이"],
-    // ⚠ 이 자문은 번호가 갱신됐다(옛 1124287 자리). **우리 해제기는 이 패키지를 안 쓴다** —
-    //    서버가 주는 tar.gz 는 내장 `zlib` + 자체 파서로 푼다(`fetchSource.ts`). 취약한 tar 는
-    //    번들 npm 안에만 있고, audit 이 내놓는 「수정」은 npm 을 10.9.9 로 **메이저 다운그레이드**
-    //    하는 것뿐이라 고침이 아니다(npm 12.0.2 가 최신이고 그것이 tar 7.5.19 를 번들한다).
-    [1145647, "node-tar 재귀 DoS — npm 번들(우리 해제기는 미사용)"],
-    [1130716, "undici 응답 desync — npm 전이"],
-    [1130727, "undici CRLF 주입 — npm 전이"],
-    [1130732, "undici 쿠키 속성 주입 — npm 전이"],
+    // 셋 다 `npm@12.1.0`(최신)이 **자기 안에 묶어** 싣는 판이다 — `npm audit fix` 가 「번들 의존이라
+    // 자동으로 못 고친다」고 답한다(실측). 위 받아들인 이유(폴백 설치기에서만 돈다)가 그대로 맞는다.
+    [1239948, "ip-address 링크로컬 오분류 — npm 번들(socks 프록시 경로)"],
+    [1239949, "ip-address NAT64 범위 미분류 — npm 번들(socks 프록시 경로)"],
+    [1239934, "undici WebSocket 압축 해제 DoS — npm 번들(node-gyp)"],
 ]);
 
 // 판정([whyUnmeasured])은 import 로 불러 확인할 수 있어야 하고, 그때 감사가 돌면 안 된다.
