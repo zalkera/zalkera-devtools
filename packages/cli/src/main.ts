@@ -53,7 +53,7 @@ function help(): string {
     return `잘커라 — 사이트 소스를 로컬에서 다루는 도구 (v${version()})
 
   zalkera login                 브라우저로 로그인
-  zalkera logout                로그인 정보를 지운다
+  zalkera logout                로그인 정보를 지우고 이 컴퓨터의 서버 쪽 로그인도 끊는다
   zalkera status                이 폴더와 사이트가 어떻게 다른지 본다
   zalkera pull                  사이트의 지금 판을 이 폴더에 받는다
   zalkera push                  이 폴더에서 고친 것을 사이트 쪽에 올린다(켜지지는 않는다)
@@ -117,11 +117,16 @@ async function main(argv: readonly string[]): Promise<number> {
             return 0;
         }
         case "logout": {
-            const serverEnded = await (await logout(new FileTokenStore())).serverEnded;
+            const store = new FileTokenStore();
+            // 없던 로그인에 「서버를 끊지 못했다」고 하면 없는 일을 말하는 셈이다.
+            const hadLogin = (await store.read()) !== null;
+            const serverEnded = await (await logout(store)).serverEnded;
             process.stdout.write(
-                serverEnded
-                    ? "로그인 정보를 지우고 이 기기의 서버 쪽 로그인도 끝냈습니다.\n"
-                    : "로그인 정보를 지웠습니다. 서버 쪽 로그인은 끊지 못했습니다(연결 없음·예전 로그인).\n",
+                !hadLogin
+                    ? "로그인 정보가 없습니다.\n"
+                    : serverEnded
+                      ? "로그인 정보를 지우고 이 기기의 서버 쪽 로그인도 끝냈습니다.\n"
+                      : "로그인 정보를 지웠습니다. 서버 쪽 로그인은 끊지 못했습니다(연결 없음·예전 로그인).\n",
             );
             return 0;
         }
