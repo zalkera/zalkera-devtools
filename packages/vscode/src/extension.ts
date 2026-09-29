@@ -1062,7 +1062,11 @@ async function signOut(options: { quiet?: boolean } = {}): Promise<boolean> {
   // `session` 이 아니라 **적어 둔 목록 전부**를 본다 — 「중지」 뒤에도, 다른 창이 켠 것도 지운다.
   await revokeRecordedKeys();
 
-  await logout(store);
+  const { serverEnded } = await logout(store);
+  // 기다리지 않는다(뒤 정리가 네트워크에 붙들리지 않게) — 결과만 남긴다. 창을 닫으면 끊기가 못 끝날 수 있다.
+  void serverEnded.then((ended) =>
+    log(ended ? "서버 쪽 로그인도 끊었습니다." : "서버 쪽 로그인은 끊지 못했습니다(연결 없음·예전 로그인)."),
+  );
   // ⚠ **사이트 설정을 `.env.local` 재작성보다 **먼저** 지운다. 그 재작성은 읽기전용·권한 등으로
   //    던질 수 있는데, 뒤에 두면 토큰은 지워졌는데 **사이트만 남는** 부분 실패가 된다(심의 관찰).
   //    지우는 순서는 「되돌릴 수 없는 것부터」가 아니라 「실패해도 다음이 도는 순서」다.

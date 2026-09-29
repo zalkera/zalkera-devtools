@@ -64,6 +64,16 @@ test("쓰고 읽으면 같다 · 지우면 없다", async () => {
     await store.clear();
 });
 
+test("🔴 받아 온 클라이언트를 되읽는다 — 없으면 로그아웃이 서버 세션을 못 끊는다", async () => {
+    const path = join(await tempDir("zalkera-token-cid-"), "auth.json");
+    const store = new FileTokenStore(path);
+    await store.write({...tokens, clientId: "zalkera-devtools"});
+    strictEqual((await store.read())?.clientId, "zalkera-devtools");
+    await store.write(tokens);
+    ok(await store.read(), "칸이 없는 옛 파일도 읽는다");
+    strictEqual((await store.read())?.clientId, undefined);
+});
+
 test("🔴 반쯤 읽지 않는다 — 모자란 토큰은 401 을 「권한 없음」으로 보이게 한다", async () => {
     const dir = await tempDir("zalkera-token-bad-");
     for (const [name, body] of [

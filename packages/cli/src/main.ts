@@ -117,8 +117,12 @@ async function main(argv: readonly string[]): Promise<number> {
             return 0;
         }
         case "logout": {
-            await logout(new FileTokenStore());
-            process.stdout.write("로그인 정보를 지웠습니다.\n");
+            const serverEnded = await (await logout(new FileTokenStore())).serverEnded;
+            process.stdout.write(
+                serverEnded
+                    ? "로그인 정보를 지우고 이 기기의 서버 쪽 로그인도 끝냈습니다.\n"
+                    : "로그인 정보를 지웠습니다. 서버 쪽 로그인은 끊지 못했습니다(연결 없음·예전 로그인).\n",
+            );
             return 0;
         }
         case "status": {
