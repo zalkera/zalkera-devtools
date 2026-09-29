@@ -65,6 +65,8 @@ export class FileTokenStore implements TokenStore {
                 refreshToken: t.refreshToken,
                 expiresAt: t.expiresAt,
                 issuer: t.issuer,
+                // 없으면 로그아웃이 서버 세션을 못 끊는다 — 옛 파일은 칸이 없어 로컬만 지운다.
+                ...(typeof t.clientId === "string" ? { clientId: t.clientId } : {}),
             };
         } catch {
             return null;

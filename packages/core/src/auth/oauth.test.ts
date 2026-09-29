@@ -431,3 +431,137 @@ test("로그아웃은 비우기 **앞에서** 세대를 올린다 — 그 사이
   await loggingOut;
   strictEqual(await store.read(), null, "비우기가 도는 사이의 갱신이 로그아웃을 되살렸다");
 });
+
+// ── 로그아웃이 서버 세션을 끊는다 ──────────────────────────────────────────────
+
+const revokableTokens = () => ({
+    accessToken: "a",
+    refreshToken: "offline-r",
+    expiresAt: Date.now() + 60_000,
+    issuer: config.issuer,
+    clientId: config.clientId,
+});
+
+test("🔴 로그아웃은 그 토큰을 Keycloak 에서 폐기한다 — 비우기만 하면 서버 세션이 수명까지 남는다", async () => {
+    const store = new MemoryTokenStore();
+    await store.write(revokableTokens());
+    const calls: { url: string; body: string; storedAtCall: unknown }[] = [];
+    const real = globalThis.fetch;
+    globalThis.fetch = (async (url: string, init: RequestInit) => {
+        calls.push({ url: String(url), body: String(init.body), storedAtCall: await store.read() });
+        return new Response(null, { status: 200 });
+    }) as unknown as typeof fetch;
+    try {
+        strictEqual(await (await logout(store)).serverEnded, true);
+    } finally {
+        globalThis.fetch = real;
+    }
+    strictEqual(calls.length, 1);
+    const [call] = calls;
+    ok(call);
+    strictEqual(call.url, `${config.issuer}/protocol/openid-connect/revoke`);
+    const body = new URLSearchParams(call.body);
+    strictEqual(body.get("token"), "offline-r");
+    strictEqual(body.get("token_type_hint"), "refresh_token");
+    strictEqual(body.get("client_id"), config.clientId);
+    strictEqual(call.storedAtCall, null, "서버 끊기가 로컬 비우기보다 먼저 돌았다 — 네트워크가 로그아웃을 붙든다");
+    strictEqual(await store.read(), null);
+});
+
+test("🔴 서버 끊기가 실패해도 로컬 로그아웃은 끝난다 — 실패는 false 로만 알린다", async () => {
+    for (const failing of [
+        async () => new Response("nope", { status: 503 }),
+        async () => {
+            throw new TypeError("fetch failed");
+        },
+    ]) {
+        const store = new MemoryTokenStore();
+        await store.write(revokableTokens());
+        const real = globalThis.fetch;
+        globalThis.fetch = failing as unknown as typeof fetch;
+        try {
+            strictEqual(await (await logout(store)).serverEnded, false);
+        } finally {
+            globalThis.fetch = real;
+        }
+        strictEqual(await store.read(), null);
+    }
+});
+
+test("클라이언트 칸이 없는 옛 토큰은 로컬만 지운다 — 부르지 않는다", async () => {
+    const store = new MemoryTokenStore();
+    await store.write({ ...revokableTokens(), clientId: undefined });
+    let called = false;
+    const real = globalThis.fetch;
+    globalThis.fetch = (async () => {
+        called = true;
+        return new Response(null, { status: 200 });
+    }) as unknown as typeof fetch;
+    try {
+        strictEqual(await (await logout(store)).serverEnded, false);
+    } finally {
+        globalThis.fetch = real;
+    }
+    strictEqual(called, false);
+    strictEqual(await store.read(), null);
+});
+
+test("🔴 갱신한 토큰도 받아 온 클라이언트를 적는다 — 적지 않으면 첫 갱신 뒤 로그아웃이 서버를 못 끊는다", async () => {
+    const store = new MemoryTokenStore();
+    await store.write({ ...revokableTokens(), expiresAt: Date.now() - 1_000, clientId: undefined });
+    await withStubbedTokenEndpoint(
+        async () =>
+            new Response(
+                JSON.stringify({ access_token: "fresh", refresh_token: "r2", expires_in: 300 }),
+                { status: 200, headers: { "content-type": "application/json" } },
+            ),
+        () => getAccessToken(config, store),
+    );
+    strictEqual((await store.read())?.clientId, config.clientId);
+});
+
+test("🔴 로그아웃은 서버 끊기를 기다리지 않고 돌아온다 — 확장의 뒤 정리가 네트워크에 붙들리지 않게", async () => {
+    const store = new MemoryTokenStore();
+    await store.write(revokableTokens());
+    let release: ((r: Response) => void) | undefined;
+    const real = globalThis.fetch;
+    globalThis.fetch = (() => new Promise<Response>((r) => (release = r))) as unknown as typeof fetch;
+    try {
+        const { serverEnded } = await logout(store);
+        strictEqual(await store.read(), null, "로컬이 비기 전에 돌아왔다");
+        ok(release, "서버 끊기가 시작되지 않았다");
+        release?.(new Response(null, { status: 200 }));
+        strictEqual(await serverEnded, true);
+    } finally {
+        globalThis.fetch = real;
+    }
+});
+
+test("보관소를 못 읽어도 비우고 끝낸다 — 서버는 못 끊는다고만 알린다", async () => {
+    class BrokenReadStore extends MemoryTokenStore {
+        override read(): Promise<null> {
+            return Promise.reject(new Error("keychain locked"));
+        }
+    }
+    const store = new BrokenReadStore();
+    await store.write(revokableTokens());
+    strictEqual(await (await logout(store)).serverEnded, false);
+    strictEqual(await MemoryTokenStore.prototype.read.call(store), null);
+});
+
+test("발급자가 http(s) 가 아니면 부르지 않는다 — 로그인과 같은 문", async () => {
+    const store = new MemoryTokenStore();
+    await store.write({ ...revokableTokens(), issuer: "file:///etc" });
+    let called = false;
+    const real = globalThis.fetch;
+    globalThis.fetch = (async () => {
+        called = true;
+        return new Response(null, { status: 200 });
+    }) as unknown as typeof fetch;
+    try {
+        strictEqual(await (await logout(store)).serverEnded, false);
+    } finally {
+        globalThis.fetch = real;
+    }
+    strictEqual(called, false);
+});
