@@ -200,7 +200,8 @@ async function refreshToken(config: AuthConfig, store: TokenStore): Promise<stri
 export interface LogoutResult {
     /**
      * 이 기기의 Keycloak 세션 끊기를 서버가 받아들였는가. 절대 던지지 않는다 — 기다리지 않아도 된다.
-     * RFC 7009 는 이미 죽은 토큰에도 200 을 주므로 참은 「받아들였다」이지 「살아 있던 것을 죽였다」가 아니다.
+     * RFC 7009 는 이미 죽은 토큰에도 200 을 주므로 참은 「받아들였다」이지 「살아 있던 것을 죽였다」가 아니다
+     * (Keycloak 26.6 로컬 실측: 이미 폐기한 토큰·토큰이 아닌 값 모두 200).
      */
     serverEnded: Promise<boolean>;
 }
@@ -231,8 +232,8 @@ export async function logout(store: TokenStore): Promise<LogoutResult> {
 
 /** RFC 7009 토큰 폐기 — 공개 클라이언트는 `client_id` 만으로 자기 토큰을 폐기한다. */
 async function revokeRefreshToken(tokens: StoredTokens, clientId: string): Promise<boolean> {
-    // 로그인과 같은 문으로 — 보관소의 값이 http(s) 가 아니면 부르지 않는다.
-    const issuer = httpUrl(trimSlash(tokens.issuer));
+    // 로그인과 같은 문으로 — 보관소의 값이 http(s) 가 아니면(문자열이 아닌 손상 값 포함) 부르지 않는다.
+    const issuer = httpUrl(tokens.issuer);
     if (!issuer) return false;
     try {
         const response = await fetch(`${trimSlash(issuer.href)}/protocol/openid-connect/revoke`, {
