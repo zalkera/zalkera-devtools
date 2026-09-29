@@ -565,3 +565,20 @@ test("발급자가 http(s) 가 아니면 부르지 않는다 — 로그인과 �
     }
     strictEqual(called, false);
 });
+
+test("🔴 보관소의 발급자가 문자열이 아니어도 던지지 않는다 — 확장은 결과를 기다리지 않아 거절이 미처리로 남는다", async () => {
+    const store = new MemoryTokenStore();
+    await store.write({ ...revokableTokens(), issuer: 42 as unknown as string });
+    let called = false;
+    const real = globalThis.fetch;
+    globalThis.fetch = (async () => {
+        called = true;
+        return new Response(null, { status: 200 });
+    }) as unknown as typeof fetch;
+    try {
+        strictEqual(await (await logout(store)).serverEnded, false);
+    } finally {
+        globalThis.fetch = real;
+    }
+    strictEqual(called, false);
+});
