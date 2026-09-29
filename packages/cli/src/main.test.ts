@@ -131,3 +131,36 @@ test("`preview` 가 도움말과 명령 목록에 있다 — 없는 명령을 �
     const {out} = await cli("--help");
     match(out, /zalkera preview/);
 });
+
+/** 로그아웃 시험은 **남의 홈을 건드리지 않는다** — 임시 홈에 보관소를 둔다. */
+async function logoutIn(home: string): Promise<string> {
+    const {stdout} = await run(process.execPath, ["--experimental-strip-types", ENTRY, "logout"], {
+        env: {...OFFLINE, HOME: home, XDG_CONFIG_HOME: join(home, ".config")},
+    });
+    return stdout;
+}
+
+test("🔴 로그인이 없으면 「없다」고만 한다 — 끊을 서버 로그인이 없는데 「못 끊었다」고 하지 않는다", async () => {
+    const home = await mkdtemp(join(tmpdir(), "zalkera-logout-none-"));
+    strictEqual((await logoutIn(home)).trim(), "로그인 정보가 없습니다.");
+});
+
+test("로그인이 있는데 서버에 못 닿으면 지우고 그렇다고 말한다", async () => {
+    const home = await mkdtemp(join(tmpdir(), "zalkera-logout-offline-"));
+    const {mkdir, stat} = await import("node:fs/promises");
+    const dir = join(home, ".config", "zalkera");
+    await mkdir(dir, {recursive: true, mode: 0o700});
+    const file = join(dir, "auth.json");
+    await writeFile(
+        file,
+        JSON.stringify({accessToken: "a", refreshToken: "r", expiresAt: 1, issuer: "http://127.0.0.1:1/realms/x", clientId: "c"}),
+        {mode: 0o600},
+    );
+    match(await logoutIn(home), /지웠습니다\. 서버 쪽 로그인은 끊지 못했습니다/);
+    await stat(file).then(
+        () => {
+            throw new Error("로그아웃 뒤에도 보관소가 남았다");
+        },
+        () => undefined,
+    );
+});
