@@ -31,7 +31,7 @@ zalkera publish                # 올린 것을 새 버전으로 만든다(그래
 zalkera rollback <판번호>        # 라이브를 그 버전으로 되돌린다
 zalkera discard                # 사이트 쪽에서 편집 중인 것을 버린다(판은 안 옮긴다)
 zalkera baseline               # 기준 기록만 다시 세운다(파일은 안 건드린다)
-zalkera logout
+zalkera logout                 # 로그인 정보를 지우고 이 컴퓨터의 서버 쪽 로그인도 끊는다
 ```
 
 `--site` 는 **폴더가 소속을 모를 때만** 필요하다. 한 번 받으면 폴더가 그것을 기억한다.
