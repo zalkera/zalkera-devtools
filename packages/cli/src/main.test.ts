@@ -132,10 +132,18 @@ test("`preview` 가 도움말과 명령 목록에 있다 — 없는 명령을 �
     match(out, /zalkera preview/);
 });
 
-/** 로그아웃 시험은 **남의 홈을 건드리지 않는다** — 임시 홈에 보관소를 둔다. */
+/**
+ * 로그아웃 시험은 **남의 홈을 건드리지 않는다** — 임시 홈에 보관소를 둔다.
+ * `os.homedir()` 은 POSIX 에서 `HOME`, Windows 에서 `USERPROFILE` 을 본다 — 하나만 바꾸면 다른 쪽 개발자의 실제
+ * 로그인 정보가 지워진다.
+ */
+function isolatedHome(home: string): NodeJS.ProcessEnv {
+    return {...OFFLINE, HOME: home, USERPROFILE: home, XDG_CONFIG_HOME: join(home, ".config")};
+}
+
 async function logoutIn(home: string): Promise<string> {
     const {stdout} = await run(process.execPath, ["--experimental-strip-types", ENTRY, "logout"], {
-        env: {...OFFLINE, HOME: home, XDG_CONFIG_HOME: join(home, ".config")},
+        env: isolatedHome(home),
     });
     return stdout;
 }
@@ -163,4 +171,10 @@ test("로그인이 있는데 서버에 못 닿으면 지우고 그렇다고 말�
         },
         () => undefined,
     );
+});
+
+test("🔴 로그아웃 시험의 홈은 두 운영체제 모두에서 임시 폴더다 — 실제 로그인 정보를 지우지 않게", () => {
+    const env = isolatedHome("/tmp/x");
+    strictEqual(env.HOME, "/tmp/x");
+    strictEqual(env.USERPROFILE, "/tmp/x");
 });
